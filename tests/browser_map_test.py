@@ -896,6 +896,38 @@ def main():
         n = page.evaluate("window.__execs.filter(e => e[1] === 'ports').length")
         page.wait_for_timeout(6000)
         check("closed: no more reading", page.evaluate("window.__execs.filter(e => e[1] === 'ports').length") == n)
+        # sorting: Sort by (or a click on a column), highest first; remembered for next time
+        page.evaluate("t => { window.__execResult = { code: 0, stdout: t }; }",
+                      "udp/30000 1 60 100 200 9 1 100\nudp/20000 3 500 100 300 2 1 900\nudp/10000 1 50 100 250 5 1 200\n")
+        page.locator(".lf-portsseen").click()
+        page.wait_for_function("document.querySelectorAll('.lf-ports-pick').length === 3")
+        order = lambda: page.evaluate("[...document.querySelectorAll('.lf-ports-pick')].map(c => +c.value)")
+        check("Ports seen: busiest first by default", order() == [20000, 10000, 30000], order())
+        page.locator(".lf-ports-pick[value='30000']").check()
+        page.locator(".lf-ports-sort").select_option("passes")
+        check("Sort by Seen in: most passes first", order() == [30000, 10000, 20000], order())
+        check("...the ticks stay with their ports", page.evaluate("Object.fromEntries([...document.querySelectorAll('.lf-ports-pick')].map(c => [c.value, c.checked]))")
+              == {"30000": True, "10000": True, "20000": True})
+        page.locator("th.lf-ports-head", has_text="Servers").click()
+        check("a click on a column sorts by it (and the Sort by box follows)", order() == [20000, 10000, 30000]
+              and page.locator(".lf-ports-sort").input_value() == "servers", order())
+        page.locator("th.lf-ports-head", has_text="Last seen").click()
+        check("Last seen: newest first", order() == [20000, 10000, 30000], order())
+        page.locator("th.lf-ports-head", has_text="Server port").click()
+        check("Server port: lowest first, marked on its column", order() == [10000, 20000, 30000]
+              and "▲" in page.locator("th.lf-ports-head.lf-on").inner_text(), order())
+        page.locator(".lf-ports-sort").select_option("passes")
+        if SHOTS:
+            page.screenshot(path=str(SHOTS / "ports-sorted.png"))
+        page.wait_for_timeout(5600)   # (a live refresh in between keeps the order)
+        check("...kept through the live refresh", order() == [30000, 10000, 20000], order())
+        page.locator("#modal").get_by_role("button", name="Cancel").click()
+        page.locator(".lf-portsseen").click()
+        page.wait_for_function("document.querySelectorAll('.lf-ports-pick').length === 3")
+        check("the order chosen is remembered next time", order() == [30000, 10000, 20000]
+              and page.locator(".lf-ports-sort").input_value() == "passes", order())
+        page.locator(".lf-ports-sort").select_option("total")
+        page.locator("#modal").get_by_role("button", name="Cancel").click()
         page.evaluate("window.__execResult = null")
 
         # ---- 6b. Servers file: see the saved servers by game, download / copy / import / paste

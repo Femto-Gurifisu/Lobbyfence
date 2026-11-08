@@ -4654,6 +4654,42 @@ return view.extend({
 		var useBtn, clearBtn, busy = false, timer = null;
 		/* the ticks the user changed by hand stay as they are when the list refreshes */
 		var userSet = {};
+		/* the order: a column, highest first (the port number: lowest first) - remembered */
+		var SORTS = {
+			total: function(a, b) { return b.total - a.total || b.passes - a.passes || a.port - b.port; },
+			passes: function(a, b) { return b.passes - a.passes || b.total - a.total || a.port - b.port; },
+			servers: function(a, b) { return b.servers - a.servers || b.total - a.total || a.port - b.port; },
+			last: function(a, b) { return b.last - a.last || b.total - a.total || a.port - b.port; },
+			port: function(a, b) { return a.port - b.port || (a.proto < b.proto ? -1 : a.proto > b.proto ? 1 : 0); }
+		};
+		var sortBy = store('portsSort');
+		if (!SORTS.hasOwnProperty(sortBy))
+			sortBy = 'total';
+		var sortSel = E('select', { 'class': 'cbi-input-select lf-ports-sort', 'change': function() { setSort(sortSel.value); } }, [
+			E('option', { 'value': 'total' }, _('Packets - most first')),
+			E('option', { 'value': 'passes' }, _('Seen in - most passes first')),
+			E('option', { 'value': 'servers' }, _('Servers - most first')),
+			E('option', { 'value': 'last' }, _('Last seen - newest first')),
+			E('option', { 'value': 'port' }, _('Server port - lowest first'))
+		]);
+		sortSel.value = sortBy;
+		function setSort(k) {
+			if (!SORTS.hasOwnProperty(k))
+				return;
+			sortBy = k;
+			sortSel.value = k;
+			store('portsSort', k);
+			render();
+			listNode.scrollTop = 0;
+		}
+		/* a column heading: click to sort by it */
+		function head(label, k) {
+			if (!k)
+				return E('th', {}, label);
+			return E('th', { 'class': 'lf-ports-head' + (sortBy === k ? ' lf-on' : ''), 'style': 'cursor:pointer;white-space:nowrap',
+				'title': _('Sort by this'), 'click': function() { setSort(k); } },
+				label + (sortBy === k ? (k === 'port' ? ' ▲' : ' ▼') : ''));
+		}
 
 		function ranges() {
 			var nums = picks.filter(function(c) { return c.checked; }).map(function(c) { return +c.value; })
@@ -4682,8 +4718,9 @@ return view.extend({
 			}
 			var now = Date.now() / 1000;
 			listNode.appendChild(E('table', { 'class': 'lf-servers-table' }, [
-				E('tr', {}, [ E('th', {}, ''), E('th', {}, _('Server port')), E('th', {}, _('Packets')), E('th', {}, _('Servers')), E('th', {}, _('Seen in')), E('th', {}, _('Last seen')) ])
-			].concat(rows.map(function(r) {
+				E('tr', {}, [ head(''), head(_('Server port'), 'port'), head(_('Packets'), 'total'), head(_('Servers'), 'servers'),
+					head(_('Seen in'), 'passes'), head(_('Last seen'), 'last') ])
+			].concat(rows.slice().sort(SORTS[sortBy]).map(function(r) {
 				var key = r.proto + '/' + r.port;
 				var c = E('input', { 'type': 'checkbox', 'class': 'lf-ports-pick', 'value': r.port, 'change': function() { userSet[key] = c.checked; preview(); } });
 				/* real game traffic is busy; short bursts on many ports are the game's data-centre pings
@@ -4746,7 +4783,9 @@ return view.extend({
 		} }, _('Use these ports'));
 
 		ui.showModal(_('Ports seen - %s').format(sec.label || zone), [
-			E('p', {}, _('The server ports this zone\'s device used while playing, busiest first. Tick the game\'s ports and use them for the zone: it then filters only that game, and other games or apps on the device are left alone. The game stays %s.').format(preset && !preset.custom ? preset.label : _('as it is'))),
+			E('p', {}, _('The server ports this zone\'s device used while playing. Tick the game\'s ports and use them for the zone: it then filters only that game, and other games or apps on the device are left alone. The game stays %s.').format(preset && !preset.custom ? preset.label : _('as it is'))),
+			E('label', { 'class': 'lf-ports-sortrow', 'style': 'display:block;font-size:90%;margin:.4em 0' }, [ _('Sort by') + ' ', sortSel,
+				E('span', { 'style': 'opacity:.7' }, ' ' + _('(or click a column)')) ]),
 			listNode,
 			E('label', { 'style': 'display:block;font-size:90%;margin:.4em 0' }, [ round, ' ', _('Round to blocks of 100 ports (the game\'s next servers often use a nearby port)') ]),
 			previewNode,
