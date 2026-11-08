@@ -868,6 +868,17 @@ def main():
         pm.locator(".lf-ports-round").uncheck()
         check("exact ports without rounding", "10200, 10600, 27019, 27054" in pm.locator(".lf-ports-preview").inner_text(), pm.locator(".lf-ports-preview").inner_text())
         pm.locator(".lf-ports-round").check()
+        # live: a new port seen while the window is open shows up by itself; the ticks set by hand stay
+        pm.locator(".lf-ports-pick").nth(3).uncheck()
+        page.evaluate("t => { window.__execResult = { code: 0, stdout: t }; }", ports_out + "udp/10900 1 9000 100 260 1 1\n")
+        page.wait_for_function("document.querySelectorAll('.lf-ports-pick').length === 5", timeout=9000)
+        ticked = page.evaluate("Object.fromEntries([...document.querySelectorAll('.lf-ports-pick')].map(c => [c.value, c.checked]))")
+        check("Ports seen refreshes by itself while open", "10900" in ticked, ticked)
+        check("...the new busy port ticked, the user's own ticks kept", ticked == {"10200": True, "10600": True, "10900": True, "27019": True, "27054": False}, ticked)
+        check("...says it updates by itself", "Updates by itself" in pm.locator(".lf-ports-live").inner_text())
+        page.evaluate("t => { window.__execResult = { code: 0, stdout: t }; }", ports_out)
+        page.wait_for_function("document.querySelectorAll('.lf-ports-pick').length === 4", timeout=9000)
+        pm.locator(".lf-ports-pick[value='27054']").check()
         game_before = page.evaluate("z => (uciState[z] || {}).game || null", zid)
         pm.locator(".lf-ports-use").click()
         rp = page.evaluate("z => uciState[z].remote_port", zid)
@@ -879,6 +890,9 @@ def main():
         check("nothing seen yet says how to collect them", "Play a few matches" in page.locator("#modal").inner_text())
         check("Use is off with nothing ticked", page.locator(".lf-ports-use").is_disabled())
         page.locator("#modal").get_by_role("button", name="Cancel").click()
+        n = page.evaluate("window.__execs.filter(e => e[1] === 'ports').length")
+        page.wait_for_timeout(6000)
+        check("closed: no more reading", page.evaluate("window.__execs.filter(e => e[1] === 'ports').length") == n)
         page.evaluate("window.__execResult = null")
 
         # ---- 6b. Servers file: see the saved servers by game, download / copy / import / paste

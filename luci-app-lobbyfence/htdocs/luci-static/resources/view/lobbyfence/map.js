@@ -4652,7 +4652,10 @@ return view.extend({
 		var listNode = E('div', { 'class': 'lf-servers-list lf-ports-list' }, E('em', {}, _('Reading the ports the router has seen…')));
 		var round = E('input', { 'type': 'checkbox', 'class': 'lf-ports-round', 'checked': true, 'change': function() { preview(); } });
 		var previewNode = E('p', { 'class': 'lf-ports-preview', 'style': 'font-size:90%;margin:.4em 0' });
-		var useBtn, clearBtn;
+		var liveNode = E('p', { 'class': 'lf-ports-live', 'style': 'font-size:85%;opacity:.7;margin:.3em 0' });
+		var useBtn, clearBtn, busy = false, timer = null;
+		/* the ticks the user changed by hand stay as they are when the list refreshes */
+		var userSet = {};
 
 		function ranges() {
 			var nums = picks.filter(function(c) { return c.checked; }).map(function(c) { return +c.value; })
@@ -4671,6 +4674,7 @@ return view.extend({
 			previewNode.textContent = r.length ? _('The zone\'s server ports become: %s').format(r.join(', ')) : _('Tick the ports the game uses.');
 		}
 		function render() {
+			var top = listNode.scrollTop;
 			listNode.innerHTML = '';
 			picks = [];
 			if (!rows.length) {
@@ -4682,20 +4686,27 @@ return view.extend({
 			listNode.appendChild(E('table', { 'class': 'lf-servers-table' }, [
 				E('tr', {}, [ E('th', {}, ''), E('th', {}, _('Server port')), E('th', {}, _('Packets (peak)')), E('th', {}, _('Servers')), E('th', {}, _('Seen in')), E('th', {}, _('Last seen')) ])
 			].concat(rows.map(function(r) {
-				var c = E('input', { 'type': 'checkbox', 'class': 'lf-ports-pick', 'value': r.port, 'change': preview });
+				var key = r.proto + '/' + r.port;
+				var c = E('input', { 'type': 'checkbox', 'class': 'lf-ports-pick', 'value': r.port, 'change': function() { userSet[key] = c.checked; preview(); } });
 				/* real game traffic is busy; short bursts on many ports are the game's data-centre pings */
-				c.checked = r.packets >= 50;
+				c.checked = key in userSet ? userSet[key] : r.packets >= 50;
 				picks.push(c);
 				return E('tr', {}, [
 					E('td', {}, c),
-					E('td', { 'class': 'lf-mono' }, E('label', { 'style': 'cursor:pointer', 'click': function(ev) { if (ev.target.tagName !== 'INPUT') { c.checked = !c.checked; preview(); } } }, r.proto + '/' + r.port)),
+					E('td', { 'class': 'lf-mono' }, E('label', { 'style': 'cursor:pointer', 'click': function(ev) { if (ev.target.tagName !== 'INPUT') { c.checked = !c.checked; userSet[key] = c.checked; preview(); } } }, key)),
 					E('td', {}, String(r.packets)), E('td', {}, String(r.servers)),
 					E('td', {}, _('%d pass(es)').format(r.passes)), E('td', {}, ago(r.last, now))
 				]);
 			}))));
+			listNode.scrollTop = top;
 			preview();
 		}
+		/* read again while the window is open: the router adds what it sees on
+		   every learning pass, so the list follows a match as it is played */
 		function load() {
+			if (busy)
+				return Promise.resolve();
+			busy = true;
 			return fs.exec('/usr/sbin/lobbyfence', [ 'ports', zone ]).then(function(r) {
 				if (!r || r.code !== 0)
 					throw new Error(r && (r.stderr || r.stdout) || _('no answer'));
@@ -4704,10 +4715,12 @@ return view.extend({
 					return m && { proto: m[1], port: +m[2], servers: +m[3], packets: +m[4], first: +m[5], last: +m[6], passes: +m[7], covered: m[8] === '1' };
 				}).filter(Boolean);
 				render();
+				liveNode.textContent = _('Updates by itself while this is open - last checked %s.').format(new Date().toLocaleTimeString());
 			}).catch(function(err) {
-				listNode.innerHTML = '';
+				if (!rows.length)
+					listNode.innerHTML = '';
 				stateNode.textContent = _('Could not read them: %s').format(String(err && err.message || err).replace(/^lobbyfence: /, '').trim());
-			});
+			}).then(function() { busy = false; });
 		}
 
 		clearBtn = E('button', { 'class': 'cbi-button cbi-button-negative lf-ports-clear', 'click': function() {
@@ -4737,6 +4750,7 @@ return view.extend({
 			listNode,
 			E('label', { 'style': 'display:block;font-size:90%;margin:.4em 0' }, [ round, ' ', _('Round to blocks of 100 ports (the game\'s next servers often use a nearby port)') ]),
 			previewNode,
+			liveNode,
 			E('p', { 'style': 'font-size:90%;opacity:.8' }, _('Ticked for you: ports with real game traffic (50+ packets). The many short ones are usually the game measuring the ping to its data centres - tick those too to keep far data centres blocked there as well.')),
 			stateNode,
 			E('div', { 'class': 'right' }, [
@@ -4745,6 +4759,14 @@ return view.extend({
 			])
 		]);
 		load();
+		/* every 5 s until the window closes (Cancel, Use these ports, or another window) */
+		timer = window.setInterval(function() {
+			if (!document.body.contains(listNode)) {
+				window.clearInterval(timer);
+				return;
+			}
+			load();
+		}, 5000);
 	},
 
 	/* switch a zone to another game: its ports, protocol and the game's recommended
