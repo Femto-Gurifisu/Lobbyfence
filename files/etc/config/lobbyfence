@@ -1,0 +1,10 @@
+
+config globals 'globals'
+	option enabled '0'
+	option interval '20'
+	option geo_url 'http://ip-api.com/batch'
+	option max_batches '4'
+	option data_dir '/etc/lobbyfence'
+	option persist_interval '21600'
+	option log_blocked '0'
+	option priority '-5'

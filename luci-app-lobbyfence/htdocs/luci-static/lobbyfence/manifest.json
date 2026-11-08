@@ -1,0 +1,16 @@
+{
+	"name": "LobbyFence",
+	"short_name": "LobbyFence",
+	"description": "Game servers by region, on a map - LobbyFence on your router",
+	"id": "/cgi-bin/luci/admin/services/lobbyfence/map",
+	"start_url": "/cgi-bin/luci/admin/services/lobbyfence/map?lf=app",
+	"scope": "/",
+	"display": "standalone",
+	"background_color": "#f4f6f9",
+	"theme_color": "#0d131c",
+	"icons": [
+		{ "src": "/luci-static/lobbyfence/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+		{ "src": "/luci-static/lobbyfence/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+		{ "src": "/luci-static/lobbyfence/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+	]
+}

@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- LobbyFence app icon: a globe, the allowed region drawn on it, a server inside (green) and one outside (red) -->
+  <defs>
+    <radialGradient id="bg" cx="35%" cy="25%" r="85%">
+      <stop offset="0" stop-color="#1e2a3d"/>
+      <stop offset="1" stop-color="#0d131c"/>
+    </radialGradient>
+    <clipPath id="globe"><circle cx="256" cy="262" r="168"/></clipPath>
+  </defs>
+  <rect width="512" height="512" rx="__RX__" fill="url(#bg)"/>
+  <g clip-path="url(#globe)">
+    <circle cx="256" cy="262" r="168" fill="#18212d"/>
+    <g fill="none" stroke="#3a4a5f" stroke-width="7">
+      <ellipse cx="256" cy="262" rx="70" ry="168"/>
+      <ellipse cx="256" cy="262" rx="138" ry="168"/>
+      <line x1="256" y1="90" x2="256" y2="434"/>
+      <path d="M88 262h336M106 182c90 30 210 30 300 0M106 342c90-30 210-30 300 0"/>
+    </g>
+    <circle cx="214" cy="222" r="92" fill="#3b82f6" fill-opacity=".28" stroke="#4c9bf0" stroke-width="12"/>
+  </g>
+  <circle cx="256" cy="262" r="168" fill="none" stroke="#5b6b80" stroke-width="8"/>
+  <circle cx="214" cy="222" r="24" fill="#22c55e" stroke="#0d131c" stroke-width="7"/>
+  <circle cx="352" cy="352" r="24" fill="#ef4444" stroke="#0d131c" stroke-width="7"/>
+</svg>

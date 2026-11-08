@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<!--
+	LobbyFence for FreshTomato - the app: Map (the same page as on OpenWrt) and
+	Settings, on a small stand-in for LuCI (lf-shim.js).
+	SPDX-License-Identifier: GPL-3.0-or-later
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<meta http-equiv="Content-Security-Policy" content="object-src 'none'; base-uri 'none'; form-action 'self'">
+<title>LobbyFence</title>
+<!-- a home-screen app on phones (Android: browser menu > Add to Home screen; iPhone: Share > Add to Home Screen) -->
+<link rel="manifest" href="/ext/lobbyfence/manifest.txt?v=@LFVER@" crossorigin="use-credentials">
+<meta name="theme-color" content="#0d131c">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="LobbyFence">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="apple-touch-icon" href="/ext/lobbyfence/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/ext/lobbyfence/favicon-32.png">
+<script>
+//	<% nvram('lan_ipaddr'); %>
+window.LF_TOKEN = (typeof nvram !== 'undefined' && nvram.http_id) || '';
+</script>
+<style>
+:root { --lft-bg: #f4f6f9; --lft-card: #ffffff; --lft-text: #1f2933; --lft-muted: #6b7785; --lft-border: #d5dbe3;
+	--lft-accent: #1f6fd1; --lft-accent-text: #ffffff; --lft-danger: #c0392b; --lft-ok: #1e8e3e; --lft-warn: #b7791f; }
+@media (prefers-color-scheme: dark) {
+	:root { --lft-bg: #15191e; --lft-card: #1d232a; --lft-text: #e6e9ed; --lft-muted: #9aa5b1; --lft-border: #323b45;
+		--lft-accent: #4c9bf0; --lft-accent-text: #0b1520; --lft-danger: #ef6b5b; --lft-ok: #4cc26a; --lft-warn: #e0a84a; }
+}
+html, body { margin: 0; padding: 0; background: var(--lft-bg); color: var(--lft-text);
+	font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+#lf-top { display: flex; align-items: center; gap: 4px; padding: 8px 12px 0; flex-wrap: wrap; }
+#lf-top a.lft-tab { padding: 6px 14px; border-radius: 8px 8px 0 0; text-decoration: none; color: var(--lft-muted);
+	border: 1px solid transparent; border-bottom: 0; font-weight: 600; }
+#lf-top a.lft-tab.active { background: var(--lft-card); color: var(--lft-text); border-color: var(--lft-border); }
+#lf-top .lf-grow { flex: 1; }
+#lf-changes { font-size: 12px; color: var(--lft-warn); font-weight: 600; }
+#view { padding: 0 12px 8px; }
+#view > .spinning { padding: 40px; text-align: center; color: var(--lft-muted); }
+.cbi-page-actions { display: flex; gap: 8px; justify-content: flex-end; padding: 10px 12px 14px; flex-wrap: wrap; }
+
+/* LuCI classes the pages use */
+.cbi-button, .cbi-page-actions button { font: inherit; font-size: 13px; padding: 5px 12px; border-radius: 6px; cursor: pointer;
+	border: 1px solid var(--lft-border); background: var(--lft-card); color: var(--lft-text); }
+.cbi-button:hover { filter: brightness(0.96); }
+.cbi-button:disabled { opacity: .6; cursor: default; }
+.cbi-button-positive, .cbi-button-apply, .cbi-button-action.important { background: var(--lft-accent); border-color: var(--lft-accent); color: var(--lft-accent-text); }
+.cbi-button-negative, .cbi-button-remove, .cbi-button-reset { color: var(--lft-danger); }
+.cbi-button-negative.important { background: var(--lft-danger); border-color: var(--lft-danger); color: #fff; }
+.cbi-input-text, .cbi-input-select, .cbi-input-textarea { font: inherit; font-size: 13px; padding: 4px 7px; border-radius: 5px;
+	border: 1px solid var(--lft-border); background: var(--lft-card); color: var(--lft-text); box-sizing: border-box; max-width: 100%; }
+.cbi-input-invalid { outline: 2px solid var(--lft-danger); }
+.right { text-align: right; }
+.spinning { opacity: .7; }
+#modal_overlay { display: none; position: fixed; inset: 0; z-index: 3000; background: rgba(0, 0, 0, .45);
+	align-items: flex-start; justify-content: center; overflow: auto; padding: 6vh 12px; box-sizing: border-box; }
+body.modal-overlay-active #modal_overlay { display: flex; }
+body.modal-overlay-active { overflow: hidden; }
+#modal_overlay .modal { background: var(--lft-card); color: var(--lft-text); border-radius: 10px; padding: 16px 18px;
+	width: 100%; max-width: 640px; box-shadow: 0 10px 40px rgba(0, 0, 0, .35); }
+#modal_overlay .modal h4 { margin: 0 0 10px; font-size: 16px; }
+#lf-notices { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 3500; width: min(560px, calc(100% - 24px)); }
+.alert-message { background: var(--lft-card); border: 1px solid var(--lft-border); border-left: 4px solid var(--lft-accent);
+	border-radius: 6px; padding: 8px 32px 8px 12px; margin-bottom: 8px; position: relative; box-shadow: 0 4px 16px rgba(0, 0, 0, .15); }
+.alert-message.error { border-left-color: var(--lft-danger); }
+.alert-message.warning { border-left-color: var(--lft-warn); }
+.alert-message p { margin: 0; }
+.lf-notice-close { position: absolute; top: 4px; right: 6px; border: 0; background: none; color: var(--lft-muted); font-size: 18px; cursor: pointer; }
+.cbi-tabmenu { list-style: none; display: flex; gap: 4px; padding: 0; margin: 0 0 8px; border-bottom: 1px solid var(--lft-border); }
+.cbi-tabmenu li { padding: 4px 10px; cursor: pointer; }
+.cbi-tabmenu li.cbi-tab { border-bottom: 2px solid var(--lft-accent); font-weight: 600; }
+</style>
+<script src="/ext/lobbyfence/lf-shim.js?v=@LFVER@"></script>
+<script src="/ext/lobbyfence/lf-app.js?v=@LFVER@"></script>
+</head>
+<body>
+<div id="lf-top">
+	<a class="lft-tab" data-tab="map" href="#map">Map</a>
+	<a class="lft-tab" data-tab="settings" href="#settings">Settings</a>
+	<span class="lf-grow"></span>
+	<span id="lf-changes" style="display:none"></span>
+</div>
+<div id="view"><div class="spinning">Loading LobbyFence…</div></div>
+<div class="cbi-page-actions" id="lf-footer">
+	<button class="cbi-button cbi-button-reset" id="lf-reset" title="Throw away changes that were not applied">Reset</button>
+	<button class="cbi-button" id="lf-save" title="Keep the changes on the router without applying them yet">Save</button>
+	<button class="cbi-button cbi-button-apply" id="lf-apply" title="Save the changes and put them into effect">Save &amp; Apply</button>
+</div>
+<script>
+(function() {
+	var tab = (location.hash || '#map').slice(1) === 'settings' ? 'settings' : 'map', current = null;
+	Array.prototype.forEach.call(document.querySelectorAll('#lf-top a.lft-tab'), function(a) {
+		a.classList.toggle('active', a.getAttribute('data-tab') === tab);
+		a.addEventListener('click', function(ev) {
+			ev.preventDefault();
+			if (a.getAttribute('data-tab') === tab) return;
+			/* changes are kept on the router as they are made: save, then switch */
+			Promise.resolve(current && current.handleSave ? current.handleSave() : null).catch(function() {}).then(function() {
+				location.hash = a.getAttribute('data-tab');
+				location.reload();
+			});
+		});
+	});
+	function busy(btn, p) {
+		btn.disabled = true;
+		return Promise.resolve(p).catch(function(err) {
+			LF.ui.addNotification(null, LF.E('p', {}, [ String(err && err.message || err) ]), 'error');
+		}).then(function() { btn.disabled = false; });
+	}
+	document.getElementById('lf-apply').addEventListener('click', function() { if (current) busy(this, current.handleSaveApply(null, '1')); });
+	document.getElementById('lf-save').addEventListener('click', function() { if (current) busy(this, current.handleSave()); });
+	document.getElementById('lf-reset').addEventListener('click', function() { if (current) busy(this, current.handleReset()); });
+	LF.boot('/ext/lobbyfence/' + (tab === 'settings' ? 'settings.js' : 'map.js') + '?v=@LFVER@', document.getElementById('view')).then(function(v) {
+		current = v;
+	}).catch(function(err) {
+		document.getElementById('view').innerHTML = '';
+		document.getElementById('view').appendChild(LF.E('div', { 'class': 'alert-message error' },
+			[ LF.E('p', {}, [ 'LobbyFence could not start: ' + (err && err.message || err) ]) ]));
+	});
+})();
+</script>
+</body>
+</html>

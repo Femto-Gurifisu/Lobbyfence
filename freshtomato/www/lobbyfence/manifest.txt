@@ -1,0 +1,16 @@
+{
+	"name": "LobbyFence",
+	"short_name": "LobbyFence",
+	"description": "Game servers by region, on a map - LobbyFence on your router",
+	"id": "/ext/lobbyfence/app.asp",
+	"start_url": "/ext/lobbyfence/app.asp?app=1",
+	"scope": "/",
+	"display": "standalone",
+	"background_color": "#f4f6f9",
+	"theme_color": "#0d131c",
+	"icons": [
+		{ "src": "/ext/lobbyfence/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+		{ "src": "/ext/lobbyfence/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+		{ "src": "/ext/lobbyfence/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+	]
+}

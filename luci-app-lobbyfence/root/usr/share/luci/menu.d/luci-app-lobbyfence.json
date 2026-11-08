@@ -1,0 +1,33 @@
+{
+	"admin/services/lobbyfence": {
+		"title": "LobbyFence",
+		"order": 60,
+		"action": {
+			"type": "firstchild"
+		},
+		"depends": {
+			"acl": [
+				"luci-app-lobbyfence"
+			],
+			"uci": {
+				"lobbyfence": true
+			}
+		}
+	},
+	"admin/services/lobbyfence/map": {
+		"title": "Map",
+		"order": 1,
+		"action": {
+			"type": "view",
+			"path": "lobbyfence/map"
+		}
+	},
+	"admin/services/lobbyfence/zones": {
+		"title": "Zones",
+		"order": 2,
+		"action": {
+			"type": "view",
+			"path": "lobbyfence/zones"
+		}
+	}
+}

@@ -1,0 +1,78 @@
+{
+	"luci-app-lobbyfence": {
+		"description": "Grant access to LobbyFence",
+		"read": {
+			"file": {
+				"/tmp/lobbyfence/*": [
+					"read"
+				]
+			},
+			"ubus": {
+				"service": [
+					"list"
+				],
+				"luci-rpc": [
+					"getHostHints"
+				]
+			},
+			"uci": [
+				"lobbyfence"
+			]
+		},
+		"write": {
+			"file": {
+				"/etc/init.d/lobbyfence restart": [
+					"exec"
+				],
+				"/tmp/lobbyfence/servers-import.txt": [
+					"write"
+				],
+				"/usr/sbin/lobbyfence allow *": [
+					"exec"
+				],
+				"/usr/sbin/lobbyfence apitest": [
+					"exec"
+				],
+				"/usr/sbin/lobbyfence block *": [
+					"exec"
+				],
+				"/usr/sbin/lobbyfence cycle": [
+					"exec"
+				],
+				"/usr/sbin/lobbyfence debug": [
+					"exec"
+				],
+				"/usr/sbin/lobbyfence debug clear": [
+					"exec"
+				],
+				"/usr/sbin/lobbyfence devices": [
+					"exec"
+				],
+				"/usr/sbin/lobbyfence export": [
+					"exec"
+				],
+				"/usr/sbin/lobbyfence forget *": [
+					"exec"
+				],
+				"/usr/sbin/lobbyfence import-servers /tmp/lobbyfence/servers-import.txt": [
+					"exec"
+				],
+				"/usr/sbin/lobbyfence live": [
+					"exec"
+				],
+				"/usr/sbin/lobbyfence ports *": [
+					"exec"
+				],
+				"/usr/sbin/lobbyfence remove-servers *": [
+					"exec"
+				],
+				"/usr/sbin/lobbyfence unlist *": [
+					"exec"
+				]
+			},
+			"uci": [
+				"lobbyfence"
+			]
+		}
+	}
+}

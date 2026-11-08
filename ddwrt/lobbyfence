@@ -1,0 +1,330 @@
+#!/bin/sh
+# LobbyFence for DD-WRT - service commands around the router script
+#
+#   start | stop | restart   filter + learning loop on / off (start also starts the web page)
+#   reload                   apply the configuration (after Save & Apply on the web page)
+#   fwhook                   run by DD-WRT after it rebuilt its firewall
+#   watchdog                 run every minute by cron: restarts what died
+#   web | web-stop           start / stop LobbyFence's web page (its own small web server)
+#   url                      print the page's address (with the sign-in token)
+#   newtoken                 make a new sign-in token (pages opened before must be opened again)
+#   debug [clear]            the debug report (logs, crashes, settings, firewall, web page)
+#   anything else            passed to the router script: status, list, whereis, ...
+#
+# The web page: DD-WRT's own web server can't serve add-on pages, so LobbyFence
+# runs DD-WRT's lighttpd on a port of its own (8055, on the LAN address only).
+# Its commands need a token that only DD-WRT's Status > My Page shows - and
+# that page needs DD-WRT's login.
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+LF_HOME="${LF_HOME:-/jffs/lobbyfence}"
+export LF_HOME
+export LF_SHARE="${LF_SHARE:-$LF_HOME/share}"
+export LF_FW=ddwrt
+export LF_FUNCTIONS="${LF_FUNCTIONS:-$LF_SHARE/functions.sh}"
+export LF_CONF_FILE="${LF_CONF_FILE:-$LF_HOME/lobbyfence.conf}"
+export LF_RUN="${LF_RUN:-/tmp/lobbyfence}"
+export LF_CONF_STAGED="${LF_CONF_STAGED:-$LF_RUN/staged.conf}"
+if [ -z "${LF_LEASES:-}" ]; then
+	# DD-WRT keeps the DHCP leases in /tmp, or on JFFS when set so
+	LF_LEASES=/tmp/dnsmasq.leases
+	[ -f "$LF_LEASES" ] || [ ! -f /jffs/dnsmasq.leases ] || LF_LEASES=/jffs/dnsmasq.leases
+fi
+export LF_LEASES
+export LF_DATA_DEFAULT="${LF_DATA_DEFAULT:-$LF_HOME/data}"
+export PATH="$PATH:/usr/sbin:/sbin:/usr/bin:/bin"
+MAIN="${LF_MAIN:-$LF_HOME/bin/lobbyfence-main}"
+SELF="$LF_HOME/lobbyfence"
+CROND="${LF_CROND:-/tmp/cron.d}"
+TOKEN_FILE="$LF_HOME/.webtoken"
+LIGHTTPD="${LF_LIGHTTPD:-lighttpd}"
+WEB_PORT="${LF_WEB_PORT:-$(cat "$LF_HOME/.webport" 2>/dev/null)}"
+WEB_PORT_SET="$WEB_PORT"
+# (a port number, 1-65535: anything else is not used - mypage.sh does the same)
+case "$WEB_PORT" in [1-9]|[1-9][0-9]|[1-9][0-9][0-9]|[1-9][0-9][0-9][0-9]|[1-9][0-9][0-9][0-9][0-9]) ;; *) WEB_PORT=8055;; esac
+[ "$WEB_PORT" -le 65535 ] || WEB_PORT=8055
+NVRAM="${LF_NVRAM:-nvram}"
+
+have() { type "$1" >/dev/null 2>&1; }
+
+# the RAM folder is root's own: a link, or a folder someone else put in its
+# place in /tmp before LobbyFence started, is removed - never written through
+run_dir() {
+	local o
+	o="$(ls -ldn "$LF_RUN" 2>/dev/null | awk '{ print substr($1, 1, 1) $3 }')"
+	[ -z "$o" ] || [ "$o" = d0 ] || rm -rf "$LF_RUN"
+	mkdir -p "$LF_RUN"
+}
+is_num() { case "$1" in ''|*[!0-9]*) return 1;; esac; return 0; }
+log() {
+	logger -t lobbyfence -p "daemon.$1" -- "$2" 2>/dev/null || echo "lobbyfence[$1]: $2" >&2
+	# (also into LobbyFence's own log in memory, for the debug report)
+	[ -d "$LF_RUN" ] && echo "$(date '+%F %T' 2>/dev/null) $1: $2" >> "$LF_RUN/log" 2>/dev/null
+	return 0
+}
+
+enabled() {
+	. "$LF_FUNCTIONS"
+	config_load lobbyfence
+	config_get_bool _en globals enabled 0
+	[ "$_en" = 1 ]
+}
+
+# the learning loop's pid while it runs: the pid file can name another program
+# by now (the loop died and its number was used again - that one must not be
+# stopped), and a finished loop waiting to be cleared away (a zombie) has no
+# command line
+daemon_pid() {
+	local p
+	p="$(cat "$LF_RUN/daemon.pid" 2>/dev/null)"
+	case "$p" in ''|*[!0-9]*) return 0;; esac
+	case "$(tr '\000' ' ' 2>/dev/null < "/proc/$p/cmdline")" in
+		*"$MAIN daemon "*) echo "$p";;
+	esac
+}
+
+daemon_start() {
+	[ -n "$(daemon_pid)" ] && return 0
+	mkdir -p "$LF_RUN"
+	"$MAIN" daemon < /dev/null > /dev/null 2>&1 &
+	echo "$!" > "$LF_RUN/daemon.pid"
+}
+
+daemon_stop() {
+	local p n=0
+	p="$(daemon_pid)"
+	[ -n "$p" ] || return 0
+	kill "$p" 2>/dev/null
+	# it saves the learned servers on the way out
+	while [ -n "$(daemon_pid)" ] && [ "$n" -lt 30 ]; do sleep 1; n=$((n + 1)); done
+	p="$(daemon_pid)"
+	[ -n "$p" ] && kill -9 "$p" 2>/dev/null
+	rm -f "$LF_RUN/daemon.pid"
+}
+
+# DD-WRT's cron reads /tmp/cron.d (lines with the user name); /tmp is empty after a reboot
+cron_on() {
+	mkdir -p "$CROND" && echo "* * * * * root $SELF watchdog" > "$CROND/lobbyfence.new" && mv "$CROND/lobbyfence.new" "$CROND/lobbyfence"
+}
+cron_off() { rm -f "$CROND/lobbyfence"; }
+
+# ------------------------------------------------------------- web page
+
+lan_ip() { $NVRAM get lan_ipaddr 2>/dev/null; }
+
+token() {
+	if [ ! -s "$TOKEN_FILE" ]; then
+		( umask 077; hexdump -n 16 -e '16/1 "%02x"' /dev/urandom > "$TOKEN_FILE.new" 2>/dev/null ) && \
+			[ -s "$TOKEN_FILE.new" ] && mv "$TOKEN_FILE.new" "$TOKEN_FILE"
+		rm -f "$TOKEN_FILE.new"
+	fi
+	cat "$TOKEN_FILE" 2>/dev/null
+}
+
+# LobbyFence's web servers: found by their command line in the process list
+# (a server whose pid file got lost - e.g. a start racing the watchdog -
+# would otherwise hold the port and block every new start). Exactly
+# "lighttpd -f <its configuration>": an editor or any other command that
+# just mentions the file is not one (it used to count - and be killed).
+web_ours() { # pid
+	case "$(tr '\000' ' ' 2>/dev/null < "/proc/$1/cmdline")" in
+		"lighttpd -f $LF_RUN/lighttpd.conf "|*"/lighttpd -f $LF_RUN/lighttpd.conf ") return 0;;
+	esac
+	return 1
+}
+
+web_pids() {
+	local d
+	for d in /proc/[0-9]*; do
+		web_ours "${d#/proc/}" && echo "${d#/proc/}"
+	done
+}
+
+# (the pid file can name another program by now: the server died and its
+# number was used again - that one is not LobbyFence's to stop)
+web_pid() {
+	local p
+	p="$(cat "$LF_RUN/lighttpd.pid" 2>/dev/null)"
+	if is_num "$p" && web_ours "$p"; then echo "$p"; return; fi
+	p="$(web_pids | head -n 1)"
+	[ -n "$p" ] && { echo "$p" > "$LF_RUN/lighttpd.pid"; echo "$p"; }
+}
+
+# the web server's messages are in RAM: kept short (cut in place - the
+# server keeps writing to the same open file)
+web_log_trim() {
+	local f
+	for f in "$LF_RUN/lighttpd.log" "$LF_RUN/lighttpd.out"; do
+		[ -f "$f" ] && [ "$(wc -c < "$f")" -gt 65536 ] && tail -n 200 "$f" > "$f.trim" && cat "$f.trim" > "$f"
+		rm -f "$f.trim"
+	done
+}
+
+web_conf() {
+	local ip="$1" bind="" tz=""
+	bind="server.bind = \"$ip\""
+	case "${TZ:-}" in ''|*\"*) ;; *) tz=", \"TZ\" => \"$TZ\"";; esac
+	cat <<EOF
+# LobbyFence's web page (written by $SELF - changes are overwritten)
+server.modules = ( "mod_cgi", "mod_setenv" )
+server.document-root = "$LF_HOME/www"
+server.port = $WEB_PORT
+$bind
+server.pid-file = "$LF_RUN/lighttpd.pid"
+server.errorlog = "$LF_RUN/lighttpd.log"
+server.upload-dirs = ( "$LF_RUN" )
+server.max-request-size = 512
+server.max-connections = 16
+server.tag = "LobbyFence"
+index-file.names = ( "index.html" )
+mimetype.assign = ( ".html" => "text/html; charset=utf-8", ".js" => "text/javascript; charset=utf-8",
+	".json" => "application/manifest+json", ".png" => "image/png", ".svg" => "image/svg+xml", ".css" => "text/css" )
+# (CGI programs get no environment of their own: PATH, the time zone and LobbyFence's settings)
+setenv.set-environment = ( $(env | awk -F= '/^LF_[A-Z0-9_]*=/ && $0 !~ /"/ { printf "\"%s\" => \"%s\", ", $1, substr($0, length($1) + 2) }')"PATH" => "$PATH"$tz )
+setenv.add-response-header = ( "Cache-Control" => "no-cache", "X-Content-Type-Options" => "nosniff",
+	"X-Frame-Options" => "DENY", "Referrer-Policy" => "no-referrer",
+	"Content-Security-Policy" => "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'" )
+\$HTTP["url"] =^ "/cgi-bin/" {
+	cgi.assign = ( ".cgi" => "" )
+}
+EOF
+}
+
+web_start() {
+	local ip rc=0 t
+	[ -n "$(web_pid)" ] && return 0
+	if ! have "$LIGHTTPD"; then
+		log warning "the web page needs lighttpd, which this DD-WRT build doesn't have - the filter works without it"
+		return 1
+	fi
+	mkdir -p "$LF_RUN"
+	# one start at a time (the watchdog, the boot hook and a command can meet)
+	# (the lock is a link whose target is the time it was taken: made in one
+	# step, so a start that dies can't leave a lock without a time - which
+	# never went stale and kept the page down until a reboot)
+	if ! ln -s "$(date +%s)" "$LF_RUN/web.lock" 2>/dev/null; then
+		t="$(readlink "$LF_RUN/web.lock" 2>/dev/null)"
+		# a lock older than a minute was left by a start that died (an older
+		# version's lock folder: taken over too)
+		if [ -L "$LF_RUN/web.lock" ] && is_num "$t" && [ $(( $(date +%s) - t )) -le 60 ] && [ "$(date +%s)" -ge "$t" ]; then
+			return 0
+		fi
+		rm -rf "$LF_RUN/web.lock"; ln -s "$(date +%s)" "$LF_RUN/web.lock" 2>/dev/null || return 0
+	fi
+	if [ -z "$(web_pid)" ]; then
+		token >/dev/null
+		ip="$(lan_ip)"
+		# (without the LAN address it would listen on every interface - the internet side too)
+		case "$ip" in
+			*[!0-9.]*) ip="";;
+			*.*.*.*) ;;
+			*) ip="";;
+		esac
+		if [ -z "$ip" ]; then
+			log warning "the web page's server was not started: the router's LAN address (nvram lan_ipaddr) is not set"
+			rm -rf "$LF_RUN/web.lock"
+			return 1
+		fi
+		[ -n "$WEB_PORT_SET" ] && [ "$WEB_PORT_SET" != "$WEB_PORT" ] && \
+			log warning "not a port number in $LF_HOME/.webport (\"$WEB_PORT_SET\") - the web page uses port $WEB_PORT"
+		web_conf "$ip" > "$LF_RUN/lighttpd.conf"
+		rm -f "$LF_RUN/lighttpd.pid"
+		if ! "$LIGHTTPD" -f "$LF_RUN/lighttpd.conf" > "$LF_RUN/lighttpd.out" 2>&1; then
+			rc=1
+			if grep -q "Address in use" "$LF_RUN/lighttpd.out" 2>/dev/null; then
+				log warning "the web page's port $WEB_PORT is taken by another program - pick another: echo 8056 > $LF_HOME/.webport, then $SELF web"
+			else
+				log warning "the web page's server did not start: $(tail -n 2 "$LF_RUN/lighttpd.out" "$LF_RUN/lighttpd.log" 2>/dev/null | tr '\n' ' ')"
+			fi
+		fi
+	fi
+	rm -rf "$LF_RUN/web.lock"
+	return $rc
+}
+
+web_stop() {
+	local p n=0 left
+	for p in $(web_pid) $(web_pids); do kill "$p" 2>/dev/null; done
+	while [ -n "$(web_pids)" ] && [ "$n" -lt 10 ]; do sleep 1; n=$((n + 1)); done
+	for p in $(web_pids); do kill -9 "$p" 2>/dev/null; done
+	rm -f "$LF_RUN/lighttpd.pid"
+}
+
+web_url() {
+	local ip
+	ip="$(lan_ip)"
+	echo "http://${ip:-<router>}:$WEB_PORT/#t=$(token)"
+}
+
+# the debug report's DD-WRT part (run by "lobbyfence debug")
+debug_extra() {
+	local p
+	printf '\n==== DD-WRT\n'
+	echo "JFFS: $(grep ' /jffs ' /proc/mounts 2>/dev/null || echo 'NOT mounted')"
+	echo "hooks: $(ls /jffs/etc/config/ 2>/dev/null | grep -i lobbyfence | tr '\n' ' ')"
+	echo "cron: $(cat "$CROND/lobbyfence" 2>/dev/null || echo none)"
+	echo "Status > My Page scripts: $($NVRAM get mypage_scripts 2>/dev/null)"
+	echo "system log: $([ "$($NVRAM get syslogd_enable 2>/dev/null)" = 1 ] && echo on || echo 'off (Services > Services > System Log)')"
+	p="$(web_pid)"
+	echo "web page: port $WEB_PORT, server $([ -n "$p" ] && echo "running (pid $p)" || echo 'NOT running'), all servers found: $(web_pids | tr '\n' ' ')"
+	echo "web server messages:"
+	tail -n 20 "$LF_RUN/lighttpd.out" "$LF_RUN/lighttpd.log" 2>/dev/null | sed 's/^/  /'
+}
+
+# --------------------------------------------------------------- service
+
+do_start() {
+	run_dir
+	rm -f "$LF_RUN/stopped"
+	web_start
+	cron_on
+	if enabled; then
+		"$MAIN" apply
+		daemon_start
+		log notice "started"
+	else
+		"$MAIN" apply   # writes the status for the web page
+	fi
+}
+
+do_stop() {
+	cron_off
+	daemon_stop
+	"$MAIN" teardown
+}
+
+case "$1" in
+	start) do_start;;
+	stop) do_stop; web_stop;;
+	restart) do_stop; do_start;;
+	reload)
+		# the result of applying is the answer (the web page shows a failure)
+		"$MAIN" apply; rc=$?
+		daemon_stop
+		enabled && daemon_start
+		cron_on
+		[ "$rc" = 0 ] || echo "the new settings are saved, but the router could not put them into effect - filtering is off until it can (LobbyFence keeps trying, on every learning pass). See Status > Syslog (lines with \"lobbyfence\")" >&2
+		exit $rc;;
+	fwhook)
+		# DD-WRT waits for this hook: do the work in the background
+		[ -d "$LF_RUN" ] || exit 0
+		"$MAIN" fwhook < /dev/null > /dev/null 2>&1 &;;
+	watchdog)
+		[ -f "$LF_RUN/stopped" ] && exit 0
+		[ -n "$(web_pid)" ] || web_start
+		web_log_trim
+		if enabled && [ -z "$(daemon_pid)" ]; then
+			log warning "learning loop was not running - starting it again"
+			daemon_start
+		fi;;
+	web) web_stop; web_start && echo "web page: $(web_url)";;
+	web-stop) web_stop;;
+	url) web_url;;
+	debug) export LF_DEBUG_EXTRA="$SELF debug-extra"; exec "$MAIN" "$@";;
+	debug-extra) debug_extra;;
+	newtoken)
+		rm -f "$TOKEN_FILE"; token >/dev/null
+		echo "new token made - open LobbyFence again from Status > My Page (or: $(web_url))";;
+	*) exec "$MAIN" "$@";;
+esac

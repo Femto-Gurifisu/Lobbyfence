@@ -1,0 +1,415 @@
+#!/bin/sh
+# LobbyFence for Asuswrt-Merlin - service commands around the router script
+#
+#   start | stop | restart   filter + learning loop on / off (start also sets up the web page)
+#   reload                   apply the configuration
+#   fwhook                   run from /jffs/scripts/firewall-start after the firewall was rebuilt
+#   watchdog                 run every minute by cron: restarts the learning loop if it died
+#   web                      (re)install the web page and its tab (Administration > LobbyFence)
+#   menu | menu-off          the menu entry on its own
+#   service-event <a> <b>    run from /jffs/scripts/service-event (the web page's requests)
+#   anything else            passed to the router script: status, list, whereis, diag, ...
+#
+# The web page can't run commands on Merlin. It hands each request to the
+# router through the add-on settings file (/jffs/addons/custom_settings.txt,
+# key lobbyfence_cmd) and the "restart_lobbyfence" service event; the answer
+# and everything the page shows are files in /www/user/lobbyfence/d/ (the
+# live data too: the learning loop writes it again whenever the page read it).
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+LF_HOME="${LF_HOME:-/jffs/addons/lobbyfence}"
+export LF_HOME
+export LF_SHARE="${LF_SHARE:-$LF_HOME/share}"
+export LF_FW=merlin
+export LF_FUNCTIONS="${LF_FUNCTIONS:-$LF_SHARE/functions.sh}"
+export LF_CONF_FILE="${LF_CONF_FILE:-$LF_HOME/lobbyfence.conf}"
+export LF_RUN="${LF_RUN:-/tmp/lobbyfence}"
+export LF_CONF_STAGED="${LF_CONF_STAGED:-$LF_RUN/staged.conf}"
+export LF_LEASES="${LF_LEASES:-/var/lib/misc/dnsmasq.leases}"
+export LF_DATA_DEFAULT="${LF_DATA_DEFAULT:-$LF_HOME/data}"
+MAIN="${LF_MAIN:-$LF_HOME/bin/lobbyfence-main}"
+SELF="$LF_HOME/lobbyfence"
+WWWUSER="${LF_WWWUSER:-/www/user}"
+WEB="$WWWUSER/lobbyfence"
+DATA="$LF_RUN/web"
+CUSTOM="${LF_CUSTOM_SETTINGS:-/jffs/addons/custom_settings.txt}"
+MENU_JS="${LF_MENU_JS:-/www/require/modules/menuTree.js}"
+MENU_TMP="${LF_MENU_TMP:-/tmp/menuTree.js}"
+HELPER="${LF_HELPER:-/usr/sbin/helper.sh}"
+CONF_AWK="$LF_SHARE/conf.awk"
+
+have() { type "$1" >/dev/null 2>&1; }
+
+# the RAM folder is root's own: a link, or a folder someone else put in its
+# place in /tmp before LobbyFence started, is removed - never written through
+run_dir() {
+	local o
+	o="$(ls -ldn "$LF_RUN" 2>/dev/null | awk '{ print substr($1, 1, 1) $3 }')"
+	[ -z "$o" ] || [ "$o" = d0 ] || rm -rf "$LF_RUN"
+	mkdir -p "$LF_RUN"
+}
+log() {
+	logger -t lobbyfence -p "daemon.$1" -- "$2" 2>/dev/null || echo "lobbyfence[$1]: $2" >&2
+	# (also into LobbyFence's own log in memory, for the debug report)
+	[ -d "$LF_RUN" ] && echo "$(date '+%F %T' 2>/dev/null) $1: $2" >> "$LF_RUN/log" 2>/dev/null
+	return 0
+}
+now() { date +%s; }
+
+enabled() {
+	. "$LF_FUNCTIONS"
+	config_load lobbyfence
+	config_get_bool _en globals enabled 0
+	[ "$_en" = 1 ]
+}
+
+# the learning loop's pid while it runs: the pid file can name another program
+# by now (the loop died and its number was used again - that one must not be
+# stopped), and a finished loop waiting to be cleared away (a zombie) has no
+# command line
+daemon_pid() {
+	local p
+	p="$(cat "$LF_RUN/daemon.pid" 2>/dev/null)"
+	case "$p" in ''|*[!0-9]*) return 0;; esac
+	case "$(tr '\000' ' ' 2>/dev/null < "/proc/$p/cmdline")" in
+		*"$MAIN daemon "*) echo "$p";;
+	esac
+}
+
+daemon_start() {
+	[ -n "$(daemon_pid)" ] && return 0
+	mkdir -p "$LF_RUN"
+	"$MAIN" daemon < /dev/null > /dev/null 2>&1 8>&- 9>&- &
+	echo "$!" > "$LF_RUN/daemon.pid"
+}
+
+daemon_stop() {
+	local p n=0
+	p="$(daemon_pid)"
+	[ -n "$p" ] || return 0
+	kill "$p" 2>/dev/null
+	# it saves the learned servers on the way out
+	while [ -n "$(daemon_pid)" ] && [ "$n" -lt 30 ]; do sleep 1; n=$((n + 1)); done
+	p="$(daemon_pid)"
+	[ -n "$p" ] && kill -9 "$p" 2>/dev/null
+	rm -f "$LF_RUN/daemon.pid"
+}
+
+cron_on() { have cru && cru a lobbyfence "* * * * * $SELF watchdog"; }
+cron_off() { have cru && cru d lobbyfence; }
+
+# ---------------------------------------------------------------- web data
+
+# text on stdin -> JSON string body. No "<" left as such: Merlin's web
+# server runs "<% %>" in every .json / .js / .asp file it serves.
+jstr() {
+	tr -d '\000-\010\013\014\016-\037' | awk 'BEGIN { ORS = "" }
+		function rep(s, a, b,   n, p, i, o) { n = split(s, p, a); o = p[1]; for (i = 2; i <= n; i++) o = o b p[i]; return o }
+		{ s = rep($0, "\\", "\\\\"); s = rep(s, "\"", "\\\""); s = rep(s, "\t", "\\t"); s = rep(s, "\r", "\\r"); s = rep(s, "<", "\\u003c")
+		  print (NR > 1 ? "\\n" : "") s }'
+}
+
+# atomically replace a file the web page reads
+put() { # file  (content on stdin)
+	cat > "$1.tmp.$$" && mv "$1.tmp.$$" "$1"
+}
+
+# the settings and each zone's server list, where the page finds them
+web_data() {
+	local z
+	mkdir -p "$DATA"
+	printf '{"text":"%s"}\n' "$( [ -f "$LF_CONF_FILE" ] && jstr < "$LF_CONF_FILE")" | put "$DATA/config.json"
+	ln -sf "$LF_RUN/status.json" "$DATA/status.json"
+	[ -f "$CUSTOM" ] && ln -sf "$CUSTOM" "$DATA/cs.json"
+	for z in $(awk '$1 == "config" && $2 == "zone" { n = $3; gsub(/\047/, "", n); if (n ~ /^[A-Za-z0-9_]+$/) print n }' "$LF_CONF_FILE" 2>/dev/null); do
+		ln -sf "$LF_RUN/$z.servers" "$DATA/$z.servers.json"
+	done
+}
+
+# the page (Merlin's add-on API: one of /www/user/user1..20.asp) + the files it loads
+page_mount() {
+	local page="none"
+	if [ -f "$HELPER" ]; then
+		. "$HELPER"
+		am_get_webui_page "$LF_HOME/www/lobbyfence.asp"
+		page="$am_webui_page"
+	fi
+	if [ "$page" = none ]; then
+		log warning "web page not added: no free add-on page slot (Merlin allows 20) or no add-on support"
+		return 1
+	fi
+	cp "$LF_HOME/www/lobbyfence.asp" "$WWWUSER/$page" && echo "$page" > "$LF_RUN/webui_page"
+}
+
+web_install() {
+	local f
+	mkdir -p "$WEB" "$DATA" || return 1
+	for f in "$LF_HOME"/www/lobbyfence/*; do
+		[ -f "$f" ] && ln -sf "$f" "$WEB/${f##*/}"
+	done
+	rm -rf "$WEB/d"; ln -sf "$DATA" "$WEB/d"
+	web_data
+	page_mount && menu_link
+}
+
+# "LobbyFence" as a tab under Administration (next to Tweaks): Merlin's menu file copied to /tmp,
+# the entry added after "Other Settings", laid over the original
+menu_mounted() { awk -v f="$1" '$2 == f { m = 1 } END { exit !m }' /proc/mounts 2>/dev/null; }
+
+menu_link() {
+	local page v="$1" err
+	say() { [ -n "$v" ] && echo "$*"; }
+	page="$(cat "$LF_RUN/webui_page" 2>/dev/null)"
+	[ -n "$page" ] || { say "no web page slot - see the system log"; return 0; }
+	if [ -f "$LF_HOME/.nomenu" ]; then say "menu entry switched off ($LF_HOME/.nomenu exists)"; menu_unlink; return 0; fi
+	(
+		have flock && flock -x 9
+		[ -f "$MENU_TMP" ] || cp "$MENU_JS" "$MENU_TMP"
+		if grep -q "url: \"$page\", tabName: \"LobbyFence\"" "$MENU_TMP"; then
+			say "menu entry is there"
+		elif grep -q 'url: "Tools_OtherSettings.asp", tabName:' "$MENU_TMP"; then
+			sed -i "/url: \"Tools_OtherSettings.asp\", tabName:/a {url: \"$page\", tabName: \"LobbyFence\"}," "$MENU_TMP"
+			say "LobbyFence tab added under Administration - reload the page with Cmd+Shift+R (Ctrl+Shift+R on Windows)"
+		else
+			log warning "menu entry not added: Merlin's menu file looks different"
+			say "could not find where to add the menu entry - the page works at http://<router>/$page"
+		fi
+		# re-bind so the web server sees the edited copy
+		menu_mounted "$MENU_JS" && umount "$MENU_JS" 2>/dev/null
+		if ! err="$(mount -o bind "$MENU_TMP" "$MENU_JS" 2>&1)"; then
+			log warning "menu entry not added: mount failed: $err"
+			say "mount failed: $err"
+		fi
+	) 9> /tmp/addonwebui.lock
+	return 0
+}
+
+menu_unlink() {
+	local page
+	page="$(cat "$LF_RUN/webui_page" 2>/dev/null)"
+	[ -n "$page" ] || return 0
+	(
+		have flock && flock -x 9
+		if [ -f "$MENU_TMP" ]; then
+			sed -i "/url: \"$page\", tabName: \"LobbyFence\"/d" "$MENU_TMP"
+			menu_mounted "$MENU_JS" && umount "$MENU_JS" 2>/dev/null
+			mount -o bind "$MENU_TMP" "$MENU_JS" 2>/dev/null
+		fi
+	) 9> /tmp/addonwebui.lock
+	return 0
+}
+
+web_remove() {
+	local page
+	menu_unlink
+	page="$(cat "$LF_RUN/webui_page" 2>/dev/null)"
+	[ -n "$page" ] && cmp -s "$WWWUSER/$page" "$LF_HOME/www/lobbyfence.asp" && rm -f "$WWWUSER/$page"
+	rm -f "$LF_RUN/webui_page"
+	rm -rf "$WEB"
+}
+
+# ------------------------------------------------------- the page's requests
+
+# "%41b%0A" -> bytes
+pdecode() {
+	awk 'function hv(c) { return index("0123456789abcdef", tolower(c)) - 1 }
+		{ o = ""; v = $0
+		  for (i = 1; i <= length(v); i++) {
+			c = substr(v, i, 1)
+			if (c == "%" && i + 2 <= length(v) && hv(substr(v, i + 1, 1)) >= 0 && hv(substr(v, i + 2, 1)) >= 0) {
+				o = o sprintf("%c", hv(substr(v, i + 1, 1)) * 16 + hv(substr(v, i + 2, 1))); i += 2
+			} else o = o c
+		  }
+		  printf "%s", o }'
+}
+
+valid_zone() { case "$1" in ''|*[!A-Za-z0-9_]*) return 1;; esac; [ "${#1}" -le 64 ]; }
+valid_addr() { case "$1" in ''|*[!0-9A-Fa-f:./]*) return 1;; esac; [ "${#1}" -le 49 ]; }
+
+answer() { # id code stdout-file stderr-file
+	printf '{"done":true,"code":%d,"stdout":"%s","stderr":"%s"}\n' "$2" "$(jstr < "$3")" "$(jstr < "$4")" | put "$DATA/res-$1.json"
+	answered "$1"
+}
+
+# answers the page has had time to fetch are deleted after ten minutes (they
+# are in RAM, and a debug report is up to 240 KB). Merlin's find has no -mmin:
+# each answer's time is noted in res.list.
+answered() { # id
+	local t
+	t="$(now)"
+	echo "$t $1" >> "$LF_RUN/res.list"
+	awk -v t="$t" -v d="$DATA" '$1 + 600 < t || $1 > t { print d "/res-" $2 ".json"; next } { print > "/dev/stderr" }' \
+		"$LF_RUN/res.list" 2> "$LF_RUN/res.list.new" | while read -r f; do rm -f "$f"; done
+	mv "$LF_RUN/res.list.new" "$LF_RUN/res.list"
+}
+
+answer_err() { # id message
+	printf '{"done":true,"error":"%s"}\n' "$(printf '%s' "$2" | jstr)" | put "$DATA/res-$1.json"
+	answered "$1"
+}
+
+# a complete request: first line "command args...", the rest is its data
+web_run() { # id file
+	local id="$1" in="$2" out="$LF_RUN/web.out" err="$LF_RUN/web.err" line cmd rc z a
+	line="$(head -n 1 "$in")"
+	set -f; set -- $line; set +f
+	cmd="$1"; [ $# -gt 0 ] && shift
+	: > "$out"; : > "$err"
+	case "$cmd" in
+		# (8>&-: what they start must not keep the request lock)
+		live|devices|cycle|apitest|export)
+			"$MAIN" "$cmd" > "$out" 2> "$err" < /dev/null 8>&-; rc=$?;;
+		import-servers)
+			# the rest of the request: another router's servers file
+			sed 1d "$in" | "$MAIN" import-servers - > "$out" 2> "$err" 8>&-; rc=$?;;
+		restart)
+			"$SELF" restart > "$out" 2> "$err" < /dev/null 8>&-; rc=$?;;
+		ports)
+			valid_zone "$1" || { answer_err "$id" "bad zone"; return; }
+			case "$2" in ''|clear) ;; *) answer_err "$id" "bad argument"; return;; esac
+			[ $# -le 2 ] || { answer_err "$id" "bad argument"; return; }
+			"$MAIN" ports "$@" > "$out" 2> "$err" < /dev/null 8>&-; rc=$?;;
+		remove-servers)
+			case "$1" in ''|*[!a-z0-9_]*) answer_err "$id" "bad game"; return;; esac
+			[ ${#1} -le 32 ] || { answer_err "$id" "bad game"; return; }
+			g="$1"; shift
+			for a in "$@"; do valid_addr "$a" || { answer_err "$id" "bad address"; return; }; done
+			"$MAIN" remove-servers "$g" "$@" > "$out" 2> "$err" < /dev/null 8>&-; rc=$?;;
+		forget|allow|block|unlist)
+			z="$1"; shift
+			valid_zone "$z" || { answer_err "$id" "bad zone"; return; }
+			for a in "$@"; do valid_addr "$a" || { answer_err "$id" "bad address"; return; }; done
+			[ "$cmd" = forget ] || [ $# -gt 0 ] || { answer_err "$id" "no address"; return; }
+			"$MAIN" "$cmd" "$z" "$@" > "$out" 2> "$err" < /dev/null 8>&-; rc=$?;;
+		apply)
+			# the page's changes, replayed onto the settings as they are now
+			# (a rule clicked on the map meanwhile is kept)
+			sed 1d "$in" > "$LF_RUN/web.ops"
+			if [ -s "$LF_RUN/web.ops" ]; then
+				if ! awk -v mode=ops -v opsfile="$LF_RUN/web.ops" -f "$CONF_AWK" "$LF_CONF_FILE" > "$LF_CONF_FILE.new" 2> "$err" || \
+					! mv "$LF_CONF_FILE.new" "$LF_CONF_FILE"; then
+					rm -f "$LF_CONF_FILE.new"
+					answer "$id" 1 "$out" "$err"; return
+				fi
+			fi
+			rm -f "$LF_RUN/web.ops"
+			"$SELF" reload > "$out" 2> "$err" < /dev/null 8>&-; rc=$?;;
+		debug)
+			# the debug report (or "debug clear": forget the crash records)
+			case "$1" in ''|clear) ;; *) answer_err "$id" "not allowed"; return;; esac
+			"$SELF" debug $1 > "$out" 2> "$err" < /dev/null 8>&-; rc=$?;;
+		*) answer_err "$id" "not allowed"; return;;
+	esac
+	web_data
+	answer "$id" "$rc" "$out" "$err"
+}
+
+# one piece of a request from the add-on settings file:
+#   lobbyfence_cmd <id> <n>/<count> <%-encoded text>
+web_cmd() {
+	local line id part n cnt
+	[ -f "$CUSTOM" ] || return 0
+	line="$(grep '^lobbyfence_cmd ' "$CUSTOM" | head -n 1)"
+	[ -n "$line" ] || return 0
+	# take it out again (the settings file holds 8 KB for all add-ons)
+	sed -i '/^lobbyfence_cmd /d' "$CUSTOM"
+	set -f; set -- $line; set +f
+	id="$2"; part="$3"
+	case "$id" in ''|*[!A-Za-z0-9]*) return 0;; esac
+	[ "${#id}" -le 24 ] || return 0
+	n="${part%/*}"; cnt="${part#*/}"
+	case "$n$cnt" in ''|*[!0-9]*) answer_err "$id" "bad request"; return;; esac
+	[ "$n" -ge 1 ] && [ "$n" -le "$cnt" ] && [ "$cnt" -le 200 ] || { answer_err "$id" "bad request"; return; }
+	mkdir -p "$DATA"
+	[ "$n" = 1 ] && : > "$LF_RUN/web.in.$id"
+	[ -f "$LF_RUN/web.in.$id" ] || { answer_err "$id" "request incomplete - try again"; return; }
+	printf '%s' "${line#lobbyfence_cmd $id $part }" | pdecode >> "$LF_RUN/web.in.$id"
+	if [ "$n" -lt "$cnt" ]; then
+		printf '{"ack":%d}\n' "$n" | put "$DATA/res-$id.json"
+		return 0
+	fi
+	web_run "$id" "$LF_RUN/web.in.$id"
+	rm -f "$LF_RUN/web.in.$id"
+}
+
+# the debug report's Asuswrt-Merlin part (run by "lobbyfence debug")
+debug_extra() {
+	local h
+	printf '\n==== Asuswrt-Merlin\n'
+	echo "JFFS: $(grep ' /jffs ' /proc/mounts 2>/dev/null || echo 'NOT mounted')"
+	echo "custom scripts: $([ "$(nvram get jffs2_scripts 2>/dev/null)" = 1 ] && echo on || echo 'OFF (Administration > System > Enable JFFS custom scripts)')"
+	for h in services-start firewall-start service-event services-stop; do
+		echo "/jffs/scripts/$h: $(grep -c lobbyfence "/jffs/scripts/$h" 2>/dev/null || echo missing) LobbyFence line(s)"
+	done
+	echo "cron: $(have cru && cru l 2>/dev/null | grep lobbyfence)"
+	echo "web page: $(cat "$LF_RUN/webui_page" 2>/dev/null || echo 'no page slot') - files $(ls "$WEB" 2>/dev/null | wc -l), menu $(grep -q 'tabName: "LobbyFence"' "$MENU_TMP" 2>/dev/null && menu_mounted "$MENU_JS" && echo added || echo 'not added')"
+	echo "add-on settings file: $(wc -c 2>/dev/null < "$CUSTOM" || echo 0) of 8192 bytes"
+	echo "answers waiting for the page: $(ls "$DATA" 2>/dev/null | grep -c '^res-')"
+}
+
+# ------------------------------------------------------------ service
+
+do_start() {
+	run_dir
+	cron_on
+	if enabled; then
+		"$MAIN" apply
+		daemon_start
+		log notice "started"
+	else
+		"$MAIN" apply   # writes the status for the web page
+	fi
+	web_install
+}
+
+do_stop() {
+	cron_off
+	daemon_stop
+	"$MAIN" teardown
+}
+
+case "$1" in
+	start) do_start;;
+	stop) do_stop;;
+	restart) do_stop; do_start;;
+	reload)
+		# the result of applying is the answer (the web page shows a failure)
+		"$MAIN" apply; rc=$?
+		daemon_stop
+		enabled && daemon_start
+		cron_on
+		web_data
+		[ "$rc" = 0 ] || echo "the new settings are saved, but the router could not put them into effect - filtering is off until it can (LobbyFence keeps trying, on every learning pass). See System Log (lines with \"lobbyfence\")" >&2
+		exit $rc;;
+	fwhook)
+		# Merlin runs firewall-start without waiting: do the work in the background
+		[ -d "$LF_RUN" ] || exit 0
+		"$MAIN" fwhook < /dev/null > /dev/null 2>&1 &;;
+	watchdog)
+		[ -f "$LF_RUN/stopped" ] && exit 0
+		[ -L "$WEB/d" ] || web_install
+		if enabled && [ -z "$(daemon_pid)" ]; then
+			log warning "learning loop was not running - starting it again"
+			daemon_start
+		fi;;
+	service-event)
+		# $2 restart / start / ..., $3 the service: ours is "lobbyfence"
+		case "$3" in
+			lobbyfence) [ -d "$LF_RUN" ] && { "$SELF" web-cmd < /dev/null > /dev/null 2>&1 & };;
+		esac
+		exit 0;;
+	web-cmd)
+		mkdir -p "$LF_RUN"
+		(
+			have flock && flock -x 8
+			web_cmd
+		) 8> "$LF_RUN/web.lock";;
+	web) web_install;;
+	debug) export LF_DEBUG_EXTRA="$SELF debug-extra"; exec "$MAIN" "$@";;
+	debug-extra) debug_extra;;
+	menu) mkdir -p "$LF_RUN"; [ -s "$LF_RUN/webui_page" ] || page_mount; menu_link verbose;;
+	menu-off) menu_unlink;;
+	web-remove) web_remove;;
+	*) exec "$MAIN" "$@";;
+esac

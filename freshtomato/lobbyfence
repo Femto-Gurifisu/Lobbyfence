@@ -1,0 +1,197 @@
+#!/bin/sh
+# LobbyFence for FreshTomato - service commands around the router script
+#
+#   start | stop | restart   filter + learning loop on / off (start also sets up the web page)
+#   reload                   apply the configuration (after Save & Apply on the web page)
+#   fwhook                   run by FreshTomato after it rebuilt its firewall
+#   watchdog                 run every minute by cron: restarts the learning loop if it died
+#   web                      (re)install the web page (http://<router>/ext/lobbyfence.asp)
+#   menu                     add "LobbyFence" to FreshTomato's menu and say how it went
+#   anything else            passed to the router script: status, list, whereis, ...
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+LF_HOME="${LF_HOME:-/jffs/lobbyfence}"
+export LF_HOME
+export LF_SHARE="${LF_SHARE:-$LF_HOME/share}"
+export LF_FW=ipt
+export LF_FUNCTIONS="${LF_FUNCTIONS:-$LF_SHARE/functions.sh}"
+export LF_CONF_FILE="${LF_CONF_FILE:-$LF_HOME/lobbyfence.conf}"
+export LF_RUN="${LF_RUN:-/tmp/lobbyfence}"
+export LF_CONF_STAGED="${LF_CONF_STAGED:-$LF_RUN/staged.conf}"
+export LF_LEASES="${LF_LEASES:-/var/lib/misc/dnsmasq.leases}"
+export LF_DATA_DEFAULT="${LF_DATA_DEFAULT:-$LF_HOME/data}"
+MAIN="${LF_MAIN:-$LF_HOME/bin/lobbyfence-main}"
+WWWEXT="${LF_WWWEXT:-/tmp/var/wwwext}"
+SELF="$LF_HOME/lobbyfence"
+
+have() { type "$1" >/dev/null 2>&1; }
+
+# the RAM folder is root's own: a link, or a folder someone else put in its
+# place in /tmp before LobbyFence started, is removed - never written through
+run_dir() {
+	local o
+	o="$(ls -ldn "$LF_RUN" 2>/dev/null | awk '{ print substr($1, 1, 1) $3 }')"
+	[ -z "$o" ] || [ "$o" = d0 ] || rm -rf "$LF_RUN"
+	mkdir -p "$LF_RUN"
+}
+log() {
+	logger -t lobbyfence -p "daemon.$1" -- "$2" 2>/dev/null || echo "lobbyfence[$1]: $2" >&2
+	# (also into LobbyFence's own log in memory, for the debug report)
+	[ -d "$LF_RUN" ] && echo "$(date '+%F %T' 2>/dev/null) $1: $2" >> "$LF_RUN/log" 2>/dev/null
+	return 0
+}
+
+enabled() {
+	. "$LF_FUNCTIONS"
+	config_load lobbyfence
+	config_get_bool _en globals enabled 0
+	[ "$_en" = 1 ]
+}
+
+# the learning loop's pid while it runs: the pid file can name another program
+# by now (the loop died and its number was used again - that one must not be
+# stopped), and a finished loop waiting to be cleared away (a zombie) has no
+# command line
+daemon_pid() {
+	local p
+	p="$(cat "$LF_RUN/daemon.pid" 2>/dev/null)"
+	case "$p" in ''|*[!0-9]*) return 0;; esac
+	case "$(tr '\000' ' ' 2>/dev/null < "/proc/$p/cmdline")" in
+		*"$MAIN daemon "*) echo "$p";;
+	esac
+}
+
+daemon_start() {
+	[ -n "$(daemon_pid)" ] && return 0
+	mkdir -p "$LF_RUN"
+	"$MAIN" daemon < /dev/null > /dev/null 2>&1 &
+	echo "$!" > "$LF_RUN/daemon.pid"
+}
+
+daemon_stop() {
+	local p n=0
+	p="$(daemon_pid)"
+	[ -n "$p" ] || return 0
+	kill "$p" 2>/dev/null
+	# it saves the learned servers on the way out
+	while [ -n "$(daemon_pid)" ] && [ "$n" -lt 30 ]; do sleep 1; n=$((n + 1)); done
+	p="$(daemon_pid)"
+	[ -n "$p" ] && kill -9 "$p" 2>/dev/null
+	rm -f "$LF_RUN/daemon.pid"
+}
+
+cron_on() { have cru && cru a lobbyfence "* * * * * $SELF watchdog"; }
+cron_off() { have cru && cru d lobbyfence; }
+
+# the web page lives in /www/ext (a link to /tmp/var/wwwext, cleared at boot)
+web_install() {
+	mkdir -p "$WWWEXT/cgi-bin" "$WWWEXT/lobbyfence" || return 1
+	ln -sf "$LF_HOME/www/lobbyfence.asp" "$WWWEXT/lobbyfence.asp"
+	for f in "$LF_HOME"/www/lobbyfence/*; do
+		[ -f "$f" ] && ln -sf "$f" "$WWWEXT/lobbyfence/${f##*/}"
+	done
+	ln -sf "$LF_HOME/www/lobbyfence.cgi" "$WWWEXT/cgi-bin/lobbyfence.cgi"
+	menu_link
+}
+
+# "LobbyFence" in FreshTomato's menu: a copy of the firmware's own tomato.js
+# with the entry added right before "About", laid over the original until the
+# next reboot. The firmware ships tomato.js minified, so the entry is put
+# into the text itself (not as a line of its own); if the About entry can't
+# be found, nothing is changed. (menu_link [verbose] - "lobbyfence menu")
+menu_mounted() { awk -v f="$1" '$2 == f { m = 1 } END { exit !m }' /proc/mounts 2>/dev/null; }
+
+menu_link() {
+	local js="${LF_TOMATO_JS:-/www/tomato.js}" tmp="$LF_RUN/tomato.js" v="$1" err
+	say() { [ -n "$v" ] && echo "$*"; }
+	if [ -f "$LF_HOME/.nomenu" ]; then say "menu entry switched off ($LF_HOME/.nomenu exists)"; menu_unlink; return 0; fi
+	# always start from the firmware's own file (an older copy may be laid over it)
+	menu_mounted "$js" && umount "$js" 2>/dev/null
+	if [ ! -f "$js" ]; then say "no $js - not FreshTomato?"; return 0; fi
+	if grep -q "ext/lobbyfence.asp" "$js"; then say "menu entry is there"; return 0; fi
+	mkdir -p "$LF_RUN"
+	if ! awk '!done && match($0, /\[[ \t]*["\047]About["\047][ \t]*,[ \t]*["\047]about\.asp["\047][ \t]*\]/) {
+			$0 = substr($0, 1, RSTART - 1) "[\"LobbyFence\",\"ext/lobbyfence.asp\"]," substr($0, RSTART); done = 1 }
+		{ print }
+		END { exit !done }' "$js" > "$tmp" 2>/dev/null; then
+		rm -f "$tmp"
+		log warning "menu entry not added: no About entry found in tomato.js"
+		say "could not find the About entry in $js - menu left as it is (the page works at /ext/lobbyfence.asp)"
+		return 0
+	fi
+	if ! err="$(mount --bind "$tmp" "$js" 2>&1)"; then
+		rm -f "$tmp"
+		log warning "menu entry not added: mount failed: $err"
+		say "mount failed: $err"
+		return 0
+	fi
+	say "menu entry added - reload the page with Cmd+Shift+R (Ctrl+Shift+R on Windows)"
+}
+
+menu_unlink() {
+	local js="${LF_TOMATO_JS:-/www/tomato.js}"
+	menu_mounted "$js" && umount "$js" 2>/dev/null
+	rm -f "$LF_RUN/tomato.js"
+	return 0
+}
+
+# the debug report's FreshTomato part (run by "lobbyfence debug")
+debug_extra() {
+	printf '\n==== FreshTomato\n'
+	echo "JFFS: $(grep ' /jffs ' /proc/mounts 2>/dev/null || echo 'NOT mounted')"
+	echo "hooks: $(ls /jffs/etc/config/ 2>/dev/null | grep -i lobbyfence | tr '\n' ' ')"
+	echo "cron: $(have cru && cru l 2>/dev/null | grep lobbyfence)"
+	echo "web page links: $(ls "$WWWEXT" "$WWWEXT/cgi-bin" 2>/dev/null | grep -i lobbyfence | tr '\n' ' ')"
+	echo "menu entry: $(menu_mounted "${LF_TOMATO_JS:-/www/tomato.js}" && echo added || echo 'not added')"
+}
+
+do_start() {
+	run_dir
+	web_install
+	cron_on
+	if enabled; then
+		"$MAIN" apply
+		daemon_start
+		log notice "started"
+	else
+		"$MAIN" apply   # writes the status for the web page
+	fi
+}
+
+do_stop() {
+	cron_off
+	daemon_stop
+	"$MAIN" teardown
+}
+
+case "$1" in
+	start) do_start;;
+	stop) do_stop;;
+	restart) do_stop; do_start;;
+	reload)
+		# the result of applying is the answer (the web page shows a failure)
+		"$MAIN" apply; rc=$?
+		daemon_stop
+		enabled && daemon_start
+		cron_on
+		[ "$rc" = 0 ] || echo "the new settings are saved, but the router could not put them into effect - filtering is off until it can (LobbyFence keeps trying, on every learning pass). See Status > Logs (lines with \"lobbyfence\")" >&2
+		exit $rc;;
+	fwhook)
+		# FreshTomato waits for this hook: do the work in the background
+		[ -d "$LF_RUN" ] || exit 0
+		"$MAIN" fwhook < /dev/null > /dev/null 2>&1 &;;
+	watchdog)
+		[ -f "$LF_RUN/stopped" ] && exit 0
+		[ -L "$WWWEXT/lobbyfence.asp" ] || web_install
+		if enabled && [ -z "$(daemon_pid)" ]; then
+			log warning "learning loop was not running - starting it again"
+			daemon_start
+		fi;;
+	web) web_install;;
+	debug) export LF_DEBUG_EXTRA="$SELF debug-extra"; exec "$MAIN" "$@";;
+	debug-extra) debug_extra;;
+	menu) mkdir -p "$LF_RUN"; menu_link verbose;;
+	menu-off) menu_unlink;;
+	*) exec "$MAIN" "$@";;
+esac

@@ -1,0 +1,1741 @@
+#!/bin/sh
+# LobbyFence - geographic game-server filter for OpenWrt (nftables / fw4)
+# and FreshTomato (iptables + ipset)
+#
+# Learns which servers a game talks to, locates them, and (optionally)
+# blocks connections to servers outside the regions you allow.
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+LF_VERSION="1.0.0"
+LF_TABLE="lobbyfence"
+LF_SHARE="${LF_SHARE:-/usr/share/lobbyfence}"
+LF_RUN="${LF_RUN:-/tmp/lobbyfence}"
+LF_STATE="$LF_RUN/state"
+LF_AWK="$LF_SHARE/lobbyfence.awk"
+LF_CONFIG="${LF_CONFIG:-lobbyfence}"
+LF_ARP="${LF_ARP:-/proc/net/arp}"
+LF_LEASES="${LF_LEASES:-/tmp/dhcp.leases}"
+LF_DATA_DEFAULT="${LF_DATA_DEFAULT:-/etc/lobbyfence}"
+
+# ip-api.com's free batch endpoint: 15 requests per minute per public IP
+# address, 100 addresses each, HTTP only, non-commercial use. LobbyFence sends
+# at most 14 a minute, and also follows the service's own count (X-Rl / X-Ttl
+# headers: other devices behind the same address use it up too) and its "too
+# many requests" answer (429). Going on past 429 gets the address banned for
+# an hour.
+GEO_RATE_LIMIT=14
+GEO_FIELDS="status,message,countryCode,lat,lon,query"
+# unlocatable addresses are retried after a week
+GEO_RETRY=604800
+# seconds without packets from the device after which a server is no longer "active now"
+LF_NOW_TIMEOUT=15
+
+. "${LF_FUNCTIONS:-/lib/functions.sh}"
+LF_FW="${LF_FW:-nft}"
+# every 2 s in the learning loop's wait (a backend may do something then)
+fw_tick() { :; }
+. "$LF_SHARE/fw-$LF_FW.sh"
+
+# ------------------------------------------------------------------ helpers
+
+now() { date +%s; }
+
+# timestamps are only trusted once the clock has been set (NTP)
+clock_ok() { [ "$(now)" -gt 1704067200 ]; }
+
+log() {
+	local lvl="$1"; shift
+	logger -t lobbyfence -p "daemon.$lvl" -- "$*" 2>/dev/null || echo "lobbyfence[$lvl]: $*" >&2
+	lf_logfile "$lvl" "$*"
+}
+
+# LobbyFence's own short log in RAM, for the debug report: the router's
+# system log is often off (DD-WRT's default), tiny or full of other things.
+# Errors are also kept as "the last problem" for the web page.
+lf_logfile() {
+	[ -d "$LF_RUN" ] || return 0
+	echo "$(date '+%F %T' 2>/dev/null) $1: $2" >> "$LF_RUN/log" 2>/dev/null
+	case "$1" in err|crit|alert|emerg) echo "$(date +%s) $2" > "$LF_RUN/last_error" 2>/dev/null;; esac
+}
+
+# keep the RAM log and the learning loop's error output small (cut in
+# place: the loop keeps writing to the same open file)
+log_trim() {
+	local f
+	for f in "$LF_RUN/log" "$LF_RUN/daemon.err"; do
+		[ -f "$f" ] && [ "$(wc -c < "$f")" -gt 65536 ] && tail -n 300 "$f" > "$f.trim" && cat "$f.trim" > "$f"
+		rm -f "$f.trim"
+	done
+}
+
+# what the learning loop is doing (a crash report says where it stopped)
+lf_phase() { [ "$LF_IS_DAEMON" = 1 ] && echo "$1" > "$LF_RUN/phase"; return 0; }
+
+die() { echo "lobbyfence: $*" >&2; exit 1; }
+
+lfawk() { local op="$1"; shift; awk -v op="$op" -f "$LF_AWK" "$@"; }
+
+# is this command / function available? ("command -v" is missing from some
+# BusyBox builds, e.g. FreshTomato's)
+have() { type "$1" >/dev/null 2>&1; }
+
+is_uint() { case "$1" in ''|*[!0-9]*) return 1;; esac; return 0; }
+
+# is this pid a running LobbyFence learning loop? (a pid from a file can name
+# another program by now - the loop died and the number was used again - and
+# a finished one waiting to be cleared away, a zombie, has no command line)
+is_loop() {
+	is_uint "$1" || return 1
+	case "$(tr '\000' ' ' 2>/dev/null < "/proc/$1/cmdline")" in
+		*lobbyfence*" daemon "*) return 0;;
+	esac
+	return 1
+}
+
+# "007" -> "7", "01.50" -> "1.50": numbers as JSON (and netem) expect them,
+# in the shell itself (no extra process): num_fix VAR...
+num_fix() {
+	local _n _v
+	for _n in "$@"; do
+		eval "_v=\$$_n"
+		while :; do case "$_v" in 0[0-9]*) _v="${_v#0}";; *) break;; esac; done
+		eval "$_n=\$_v"
+	done
+}
+
+# "a,b c" -> "a b c" without starting tr: words_fix VAR...
+words_fix() {
+	local _n _v IFS
+	for _n in "$@"; do
+		eval "_v=\$$_n"
+		IFS=', 	
+'
+		set -f; set -- $_v; set +f
+		IFS=' '
+		eval "$_n=\"\$*\""
+	done
+}
+
+# (no < > either: some router web servers treat "<%" in a file as code)
+json_str() { printf '%s' "$1" | tr -d '"\\\000-\037<>'; }
+
+lines() { [ -f "$1" ] && wc -l < "$1" | tr -d ' ' || echo 0; }
+
+# The RAM folder is root's own: a link, or a folder someone else put in its
+# place in /tmp before LobbyFence started, is removed - never written through.
+ensure_dirs() {
+	local o
+	o="$(ls -ldn "$LF_RUN" 2>/dev/null | awk '{ print substr($1, 1, 1) $3 }')"
+	[ -z "$o" ] || [ "$o" = d0 ] || rm -rf "$LF_RUN"
+	mkdir -p "$LF_RUN" "$LF_STATE"
+}
+
+# lock_acquire [seconds]: waits for another LobbyFence command (90 s at most,
+# then takes the lock over - stop uses 20 s: a router shutting down waits for it)
+lock_acquire() {
+	local tries=0 pid max="${1:-90}"
+	ensure_dirs
+	while ! mkdir "$LF_RUN/lock" 2>/dev/null; do
+		pid="$(cat "$LF_RUN/lock/pid" 2>/dev/null)"
+		[ "$pid" = "$$" ] && return 0
+		if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
+			rm -rf "$LF_RUN/lock"; continue
+		fi
+		tries=$((tries + 1))
+		if [ "$tries" -ge "$max" ]; then
+			log warning "lock held for too long, taking it over"
+			rm -rf "$LF_RUN/lock"; continue
+		fi
+		sleep 1
+	done
+	echo "$$" > "$LF_RUN/lock/pid"
+}
+
+lock_release() {
+	[ "$(cat "$LF_RUN/lock/pid" 2>/dev/null)" = "$$" ] && rm -rf "$LF_RUN/lock"
+}
+
+# An answer is ~10 KB, but the service is plain HTTP, so anyone on the way
+# could send an endless or a very slow one: it is cut at 1 MB (dd) and after
+# 30 seconds - uclient-fetch's and wget's -T only limit a silence, and curl's
+# --max-filesize doesn't stop every kind of answer.
+http_post() { # url body [header-file] -> response on stdout (headers to the file if the tool can)
+	local out="$LF_RUN/http.$$" pid n=0
+	if have curl; then
+		curl -fsS -m 25 --max-filesize 1048576 ${3:+-D "$3"} --data-binary "$2" "$1" 2>/dev/null | dd bs=1024 count=1024 2>/dev/null
+		return 0
+	fi
+	if have uclient-fetch; then
+		uclient-fetch -q -T 25 -O - --post-data="$2" "$1" 2>/dev/null | dd bs=1024 count=1024 2>/dev/null > "$out" &
+	else
+		wget -q -T 25 -O - --post-data="$2" "$1" 2>/dev/null | dd bs=1024 count=1024 2>/dev/null > "$out" &
+	fi
+	pid=$!
+	while kill -0 "$pid" 2>/dev/null; do
+		[ "$n" -ge 30 ] && { kill "$pid" 2>/dev/null; break; }
+		sleep 1
+		n=$((n + 1))
+	done
+	wait "$pid" 2>/dev/null
+	cat "$out" 2>/dev/null
+	rm -f "$out"
+}
+
+# ------------------------------------------------------------ configuration
+
+_collect_zone() {
+	local s="$1" en
+	case "$s" in
+		''|*[!A-Za-z0-9_]*) log warning "ignoring zone '$s': name may only use letters, digits and _"; return;;
+	esac
+	if [ "${#s}" -gt "$LF_ZONE_MAXLEN" ]; then
+		log warning "ignoring zone '$s': name longer than $LF_ZONE_MAXLEN characters"; return
+	fi
+	ZONES="${ZONES:+$ZONES }$s"
+	config_get_bool en "$s" enabled 0
+	[ "$en" = 1 ] && ZONES_ON="${ZONES_ON:+$ZONES_ON }$s"
+}
+
+# a setting that is not used because its value is not valid: said once (load_config runs every pass)
+setting_ignored() {
+	[ -f "$LF_RUN/ignored.$1" ] && return 0
+	log warning "setting $1 ignored: $2 - the default is used"
+	[ -d "$LF_RUN" ] && : > "$LF_RUN/ignored.$1"
+}
+
+load_config() {
+	config_load "$LF_CONFIG"
+	config_get_bool G_ENABLED globals enabled 0
+	config_get G_INTERVAL globals interval 20
+	config_get G_GEO_URL globals geo_url "http://ip-api.com/batch"
+	config_get G_MAX_BATCHES globals max_batches 4
+	config_get G_DATA globals data_dir "$LF_DATA_DEFAULT"
+	config_get G_PERSIST globals persist_interval 21600
+	config_get_bool G_LOG globals log_blocked 0
+	config_get G_PRIORITY globals priority -5
+	config_get G_LAG_DEV globals lag_dev ""
+
+	is_uint "$G_INTERVAL" && [ "$G_INTERVAL" -ge 15 ] || G_INTERVAL=20
+	is_uint "$G_MAX_BATCHES" && [ "$G_MAX_BATCHES" -ge 1 ] || G_MAX_BATCHES=4
+	is_uint "$G_PERSIST" && [ "$G_PERSIST" -ge 600 ] || G_PERSIST=21600
+	case "$G_PRIORITY" in -[0-9]*|[0-9]*) is_uint "${G_PRIORITY#-}" || G_PRIORITY=-5;; *) G_PRIORITY=-5;; esac
+	[ -n "$G_DATA" ] || G_DATA="$LF_DATA_DEFAULT"
+	# settings that end up as arguments of other programs (curl, tc, mkdir / cp):
+	# only what they are meant to be - a value starting with "-" would be taken
+	# as an option (a "URL" of --output=<file> lets curl write any file)
+	case "$G_GEO_URL" in
+		*[[:space:]]*) G_GEO_URL="";;
+		http://?*|https://?*) ;;
+		*) G_GEO_URL="";;
+	esac
+	[ -n "$G_GEO_URL" ] || { G_GEO_URL="http://ip-api.com/batch"; setting_ignored geo_url "not an http:// or https:// address"; }
+	case "$G_LAG_DEV" in
+		''|*[!A-Za-z0-9._@-]*|-*) [ -n "$G_LAG_DEV" ] && setting_ignored lag_dev "not a network interface name"; G_LAG_DEV="";;
+	esac
+	case "$G_DATA" in
+		/*) case "$G_DATA" in *[!A-Za-z0-9._/@+-]*|*/../*|*/..) G_DATA="";; esac;;
+		*) G_DATA="";;
+	esac
+	[ -n "$G_DATA" ] || { G_DATA="$LF_DATA_DEFAULT"; setting_ignored data_dir "not a plain absolute folder path"; }
+
+	ZONES=""; ZONES_ON=""
+	config_foreach _collect_zone zone
+}
+
+zone_load() {
+	local s="$1"
+	Z_ID="$s"
+	config_get_bool Z_ENABLED "$s" enabled 0
+	config_get Z_LABEL "$s" label "$s"
+	# blocking is the point: zones enforce strictly unless told otherwise
+	config_get Z_MODE "$s" mode enforce
+	case "$Z_MODE" in enforce|monitor) ;; *) Z_MODE=enforce;; esac
+	config_get_bool Z_STRICT "$s" strict 1
+	config_get Z_PROTO "$s" proto udp
+	case "$Z_PROTO" in udp|tcp|both) ;; *) Z_PROTO=udp;; esac
+	config_get Z_DEV "$s" device
+	config_get Z_LPORT "$s" local_port
+	config_get Z_RPORT "$s" remote_port
+	config_get Z_PORT "$s" port
+	config_get Z_CIRCLES "$s" circle
+	config_get Z_POLYGONS "$s" polygon
+	config_get Z_COUNTRIES "$s" country
+	config_get Z_ALLOW "$s" allow_ip
+	config_get Z_BLOCK "$s" block_ip
+	config_get Z_EXPIRE "$s" expire_days 30
+	is_uint "$Z_EXPIRE" || Z_EXPIRE=30
+	# "open for server tests": more than Z_BURST servers within Z_BURST_WIN
+	# seconds opens the zone for Z_BURST_OPEN seconds (0 = off)
+	config_get Z_BURST "$s" burst_servers 0
+	config_get Z_BURST_OPEN "$s" burst_open 20
+	config_get Z_BURST_WIN "$s" burst_window 10
+	num_fix Z_BURST Z_BURST_OPEN Z_BURST_WIN
+	is_uint "$Z_BURST" && [ "$Z_BURST" -le 10000 ] || Z_BURST=0
+	is_uint "$Z_BURST_OPEN" && [ "$Z_BURST_OPEN" -ge 1 ] && [ "$Z_BURST_OPEN" -le 3600 ] || Z_BURST_OPEN=20
+	is_uint "$Z_BURST_WIN" && [ "$Z_BURST_WIN" -ge 1 ] && [ "$Z_BURST_WIN" -le 300 ] || Z_BURST_WIN=10
+	# lag simulator (netem): extra ping, jitter and packet loss for this zone's game traffic
+	config_get_bool Z_LAG "$s" lag 0
+	config_get Z_LAG_DELAY "$s" lag_delay 0
+	config_get Z_LAG_JITTER "$s" lag_jitter 0
+	config_get Z_LAG_LOSS "$s" lag_loss 0
+	# which way: down (server -> device), up (device -> server) or both (delay split in half)
+	config_get Z_LAG_DIR "$s" lag_direction both
+	case "$Z_LAG_DIR" in down|up|both) ;; *) Z_LAG_DIR=both;; esac
+	num_fix Z_LAG_DELAY Z_LAG_JITTER Z_LAG_LOSS
+	is_uint "$Z_LAG_DELAY" && [ "$Z_LAG_DELAY" -le 5000 ] || Z_LAG_DELAY=0
+	is_uint "$Z_LAG_JITTER" && [ "$Z_LAG_JITTER" -le 2000 ] || Z_LAG_JITTER=0
+	case "$Z_LAG_LOSS" in ''|*[!0-9.]*|*.*.*|.*|*.) Z_LAG_LOSS=0;; esac
+	[ "${Z_LAG_LOSS%%.*}" -le 100 ] 2>/dev/null || Z_LAG_LOSS=0
+	[ "${Z_LAG_LOSS%%.*}" = 100 ] && Z_LAG_LOSS=100
+	# nothing to simulate -> off
+	case "$Z_LAG_LOSS" in *[1-9]*) ;; *) [ "$Z_LAG_DELAY" = 0 ] && [ "$Z_LAG_JITTER" = 0 ] && Z_LAG=0;; esac
+	words_fix Z_DEV Z_ALLOW Z_BLOCK
+	[ -n "$Z_COUNTRIES" ] && Z_COUNTRIES="$(echo "$Z_COUNTRIES" | tr ',a-z' ' A-Z')"
+	Z_HAS_REGION=0
+	case "$Z_CIRCLES$Z_POLYGONS$Z_COUNTRIES" in *[!\ \	]*) Z_HAS_REGION=1;; esac
+}
+
+# "3074 3075-3079" -> "{ 3074, 3075-3079 }" (empty when no valid ports)
+port_set() {
+	local out="" t a b
+	for t in $(echo "$1" | tr ',' ' '); do
+		case "$t" in
+			*[!0-9-]*|-*|*-|*-*-*) log warning "zone $Z_ID: ignoring bad port '$t'"; continue;;
+		esac
+		a="${t%-*}"; b="${t#*-}"
+		# ("03074": the firewall tools could read a leading 0 as octal)
+		num_fix a b
+		if [ "$a" -lt 1 ] || [ "$b" -gt 65535 ] || [ "$b" -lt "$a" ]; then
+			log warning "zone $Z_ID: ignoring bad port '$t'"; continue
+		fi
+		[ "$a" = "$b" ] && t="$a" || t="$a-$b"
+		out="${out:+$out, }$t"
+	done
+	[ -n "$out" ] && echo "{ $out }"
+}
+
+# addresses of one family, comma separated: addr_list <4|6> <tokens...>
+addr_list() {
+	local f="$1"; shift
+	[ $# -gt 0 ] || return 0
+	echo "$@" | tr ' ' '\n' | lfawk addrs | while read -r fa ad; do
+		if [ "$fa" = bad ]; then
+			[ "$f" = 4 ] && log warning "zone $Z_ID: ignoring invalid address '$ad'"
+		elif [ "$fa" = "$f" ]; then
+			echo "$ad"
+		fi
+	done | sort -u | tr '\n' ',' | sed 's/,$//; s/,/, /g'
+}
+
+# MAC addresses among the given tokens, comma separated
+mac_list() {
+	[ $# -gt 0 ] || return 0
+	echo "$@" | tr ' ' '\n' | lfawk addrs | awk '$1 == "mac" { print $2 }' | sort -u | tr '\n' ',' | sed 's/,$//; s/,/, /g'
+}
+
+# "mac ip" for every LAN neighbour the router knows (ARP, DHCP leases, IPv6 neighbours)
+neigh_table() {
+	awk 'NR > 1 && $3 != "0x0" { print $4, $1 }' "$LF_ARP" 2>/dev/null
+	[ -f "$LF_LEASES" ] && awk '{ print $2, $3 }' "$LF_LEASES"
+	ip -6 neigh show 2>/dev/null | awk '{ for (i = 1; i < NF; i++) if ($i == "lladdr") print $(i + 1), $1 }'
+}
+
+# current addresses of a zone's MAC devices: resolve_macs "<mac, mac>"
+resolve_macs() {
+	[ -n "$1" ] || return 0
+	neigh_table | lfawk neigh -v macs="$1"
+}
+
+# ------------------------------------------------------- firewall backend
+
+# Everything that talks to the firewall lives in $LF_SHARE/fw-<backend>.sh:
+# fw-nft.sh (OpenWrt, nftables) or fw-ipt.sh (FreshTomato, iptables + ipset).
+# They provide fw_exists, fw_build, fw_commit, fw_post_apply, fw_remove,
+# fw_check, fw_zone_servers, fw_zone_mip, fw_load_sets, fw_seen, fw_now,
+# fw_open_left, fw_override, fw_status_json and counters_load.
+
+# ------------------------------------------------------- learned data files
+
+# a saved file back into memory, damaged lines left out: clean_copy <ips|cache> <from> <to>
+clean_copy() {
+	local bad
+	if lfawk "clean_$1" -v now="$(now)" -v statf="$LF_RUN/clean.stat" "$2" > "$3.tmp"; then
+		mv "$3.tmp" "$3"
+	else
+		rm -f "$3.tmp"; cp "$2" "$3"
+	fi
+	read -r bad 2>/dev/null < "$LF_RUN/clean.stat"
+	rm -f "$LF_RUN/clean.stat"
+	is_uint "$bad" && [ "$bad" -gt 0 ] && \
+		log warning "$2: left out $bad damaged line(s) (power cut or full flash?) - those servers are simply learned / located again"
+	return 0
+}
+
+restore() {
+	local f
+	ensure_dirs
+	[ -f "$LF_STATE/.restored" ] && return 0
+	if [ -d "$G_DATA" ]; then
+		[ -f "$G_DATA/geo.cache" ] && clean_copy cache "$G_DATA/geo.cache" "$LF_STATE/geo.cache"
+		if [ -d "$G_DATA/zones" ]; then
+			for f in "$G_DATA"/zones/*.ips; do
+				[ -f "$f" ] && clean_copy ips "$f" "$LF_STATE/${f##*/}"
+			done
+			for f in "$G_DATA"/zones/*.ports; do
+				[ -f "$f" ] && clean_copy ports "$f" "$LF_STATE/${f##*/}"
+			done
+		fi
+	fi
+	[ -f "$LF_STATE/geo.cache" ] || : > "$LF_STATE/geo.cache"
+	touch "$LF_STATE/.restored"
+	now > "$LF_RUN/persisted_at"
+}
+
+mark_dirty() { touch "$LF_RUN/dirty_$1"; }
+
+# Room on the flash / JFFS for what LobbyFence saves: it never uses the last
+# LF_FLASH_RESERVE KB (256) - a full flash can stop the router saving its own
+# settings. Where the free space can't be told (a RAM folder), it is allowed.
+flash_room() { # folder bytes -> 0 when they fit
+	local size free
+	set -- "$1" "$2" $(df -Pk "$1" 2>/dev/null | awk 'NR == 2 { print $2, $4 }')
+	size="$3"; free="$4"
+	is_uint "$size" && is_uint "$free" && [ "$size" -gt 0 ] || return 0
+	[ $((free - ($2 + 1023) / 1024)) -ge "${LF_FLASH_RESERVE:-256}" ]
+}
+
+# total size of files (0 when there are none)
+bytes_of() { cat "$@" 2>/dev/null | wc -c | tr -d ' '; }
+
+persist() {
+	local f tmp ok=1
+	[ -f "$LF_STATE/.restored" ] || return 0
+	mkdir -p "$G_DATA/zones" 2>/dev/null || { persist_failed "cannot create $G_DATA"; return 1; }
+	cat "$LF_STATE"/*.ips 2>/dev/null > "$LF_RUN/refs.tmp"
+	lfawk prune "$LF_RUN/refs.tmp" "$LF_STATE/geo.cache" > "$LF_RUN/cache.tmp" && \
+		mv "$LF_RUN/cache.tmp" "$LF_STATE/geo.cache"
+	rm -f "$LF_RUN/refs.tmp"
+	if ! flash_room "$G_DATA" "$(bytes_of "$LF_STATE/geo.cache" "$LF_STATE"/*.ips "$LF_STATE"/*.ports)"; then
+		persist_failed "not enough room left on the flash in $G_DATA (LobbyFence leaves the last ${LF_FLASH_RESERVE:-256} KB to the router)"
+		return 1
+	fi
+	# flash wears with writes, not reads: only write files that changed
+	cmp -s "$LF_STATE/geo.cache" "$G_DATA/geo.cache" || \
+		{ cp "$LF_STATE/geo.cache" "$G_DATA/geo.cache.tmp" 2>/dev/null && mv "$G_DATA/geo.cache.tmp" "$G_DATA/geo.cache"; } || ok=0
+	for f in "$LF_STATE"/*.ips "$LF_STATE"/*.ports; do
+		[ -f "$f" ] || continue
+		tmp="$G_DATA/zones/${f##*/}"
+		cmp -s "$f" "$tmp" || { cp "$f" "$tmp.tmp" 2>/dev/null && mv "$tmp.tmp" "$tmp"; } || ok=0
+	done
+	if [ "$ok" != 1 ]; then
+		persist_failed "could not write to $G_DATA (is the flash / JFFS full?)"
+		return 1
+	fi
+	rm -f "$LF_RUN/dirty_new" "$LF_RUN/dirty_touch" "$LF_RUN/persist.err"
+	now > "$LF_RUN/persisted_at"
+}
+
+# saving failed: the learned data stays in memory and is saved again in 15
+# minutes; said once an hour, not on every pass (it used to retry - and
+# fail silently - every 20 s)
+persist_failed() {
+	local t last
+	t="$(now)"
+	rm -f "$G_DATA/geo.cache.tmp" "$G_DATA"/zones/*.ips.tmp "$G_DATA"/zones/*.ports.tmp 2>/dev/null
+	echo "$t" > "$LF_RUN/persisted_at"
+	last="$(cat "$LF_RUN/persist.err" 2>/dev/null)"; is_uint "$last" || last=0
+	if [ "$t" -lt "$last" ] || [ $((t - last)) -ge 3600 ]; then
+		log err "saving the learned servers failed: $1 - they are kept in memory, next try in 15 minutes"
+		echo "$t" > "$LF_RUN/persist.err"
+	fi
+}
+
+maybe_persist() {
+	local t="$1" last
+	last="$(cat "$LF_RUN/persisted_at" 2>/dev/null)"
+	is_uint "$last" || last=0
+	# new servers: saved within 15 minutes (a power cut loses at most that much,
+	# and those servers are simply learned again); last-seen times: every 6 h
+	if [ -f "$LF_RUN/dirty_new" ] && [ $((t - last)) -ge 900 ]; then
+		persist
+	elif [ -f "$LF_RUN/dirty_touch" ] && [ $((t - last)) -ge "$G_PERSIST" ]; then
+		persist
+	fi
+}
+
+# ---------------------------------------------------------- learning cycle
+
+# A zone keeps its LF_ZONE_MAX (20000) most recently seen servers. Games use
+# hundreds; far more means the zone's ports also catch other traffic (a
+# torrent client, a wide "any game" preset), which would fill the router's
+# memory and the firewall's lists. Said at most once an hour per zone.
+LF_ZONE_MAX="${LF_ZONE_MAX:-20000}"
+zone_capped() { # zone dropped -> 0 when servers were dropped
+	local t last
+	is_uint "$2" && [ "$2" -gt 0 ] || return 1
+	t="$(now)"; last="$(cat "$LF_RUN/$1.capped" 2>/dev/null)"; is_uint "$last" || last=0
+	if [ "$t" -lt "$last" ] || [ $((t - last)) -ge 3600 ]; then
+		log warning "zone $1: more than $LF_ZONE_MAX servers - forgot the $2 seen longest ago (do the zone's ports also catch other traffic than the game's?)"
+		echo "$t" > "$LF_RUN/$1.capped"
+	fi
+	return 0
+}
+
+harvest() {
+	local t="$1" z f exp added touched expired dropped last
+	HARVEST_NEW=0
+	for z in $ZONES_ON; do
+		zone_load "$z"
+		f="$LF_STATE/$z.ips"
+		[ -f "$f" ] || : > "$f"
+		fw_seen "$z" > "$LF_RUN/harvest.tmp"
+		have fw_new_reset && fw_new_reset "$z"
+		[ -s "$LF_RUN/harvest.tmp" ] && tally_ports "$z" "$t"
+		# no game traffic since the last pass (the usual case when nobody plays):
+		# nothing to merge - still run every 10 minutes so old servers expire
+		last="$(cat "$LF_RUN/$z.merged" 2>/dev/null)"; is_uint "$last" || last=0
+		if [ ! -s "$LF_RUN/harvest.tmp" ] && [ "$t" -ge "$last" ] && [ $((t - last)) -lt 600 ]; then
+			continue
+		fi
+		echo "$t" > "$LF_RUN/$z.merged"
+		exp=0
+		clock_ok && [ "$Z_EXPIRE" -gt 0 ] && exp=$((Z_EXPIRE * 86400))
+		if lfawk merge -v now="$t" -v expire="$exp" -v zmax="$LF_ZONE_MAX" -v statf="$LF_RUN/merge.stat" \
+			"$f" "$LF_RUN/harvest.tmp" > "$f.new"; then
+			mv "$f.new" "$f"
+		else
+			rm -f "$f.new"; continue
+		fi
+		read -r added touched expired dropped < "$LF_RUN/merge.stat"
+		[ "${added:-0}" -gt 0 ] && log info "zone $z: learned $added new server address(es)"
+		[ "${expired:-0}" -gt 0 ] && log info "zone $z: forgot $expired server address(es) not seen for $Z_EXPIRE days"
+		zone_capped "$z" "$dropped" && expired=1
+		{ [ "${added:-0}" -gt 0 ] || [ "${expired:-0}" -gt 0 ]; } && { mark_dirty new; HARVEST_NEW=1; : > "$LF_RUN/$z.new"; }
+		[ "${touched:-0}" -gt 0 ] && mark_dirty touch
+	done
+	rm -f "$LF_RUN/harvest.tmp" "$LF_RUN/merge.stat"
+}
+
+# seconds since boot: the rate limit can't be fooled by the clock being set
+geo_now() { awk '{ printf "%d", $1 }' /proc/uptime 2>/dev/null || date +%s; }
+
+geo_budget() { # how many lookups may still be sent now (0 while the service asked to wait)
+	local t used b
+	t="$(geo_now)"
+	b="$(cat "$LF_RUN/geo.backoff" 2>/dev/null)"
+	if is_uint "$b"; then
+		# (a wait longer than an hour is from an older version's clock-based file)
+		if [ "$t" -lt "$b" ] && [ $((b - t)) -le 3700 ]; then echo 0; return; fi
+		rm -f "$LF_RUN/geo.backoff"
+	fi
+	touch "$LF_RUN/geo.calls"
+	awk -v t="$t" '$1 > t - 61 && $1 <= t' "$LF_RUN/geo.calls" > "$LF_RUN/geo.calls.tmp"
+	mv "$LF_RUN/geo.calls.tmp" "$LF_RUN/geo.calls"
+	used="$(lines "$LF_RUN/geo.calls")"
+	echo $((GEO_RATE_LIMIT - used))
+}
+
+geo_wait() { # seconds reason: no lookups for that long
+	echo $(( $(geo_now) + $1 )) > "$LF_RUN/geo.backoff"
+	log warning "geolocation: $2 - next lookup in $1 seconds"
+}
+
+# the one place requests to the service are sent: counted, and its rate
+# limit headers obeyed.  geo_call <body> -> response on stdout, 1 = no answer
+geo_call() {
+	local url hdr="$LF_RUN/geo.hdr" resp rl ttl code
+	case "$G_GEO_URL" in *\?*) url="$G_GEO_URL&fields=$GEO_FIELDS";; *) url="$G_GEO_URL?fields=$GEO_FIELDS";; esac
+	geo_now >> "$LF_RUN/geo.calls"
+	rm -f "$hdr"
+	resp="$(http_post "$url" "$1" "$hdr")"
+	if [ -s "$hdr" ]; then
+		code="$(awk 'toupper($1) ~ /^HTTP\// { c = $2 } END { print c }' "$hdr")"
+		rl="$(awk -F': *' 'tolower($1) == "x-rl" { v = $2 } END { gsub(/[^0-9]/, "", v); print v }' "$hdr")"
+		ttl="$(awk -F': *' 'tolower($1) == "x-ttl" { v = $2 } END { gsub(/[^0-9]/, "", v); print v }' "$hdr")"
+		is_uint "$ttl" && [ "$ttl" -le 3600 ] || ttl=60
+		if [ "$code" = 429 ]; then
+			geo_wait $((ttl + 2)) "the service says too many requests from this internet address (other devices may use it too)"
+		elif [ "$rl" = 0 ]; then
+			echo $(( $(geo_now) + ttl + 2 )) > "$LF_RUN/geo.backoff"
+		fi
+	fi
+	rm -f "$hdr"
+	[ -n "$resp" ] || return 1
+	printf '%s' "$resp"
+}
+
+geo_lookup() { # file with addresses -> appends to cache, returns 1 on failure
+	local list="$1" t="$2" json resp
+	json="$(lfawk geojson < "$list")"
+	[ "$json" = "[]" ] && return 0
+	if [ "$(geo_budget)" -le 0 ]; then
+		GEO_ERR="rate limit reached ($GEO_RATE_LIMIT lookups per minute) - try again in a minute"
+		return 1
+	fi
+	if ! resp="$(geo_call "$json")"; then
+		echo "$t request failed (network error or rate limited)" > "$LF_RUN/geo.error"
+		[ -f "$LF_RUN/geo.backoff" ] || geo_wait 120 "request failed"
+		GEO_ERR="no answer from the geolocation service"
+		return 1
+	fi
+	printf '%s' "$resp" | lfawk georesp -v now="$t" > "$LF_RUN/geo.got"
+	if [ ! -s "$LF_RUN/geo.got" ]; then
+		echo "$t unexpected response from $G_GEO_URL" > "$LF_RUN/geo.error"
+		geo_wait 300 "the service returned an unexpected response"
+		return 1
+	fi
+	cat "$LF_RUN/geo.got" >> "$LF_STATE/geo.cache"
+	rm -f "$LF_RUN/geo.got" "$LF_RUN/geo.error"
+	echo "$t" > "$LF_RUN/geo.last"
+	mark_dirty new
+	return 0
+}
+
+locate() {
+	local t="$1" b=0 budget backoff n last
+	# only look for unlocated servers when there is something to find: new
+	# servers this pass, lookups still waiting, or hourly (for the weekly retries)
+	last="$(cat "$LF_RUN/pending.at" 2>/dev/null)"; is_uint "$last" || last=0
+	if [ "$HARVEST_NEW" != 1 ] && [ -f "$LF_RUN/pending" ] && [ ! -s "$LF_RUN/pending" ] && [ $((t - last)) -lt 3600 ] && [ "$t" -ge "$last" ]; then
+		return 0
+	fi
+	echo "$t" > "$LF_RUN/pending.at"
+	cat "$LF_STATE"/*.ips 2>/dev/null > "$LF_RUN/all.tmp"
+	lfawk pending -v now="$t" -v retry="$GEO_RETRY" "$LF_STATE/geo.cache" "$LF_RUN/all.tmp" > "$LF_RUN/pending"
+	rm -f "$LF_RUN/all.tmp"
+	n="$(lines "$LF_RUN/pending")"
+	[ "$n" -gt 0 ] || return 0
+	# locations imported from another router (import-servers) first: no lookup for those
+	if [ -s "$G_DATA/shared.cache" ]; then
+		lfawk shared_hit "$LF_RUN/pending" "$G_DATA/shared.cache" > "$LF_RUN/shared.hit"
+		if [ -s "$LF_RUN/shared.hit" ]; then
+			cat "$LF_RUN/shared.hit" >> "$LF_STATE/geo.cache"
+			awk 'NR == FNR { h[$1] = 1; next } !($1 in h)' "$LF_RUN/shared.hit" "$LF_RUN/pending" > "$LF_RUN/pending.tmp" && \
+				mv "$LF_RUN/pending.tmp" "$LF_RUN/pending"
+			log info "located $(lines "$LF_RUN/shared.hit") server address(es) from imported locations (no lookup)"
+			mark_dirty new
+			n="$(lines "$LF_RUN/pending")"
+		fi
+		rm -f "$LF_RUN/shared.hit"
+		[ "$n" -gt 0 ] || return 0
+	fi
+	budget="$(geo_budget)"
+	while [ "$b" -lt "$G_MAX_BATCHES" ] && [ "$budget" -gt 0 ]; do
+		sed -n "$((b * 100 + 1)),$((b * 100 + 100))p" "$LF_RUN/pending" > "$LF_RUN/batch"
+		[ -s "$LF_RUN/batch" ] || break
+		geo_lookup "$LF_RUN/batch" "$t" || break
+		b=$((b + 1)); budget=$((budget - 1))
+	done
+	rm -f "$LF_RUN/batch"
+	[ "$b" -gt 0 ] && log info "located $(( n < b * 100 ? n : b * 100 )) of $n new server address(es)"
+}
+
+classify_zone() { # zone (zone_load done) [force] -> $LF_RUN/<zone>.servers
+	local z="$1" t last
+	[ -f "$LF_STATE/$z.ips" ] || : > "$LF_STATE/$z.ips"
+	local sig prev=""
+	# earlier verdicts are only reused while the region is exactly the same
+	sig="$LF_VERSION|$Z_CIRCLES|$Z_POLYGONS|$Z_COUNTRIES"
+	# Nothing new since the last run (no new / forgotten servers, no new
+	# locations, same region): only "last seen" times moved - refresh those at
+	# most every 2 minutes instead of every pass
+	t="$(now)"; last="$(cat "$LF_RUN/$z.cls" 2>/dev/null)"; is_uint "$last" || last=0
+	if [ "$2" != force ] && [ ! -f "$LF_RUN/$z.new" ] && [ -f "$LF_RUN/$z.servers" ] && \
+		[ ! "$LF_STATE/geo.cache" -nt "$LF_RUN/$z.servers" ] && \
+		[ "$(cat "$LF_RUN/$z.sig" 2>/dev/null)" = "$sig" ] && [ "$t" -ge "$last" ] && [ $((t - last)) -lt 120 ]; then
+		return 0
+	fi
+	rm -f "$LF_RUN/$z.new"
+	echo "$t" > "$LF_RUN/$z.cls"
+	[ -f "$LF_RUN/$z.servers" ] && [ "$(cat "$LF_RUN/$z.sig" 2>/dev/null)" = "$sig" ] && prev="$LF_RUN/$z.servers"
+	: > "$LF_RUN/$z.state.tmp"
+	lfawk classify -v circles="$Z_CIRCLES" -v polygons="$Z_POLYGONS" -v countries="$Z_COUNTRIES" -v prev="$prev" \
+		-v statef="$LF_RUN/$z.state.tmp" -v countf="$LF_RUN/$z.counts" \
+		"$LF_STATE/geo.cache" "$LF_STATE/$z.ips" > "$LF_RUN/$z.servers.tmp" && \
+		mv "$LF_RUN/$z.servers.tmp" "$LF_RUN/$z.servers" && echo "$sig" > "$LF_RUN/$z.sig" && {
+			# revision of the server list: the map only downloads it when this changes
+			last="$(cat "$LF_RUN/$z.rev" 2>/dev/null)"; is_uint "$last" || last=0
+			echo $((last + 1)) > "$LF_RUN/$z.rev"
+		}
+}
+
+# classification -> set contents; only touches nft when something changed
+refresh_sets() { # [1 = rewrite everything] [build = only write $FW_SETS]
+	local z out="$FW_SETS" force="$1" mode="$2" macs
+	# (the last load failed: everything again)
+	[ -f "$LF_RUN/sets.force" ] && force=1
+	: > "$out"
+	for z in $ZONES; do
+		zone_load "$z"
+		# (even a full rewrite reuses the last classification while the region,
+		# the server list and the locations are unchanged - it only depends on those)
+		classify_zone "$z"
+		# where the zone's devices are right now: configured addresses plus
+		# the current IPv4/IPv6 addresses of its MAC devices
+		macs="$(mac_list $Z_DEV)"
+		{
+			echo "$Z_DEV" | tr ' ' '\n' | lfawk addrs | awk '$1 == "4" || $1 == "6" { print $2 }'
+			resolve_macs "$macs" > "$LF_RUN/$z.mip"
+			cat "$LF_RUN/$z.mip"
+		} | sort -u > "$LF_RUN/$z.dev"
+		[ -n "$macs" ] && echo "$macs" > "$LF_RUN/$z.macs" || rm -f "$LF_RUN/$z.macs"
+		[ "$Z_ENABLED" = 1 ] || continue
+		# nothing moved between allowed and blocked since the last pass: the
+		# firewall sets are already right (the usual case - only "last seen" changed)
+		# (no new list at all: classification was skipped because nothing was new)
+		if [ "$force" != 1 ] && { [ ! -f "$LF_RUN/$z.state.tmp" ] || { [ -f "$LF_RUN/$z.state.last" ] && \
+			cmp -s "$LF_RUN/$z.state.tmp" "$LF_RUN/$z.state.last"; }; }; then
+			rm -f "$LF_RUN/$z.state.tmp"
+		else
+			fw_zone_servers "$z" >> "$out"
+			# servers that just turned "outside": cut their connections
+			# (no new classification: nobody changed sides)
+			if [ -f "$LF_RUN/$z.state.tmp" ]; then
+				awk '$2 == "out" { print $1 }' "$LF_RUN/$z.state.tmp" > "$LF_RUN/$z.out.now"
+				[ -f "$LF_RUN/$z.out.last" ] && kick $(awk -v f="$LF_RUN/$z.out.last" \
+					'BEGIN { while ((getline l < f) > 0) o[l] = 1 } !($1 in o)' "$LF_RUN/$z.out.now")
+				mv "$LF_RUN/$z.out.now" "$LF_RUN/$z.out.last"
+				mv "$LF_RUN/$z.state.tmp" "$LF_RUN/$z.state.last"
+			fi
+		fi
+		[ -n "$macs" ] && fw_zone_mip "$z" >> "$out"
+	done
+	[ "$mode" = build ] && return 0
+	if [ "$force" = 1 ] || ! cmp -s "$out" "$LF_RUN/sets.last" 2>/dev/null; then
+		if fw_load_sets "$out"; then
+			cp "$out" "$LF_RUN/sets.last"
+			rm -f "$LF_RUN/sets.force"
+		else
+			sets_unsure
+		fi
+	fi
+}
+
+# the firewall didn't take the sets: every zone's are written again next pass
+# (a zone whose servers didn't change sides is otherwise skipped for good)
+sets_unsure() { : > "$LF_RUN/sets.force"; rm -f "$LF_RUN/sets.last"; }
+
+# valid IPv4/IPv6 addresses / subnets as a JSON array body: "a","b"
+json_addr_array() {
+	[ $# -gt 0 ] || return 0
+	echo "$@" | tr ' ' '\n' | lfawk addrs | awk 'BEGIN { ORS = "" } $1 == "4" || $1 == "6" { print (n++ ? "," : "") "\"" $2 "\"" }'
+}
+
+
+# cut running connections to these servers so the new verdict applies at once
+# (needed when flow offloading lets established connections skip the firewall)
+kick() {
+	have conntrack || return 0
+	local ip
+	for ip in "$@"; do
+		conntrack -D -d "$ip" >/dev/null 2>&1
+		conntrack -D -s "$ip" >/dev/null 2>&1
+	done
+}
+
+
+counter_of() {
+	local n p
+	while read -r n p; do
+		[ "$n" = "$1" ] && { echo "${p:-0}"; return; }
+	done <<-EOF
+	$COUNTERS
+	EOF
+	echo 0
+}
+
+# for the web page's Status: recorded crashes and the last error message
+# (cheap: two file tests when there has been neither)
+problems_json() {
+	local n=0 ct=0 et=0 etext=""
+	if [ -s "$(crash_file)" ] || [ -s "$LF_RUN/crash.log" ]; then
+		set -- $(crash_summary); n="${1:-0}"; ct="${2:-0}"
+	fi
+	if [ -s "$LF_RUN/last_error" ]; then
+		read -r et etext < "$LF_RUN/last_error"
+		is_uint "$et" || et=0
+	fi
+	printf '"problems":{"crashes":%d,"crash_time":%d,"error":"%s","error_time":%d},' "$n" "$ct" "$(json_str "$etext")" "$et"
+}
+
+write_status() {
+	local z first=1 tmp="$LF_RUN/status.json.tmp" c_in c_out c_pend c_unloc total match hit gerr glast pend devs nmac
+	gerr="$(cut -d' ' -f2- "$LF_RUN/geo.error" 2>/dev/null)"
+	glast="$(cat "$LF_RUN/geo.last" 2>/dev/null)"; is_uint "$glast" || glast=0
+	pend="$(lines "$LF_RUN/pending")"
+	counters_load
+	{
+		printf '{"version":"%s","enabled":%s,"active":%s,"updated":%s,"interval":%s,"daemon":%s,' \
+			"$LF_VERSION" "$([ "$G_ENABLED" = 1 ] && echo true || echo false)" \
+			"$(fw_exists && echo true || echo false)" "$(now)" "$G_INTERVAL" \
+			"$(is_loop "$(cat "$LF_RUN/daemon.pid" 2>/dev/null)" && echo true || echo false)"
+		fw_status_json
+		problems_json
+		printf '"geo":{"last_ok":%s,"pending":%s,"error":"%s"},"zones":[' "$glast" "$pend" "$(json_str "$gerr")"
+		for z in $ZONES; do
+			zone_load "$z"
+			if [ -s "$LF_RUN/$z.counts" ]; then
+				set -- $(cat "$LF_RUN/$z.counts")   # written by the last classification
+			else
+				set -- $(awk '{c[$2]++} END {printf "%d %d %d %d %d", NR, c["in"], c["out"], c["pending"], c["unloc"]}' \
+					"$LF_RUN/$z.servers" 2>/dev/null || echo 0 0 0 0 0)
+			fi
+			total="${1:-0}"; c_in="${2:-0}"; c_out="${3:-0}"; c_pend="${4:-0}"; c_unloc="${5:-0}"
+			match=0; hit=0
+			if [ "$Z_ENABLED" = 1 ]; then
+				match="$(counter_of "z_${z}_match")"; hit="$(counter_of "z_${z}_hit")"
+			fi
+			[ "$first" = 1 ] && first=0 || printf ','
+			printf '{"id":"%s","label":"%s","enabled":%s,"mode":"%s","strict":%s,"region":%s,' \
+				"$z" "$(json_str "$Z_LABEL")" "$([ "$Z_ENABLED" = 1 ] && echo true || echo false)" \
+				"$Z_MODE" "$([ "$Z_STRICT" = 1 ] && echo true || echo false)" \
+				"$([ "$Z_HAS_REGION" = 1 ] && echo true || echo false)"
+			devs="$(awk 'BEGIN { ORS = "" } /^[0-9a-fA-F:.]+$/ { print (n++ ? "," : "") "\"" $1 "\"" }' "$LF_RUN/$z.dev" 2>/dev/null)"
+			nmac=0; [ -f "$LF_RUN/$z.macs" ] && nmac="$(tr ',' '\n' < "$LF_RUN/$z.macs" | grep -c .)"
+			printf '"servers":%s,"inside":%s,"outside":%s,"pending":%s,"unlocatable":%s,"packets":%s,"blocked":%s,' \
+				"$total" "$c_in" "$c_out" "$c_pend" "$c_unloc" "${match:-0}" "${hit:-0}"
+			printf '"devices":[%s],"macs":%s,"allow":[%s],"block":[%s],' "$devs" "${nmac:-0}" \
+				"$(json_addr_array $Z_ALLOW)" "$(json_addr_array $Z_BLOCK)"
+			printf '"lag":{"on":%s,"dir":"%s","delay":%s,"jitter":%s,"loss":%s,"active":%s,"error":"%s"},' \
+				"$([ "$Z_LAG" = 1 ] && echo true || echo false)" "$Z_LAG_DIR" "$Z_LAG_DELAY" "$Z_LAG_JITTER" "$Z_LAG_LOSS" \
+				"$([ "$LAG_SUPPORTED" = 1 ] && [ "$Z_ENABLED" = 1 ] && [ "$Z_LAG" = 1 ] && [ ! -f "$LF_RUN/lag.$z.err" ] && grep -q . "$LF_RUN/lag.devs" 2>/dev/null && echo true || echo false)" \
+				"$(if [ "$LAG_SUPPORTED" = 1 ]; then cat "$LF_RUN/lag.$z.err" 2>/dev/null; elif [ "$Z_LAG" = 1 ]; then echo unsupported; fi)"
+			printf '"rev":%s,' "$(cat "$LF_RUN/$z.rev" 2>/dev/null || echo 0)"
+			printf '"burst":%s,"burst_open":%s,"open_left":%s,"opened":%s}' "$Z_BURST" "$Z_BURST_OPEN" \
+				"$([ "$Z_ENABLED" = 1 ] && [ "$Z_BURST" -gt 0 ] && fw_open_left "$z" || echo 0)" \
+				"$([ "$Z_ENABLED" = 1 ] && [ "$Z_BURST" -gt 0 ] && counter_of "z_${z}_opened" || echo 0)"
+		done
+		printf ']}\n'
+	} > "$tmp" && mv "$tmp" "$LF_RUN/status.json"
+}
+
+# ------------------------------------------------------------------ actions
+
+# learned data of zones that no longer exist in the configuration
+cleanup_zones() {
+	local f z
+	for f in "$LF_STATE"/*.ips "$G_DATA"/zones/*.ips; do
+		[ -f "$f" ] || continue
+		z="${f##*/}"; z="${z%.ips}"
+		case " $ZONES " in *" $z "*) continue;; esac
+		keep_servers "$z" "$(cat "$G_DATA/zones/$z.game" 2>/dev/null)"
+		rm -f "$G_DATA/zones/$z.game"
+		rm -f "$LF_STATE/$z.ports" "$G_DATA/zones/$z.ports"
+		rm -f "$LF_STATE/$z.ips" "$G_DATA/zones/$z.ips" "$LF_RUN/$z.servers" "$LF_RUN/$z.rev" "$LF_RUN/$z.sig" "$LF_RUN/$z.cls" "$LF_RUN/$z.new" "$LF_RUN/$z.merged" "$LF_RUN/$z.counts" "$LF_RUN/$z.state.last" "$LF_RUN/$z.out.last" \
+			"$LF_RUN/$z.dev" "$LF_RUN/$z.mip" "$LF_RUN/$z.macs"
+		log info "removed the learned servers of deleted zone $z"
+	done
+}
+
+# A zone's learned servers belong to the game it was set to when it found
+# them. Picking another game for the zone keeps them - under the old game, in
+# the Servers file, with their locations (no lookups lost) - and the zone
+# learns the new game's servers from scratch, so the file never files one
+# game's servers under another.
+game_changes() {
+	local z g old n
+	mkdir -p "$G_DATA/zones" 2>/dev/null || return 0
+	for z in $ZONES; do
+		config_get g "$z" game ""
+		case "$g" in ''|*[!a-z0-9_]*) g=other;; esac
+		old="$(cat "$G_DATA/zones/$z.game" 2>/dev/null)"
+		[ "$old" = "$g" ] && continue
+		if [ -n "$old" ]; then
+			n="$(keep_servers "$z" "$old")"
+			: > "$LF_STATE/$z.ips"
+			: > "$LF_RUN/$z.new"
+			persist
+			log notice "zone $z: game changed from $old to $g - its ${n:-0} located server(s) are kept under $old (Servers file), and the zone learns $g's servers anew"
+		fi
+		echo "$g" > "$G_DATA/zones/$z.game"
+	done
+}
+
+# keep_servers <zone> <game>: the zone's located servers -> the kept
+# locations (shared.cache, marked "own": found by this router, not imported).
+# Prints how many there were.
+keep_servers() {
+	local z="$1" g="$2" f cache n
+	case "$g" in ''|*[!a-z0-9_]*) g=other;; esac
+	f="$LF_STATE/$z.ips"; [ -f "$f" ] || f="$G_DATA/zones/$z.ips"
+	cache="$LF_STATE/geo.cache"; [ -f "$cache" ] || cache="$G_DATA/geo.cache"
+	[ -s "$f" ] && [ -f "$cache" ] || { echo 0; return 0; }
+	awk -v g="$g" 'FILENAME == ARGV[1] { if (NF >= 4) loc[$1] = $2 " " $3 " " $4; next }
+		($1 in loc) { print $1, loc[$1], ($2 ~ /^[0-9]+$/ ? $2 : 0), g, "own" }' "$cache" "$f" > "$LF_RUN/keep.new"
+	n="$(lines "$LF_RUN/keep.new")"
+	[ "$n" -gt 0 ] && shared_add "$LF_RUN/keep.new" > /dev/null
+	rm -f "$LF_RUN/keep.new"
+	echo "$n"
+}
+
+# shared_add <file of "ip lat lon cc ts game [own]">: merged into the kept
+# locations (one line per game and address, the newest wins, the most
+# recently seen first, at most SHARED_MAX). Prints how many were new.
+shared_add() {
+	local added=0
+	mkdir -p "$G_DATA" 2>/dev/null || return 1
+	[ -f "$G_DATA/shared.cache" ] || : > "$G_DATA/shared.cache"
+	lfawk shared_merge -v statf="$LF_RUN/shared.stat" "$G_DATA/shared.cache" "$1" | \
+		sort -k5,5nr | head -n "$SHARED_MAX" > "$LF_RUN/shared.merged"
+	read -r added 2>/dev/null < "$LF_RUN/shared.stat"
+	rm -f "$LF_RUN/shared.stat"
+	if ! flash_room "$G_DATA" "$(bytes_of "$LF_RUN/shared.merged")"; then
+		rm -f "$LF_RUN/shared.merged"
+		SHARED_ERR="not enough room left on the flash in $G_DATA (LobbyFence leaves the last ${LF_FLASH_RESERVE:-256} KB to the router)"
+		return 1
+	fi
+	if cp "$LF_RUN/shared.merged" "$G_DATA/shared.cache.tmp" 2>/dev/null && mv "$G_DATA/shared.cache.tmp" "$G_DATA/shared.cache"; then
+		rm -f "$LF_RUN/shared.merged" "$LF_RUN/pending.at"   # (the next pass looks at the waiting servers again, with these)
+		echo "${added:-0}"
+		return 0
+	fi
+	rm -f "$G_DATA/shared.cache.tmp" "$LF_RUN/shared.merged"
+	SHARED_ERR="could not write to $G_DATA (is the flash / JFFS full?)"
+	return 1
+}
+
+do_apply() {
+	load_config
+	ensure_dirs
+	restore
+	cleanup_zones
+	game_changes
+	if [ "$G_ENABLED" != 1 ]; then
+		fw_remove
+		rm -f "$LF_RUN/apply.failed"
+		write_status
+		return 0
+	fi
+	rm -f "$LF_RUN/stopped"
+	fw_build || { apply_failed; return 1; }
+	# the learned servers go in together with the rules (nftables: one
+	# transaction): no moment where the sets are empty and filtering is off
+	refresh_sets 1 build
+	fw_commit || { sets_unsure; apply_failed; return 1; }
+	cp "$FW_SETS" "$LF_RUN/sets.last"
+	rm -f "$LF_RUN/sets.force" "$LF_RUN/apply.failed"
+	fw_post_apply
+	write_status
+	log notice "firewall rules applied (zones: ${ZONES_ON:-none})"
+}
+
+# The rules could not be put in place: none at all then, rather than the old
+# ones (other settings) or half of the new ones - the router works as it
+# would without LobbyFence, and the learning loop tries again on every pass.
+apply_failed() {
+	fw_remove 2>/dev/null
+	write_status
+	[ -f "$LF_RUN/apply.failed" ] || log warning "the firewall rules could not be put in place - filtering is off until this works (tried again on every pass)"
+	: > "$LF_RUN/apply.failed"
+}
+
+do_cycle() {
+	local t
+	load_config
+	ensure_dirs
+	restore
+	[ "$G_ENABLED" = 1 ] || return 0
+	if ! fw_exists; then
+		[ -f "$LF_RUN/stopped" ] && return 0
+		[ -f "$LF_RUN/apply.failed" ] || log warning "firewall rules missing, rebuilding them"
+		do_apply || return 1
+	fi
+	lf_phase "checking the firewall rules"
+	fw_check
+	t="$(now)"
+	lf_phase "collecting the servers the games used"
+	harvest "$t"
+	lf_phase "locating new servers (geolocation service)"
+	locate "$t"
+	lf_phase "updating the firewall's server lists"
+	refresh_sets
+	lf_phase "writing the status"
+	write_status
+	lf_phase "saving the learned servers"
+	maybe_persist "$t"
+}
+
+do_teardown() {
+	load_config
+	ensure_dirs
+	touch "$LF_RUN/stopped"
+	persist
+	fw_remove
+	write_status
+	return 0
+}
+
+# the system rebuilt its firewall (FreshTomato's "Firewall" event): put the
+# rules back - quickly when the backend can keep the learned sets
+do_fwhook() {
+	load_config
+	ensure_dirs
+	[ "$G_ENABLED" = 1 ] || return 0
+	[ -f "$LF_RUN/stopped" ] && return 0
+	restore
+	if have fw_rules_only && fw_rules_only; then
+		write_status
+		log notice "firewall rebuilt by the system - rules put back"
+	else
+		do_apply
+	fi
+}
+
+# ------------------------------------------------------------------ crashes
+
+CRASH_KEEP=8   # crash records kept (on flash, so they survive a reboot)
+
+crash_file() { echo "$G_DATA/crash.log"; }
+
+# the learning loop is starting: did the last one end without its clean
+# stop (TERM)? Killed by the kernel for memory, a fatal shell error, or
+# killed by force after it did not stop in time.
+crash_check() {
+	local pid since ph
+	[ -f "$LF_RUN/daemon.alive" ] || return 0
+	read -r pid since < "$LF_RUN/daemon.alive"
+	rm -f "$LF_RUN/daemon.alive"
+	# (still running: a second start, not a crash)
+	[ "$pid" != "$$" ] && is_loop "$pid" && return 0
+	ph="$(cat "$LF_RUN/phase" 2>/dev/null)"
+	crash_record "the learning loop (pid ${pid:-?}) stopped without a clean exit: killed by the system (out of memory?), a fatal error, or stopped by force after it did not end in time" "$since" "$ph"
+	log err "the learning loop had stopped unexpectedly and was started again - details in the debug report (LobbyFence page: Status > Debug)"
+}
+
+crash_record() { # what [running-since] [last step]
+	local t f="$LF_RUN/crash.new" cf at
+	t="$(now)"
+	{
+		echo "=== crash $t $(date '+%F %T' 2>/dev/null)"
+		echo "what: $1"
+		is_uint "$2" && [ "$t" -ge "$2" ] && echo "it had been running for $((t - $2)) s"
+		[ -n "$3" ] && echo "last step: $3"
+		echo "LobbyFence $LF_VERSION ($LF_FW), router up for $(awk '{ printf "%d", $1 }' /proc/uptime 2>/dev/null) s"
+		awk '/^(MemTotal|MemFree|MemAvailable):/ { printf "%s %d kB  ", $1, $2 } END { print "" }' /proc/meminfo 2>/dev/null
+		echo "kernel messages about memory (last 5):"
+		dmesg 2>/dev/null | grep -i -E 'out of memory|oom|killed process' | tail -n 5 | sed 's/^/  /'
+		echo "error output (last 20 lines):"
+		tail -n 20 "$LF_RUN/daemon.err" 2>/dev/null | sed 's/^/  /'
+		echo "log (last 15 lines):"
+		tail -n 15 "$LF_RUN/log" 2>/dev/null | sed 's/^/  /'
+	} > "$f"
+	# on flash, so it survives a reboot - but at most once every 10 minutes:
+	# a loop that keeps stopping and being started again (every 5 s by procd)
+	# would otherwise write the flash all day. The others, and any the flash
+	# has no room for, go to the copy in RAM. Each keeps the newest CRASH_KEEP.
+	cf="$(crash_file)"
+	at="$(cat "$LF_RUN/crash.flash.at" 2>/dev/null)"; is_uint "$at" || at=0
+	if [ "$t" -ge "$at" ] && [ $((t - at)) -lt 600 ] || ! mkdir -p "$G_DATA" 2>/dev/null || \
+		! flash_room "$G_DATA" "$(bytes_of "$cf" "$f")" || ! crash_keep "$cf" "$f"; then
+		crash_keep "$LF_RUN/crash.log" "$f"
+	else
+		echo "$t" > "$LF_RUN/crash.flash.at"
+	fi
+	rm -f "$f"
+}
+
+# adds a record to a crash file, keeping its newest CRASH_KEEP: crash_keep <file> <record>
+crash_keep() {
+	{ cat "$1" 2>/dev/null; cat "$2"; } | awk -v keep="$CRASH_KEEP" '
+		{ l[NR] = $0; if ($0 ~ /^=== crash /) n++; c[NR] = n }
+		END { for (i = 1; i <= NR; i++) if (c[i] > n - keep) print l[i] }' > "$1.tmp" 2>/dev/null && mv "$1.tmp" "$1" 2>/dev/null && return 0
+	rm -f "$1.tmp"
+	return 1
+}
+
+# crashes on record: "<count> <time of the newest>"
+crash_summary() {
+	cat "$(crash_file)" "$LF_RUN/crash.log" 2>/dev/null | awk '/^=== crash / { n++; if ($3 > t) t = $3 } END { printf "%d %d\n", n, t }'
+}
+
+do_daemon() {
+	load_config
+	ensure_dirs
+	# error messages (shell, awk, firewall tools) go to a file the debug
+	# report shows - they used to be thrown away on most routers
+	exec 2>> "$LF_RUN/daemon.err"
+	LF_IS_DAEMON=1
+	crash_check
+	echo "$$ $(now)" > "$LF_RUN/daemon.alive"
+	trap 'lock_acquire 20; persist; lock_release; rm -f "$LF_RUN/daemon.alive"; exit 0' TERM INT
+	echo "$$" > "$LF_RUN/daemon.pid"
+	log notice "learning loop started (every ${G_INTERVAL}s)"
+	while :; do
+		lf_phase "waiting for its turn (another LobbyFence command is running)"
+		lock_acquire
+		do_cycle
+		lock_release
+		lf_phase "waiting for the next pass"
+		log_trim
+		# check every 2 s for servers never seen before and handle them at once,
+		# so a new server outside the region is blocked within seconds
+		waited=0
+		while [ "$waited" -lt "$G_INTERVAL" ]; do
+			sleep 2 &
+			wait $!
+			waited=$((waited + 2))
+			fw_tick
+			new_servers && break
+		done
+	done
+}
+
+# any server in the "seen" sets that the zone has not learned yet?
+new_servers() {
+	local z
+	for z in $ZONES_ON; do
+		# a backend that can tell cheaply "nothing unknown since the last pass" saves
+		# reading the zone's whole server list every 2 s
+		have fw_new_traffic && ! fw_new_traffic "$z" && continue
+		fw_seen "$z" | awk -v f="$LF_STATE/$z.ips" 'BEGIN { while ((getline l < f) > 0) { split(l, a, " "); k[a[1]] = 1 } }
+				!($1 in k) { n = 1; exit } END { exit !n }' && return 0
+	done
+	return 1
+}
+
+zone_or_die() {
+	[ -n "$1" ] || die "zone name missing"
+	load_config
+	case " $ZONES " in *" $1 "*) ;; *) die "no such zone: $1";; esac
+	zone_load "$1"
+	restore
+}
+
+do_list() {
+	local z="$1" filter="$2"
+	zone_or_die "$z"
+	classify_zone "$z"
+	printf '%-40s %-8s %9s %10s %3s  %s\n' ADDRESS STATE LAT LON CC LAST_SEEN
+	while read -r ip st la lo cc ts; do
+		[ -n "$filter" ] && [ "$filter" != "$st" ] && continue
+		printf '%-40s %-8s %9s %10s %3s  %s\n' "$ip" "$st" "$la" "$lo" "$cc" \
+			"$(date -d "@$ts" '+%F %T' 2>/dev/null || echo "$ts")"
+	done < "$LF_RUN/$z.servers"
+}
+
+do_import() {
+	local z="$1" src="$2" n dropped
+	[ -n "$src" ] || die "usage: lobbyfence import <zone> <file|->"
+	zone_or_die "$z"
+	lock_acquire
+	if [ "$src" = - ]; then cat; else cat "$src" || die "cannot read $src"; fi | \
+		tr ',;\t' '   ' | lfawk public > "$LF_RUN/import.tmp"
+	lfawk merge -v now="$(now)" -v expire=0 -v zmax="$LF_ZONE_MAX" -v statf="$LF_RUN/merge.stat" \
+		"$LF_STATE/$z.ips" "$LF_RUN/import.tmp" > "$LF_STATE/$z.ips.new" && \
+		mv "$LF_STATE/$z.ips.new" "$LF_STATE/$z.ips"
+	read -r n _ _ dropped < "$LF_RUN/merge.stat"
+	zone_capped "$z" "$dropped"
+	rm -f "$LF_RUN/import.tmp" "$LF_RUN/merge.stat"
+	: > "$LF_RUN/$z.new"   # reclassify on the next pass
+	rm -f "$LF_RUN/pending.at"   # ... and locate the new addresses then (not up to an hour later)
+	persist
+	lock_release
+	echo "imported $n new address(es) into zone $z"
+}
+
+# export: the servers this router has located, by game (with locations imported
+# earlier) - a file another router reads with import-servers, skipping those lookups
+do_export() {
+	local z g label f cache shared
+	load_config
+	ensure_dirs
+	: > "$LF_RUN/export.names"
+	: > "$LF_RUN/export.pairs"
+	for z in $ZONES; do
+		config_get g "$z" game ""
+		case "$g" in ''|*[!a-z0-9_]*) g=other;; esac
+		config_get label "$z" label "$z"
+		echo "$g $(printf '%s' "$label" | tr -cd 'A-Za-z0-9 ._()/+&-' | cut -c1-60)" >> "$LF_RUN/export.names"
+		f="$LF_STATE/$z.ips"; [ -f "$f" ] || f="$G_DATA/zones/$z.ips"
+		[ -f "$f" ] && awk -v g="$g" '$1 != "" { print g, $1, $2 }' "$f" >> "$LF_RUN/export.pairs"
+	done
+	cache="$LF_STATE/geo.cache"; [ -f "$cache" ] || cache="$G_DATA/geo.cache"
+	[ -f "$cache" ] || { : > "$LF_RUN/export.cache"; cache="$LF_RUN/export.cache"; }
+	shared="$G_DATA/shared.cache"
+	[ -f "$shared" ] || { : > "$LF_RUN/export.shared"; shared="$LF_RUN/export.shared"; }
+	lfawk export -v when="$(date '+%Y-%m-%d %H:%M' 2>/dev/null) - LobbyFence $LF_VERSION" \
+		"$cache" "$LF_RUN/export.names" "$LF_RUN/export.pairs" "$shared"
+	rm -f "$LF_RUN/export.names" "$LF_RUN/export.pairs" "$LF_RUN/export.cache" "$LF_RUN/export.shared"
+}
+
+# import-servers <file|->: another router's export. Its locations are kept (on
+# flash, in data_dir) and used before asking the geolocation service; the
+# zones' own server lists are not changed.
+SHARED_MAX=20000
+do_import_servers() {
+	local src="$1" n bad over added total rc
+	[ -n "$src" ] || die "usage: lobbyfence import-servers <file|->"
+	load_config
+	ensure_dirs
+	# (at most 1 MB is read)
+	if [ "$src" = - ]; then dd bs=1024 count=1024 2>/dev/null; else dd if="$src" bs=1024 count=1024 2>/dev/null || die "cannot read $src"; fi \
+		> "$LF_RUN/shared.in"
+	lfawk shared_in -v now="$(now)" -v maxn="$SHARED_MAX" -v statf="$LF_RUN/shared.stat" "$LF_RUN/shared.in" > "$LF_RUN/shared.new"
+	n=-1; bad=0; over=0
+	read -r n bad over 2>/dev/null < "$LF_RUN/shared.stat"
+	rm -f "$LF_RUN/shared.in" "$LF_RUN/shared.stat"
+	if [ "${n:--1}" -lt 0 ]; then
+		rm -f "$LF_RUN/shared.new"
+		die "not a LobbyFence servers file (made with Download servers / lobbyfence export)"
+	fi
+	lock_acquire
+	SHARED_ERR=""
+	shared_add "$LF_RUN/shared.new" > "$LF_RUN/shared.added"; rc=$?
+	read -r added 2>/dev/null < "$LF_RUN/shared.added"
+	rm -f "$LF_RUN/shared.added"
+	if [ "$rc" -ne 0 ]; then
+		rm -f "$LF_RUN/shared.new"
+		lock_release
+		die "${SHARED_ERR:-could not write to $G_DATA}"
+	fi
+	total="$(lines "$G_DATA/shared.cache")"
+	rm -f "$LF_RUN/shared.new"
+	lock_release
+	log info "imported $added new server location(s) from a servers file ($total kept)"
+	echo "imported $added new server location(s) of $n in the file$([ "${bad:-0}" -gt 0 ] && echo ", $bad damaged line(s) skipped")$([ "${over:-0}" -gt 0 ] && echo ", $over over the limit of $SHARED_MAX")"
+	echo "$total kept location(s) in all - servers found there are not looked up again"
+}
+
+# remove-servers <game|all> [address...]: delete the Servers file's list for
+# that game (or every game) - or, with addresses, just those servers of it:
+# the kept / imported locations filed under it, and the learned servers of
+# the zones set to that game (they are learned and located again while you
+# play). Whitelists, blacklists and regions are not touched.
+SHARED_RM_MAX=500
+do_remove_servers() {
+	local g="$1" z zg kept=0 left=0 learned=0 n a what
+	case "$g" in ''|*[!a-z0-9_]*) die "usage: lobbyfence remove-servers <game id|all> [address...]";; esac
+	[ ${#g} -le 32 ] || die "usage: lobbyfence remove-servers <game id|all> [address...]"
+	shift
+	[ $# -le "$SHARED_RM_MAX" ] || die "too many addresses at once (at most $SHARED_RM_MAX)"
+	: > "$LF_RUN/remove.ips"
+	for a in "$@"; do
+		case "$a" in ''|*[!0-9A-Fa-f:.]*) rm -f "$LF_RUN/remove.ips"; die "not an address: $a";; esac
+		[ ${#a} -le 45 ] || { rm -f "$LF_RUN/remove.ips"; die "not an address: $a"; }
+		echo "$a" >> "$LF_RUN/remove.ips"
+	done
+	load_config
+	ensure_dirs
+	restore
+	lock_acquire
+	# drop: every line of the game (no addresses given), or the given addresses of it
+	if [ -f "$G_DATA/shared.cache" ]; then
+		kept="$(lines "$G_DATA/shared.cache")"
+		awk -v g="$g" -v some=$# 'FILENAME == ARGV[1] { rm[$1] = 1; next }
+			!((g == "all" || $6 == g) && (!some || ($1 in rm)))' "$LF_RUN/remove.ips" "$G_DATA/shared.cache" > "$LF_RUN/shared.left"
+		left="$(lines "$LF_RUN/shared.left")"
+		if cp "$LF_RUN/shared.left" "$G_DATA/shared.cache.tmp" 2>/dev/null && mv "$G_DATA/shared.cache.tmp" "$G_DATA/shared.cache"; then
+			rm -f "$LF_RUN/shared.left"
+		else
+			rm -f "$LF_RUN/shared.left" "$G_DATA/shared.cache.tmp" "$LF_RUN/remove.ips"
+			lock_release
+			die "could not write to $G_DATA (is the flash / JFFS full?)"
+		fi
+	fi
+	for z in $ZONES; do
+		config_get zg "$z" game ""
+		case "$zg" in ''|*[!a-z0-9_]*) zg=other;; esac
+		[ "$g" = all ] || [ "$zg" = "$g" ] || continue
+		[ -f "$LF_STATE/$z.ips" ] || continue
+		n="$(lines "$LF_STATE/$z.ips")"
+		awk -v some=$# 'FILENAME == ARGV[1] { rm[$1] = 1; next } some && !($1 in rm)' \
+			"$LF_RUN/remove.ips" "$LF_STATE/$z.ips" > "$LF_STATE/$z.ips.new" && mv "$LF_STATE/$z.ips.new" "$LF_STATE/$z.ips"
+		learned=$((learned + n - $(lines "$LF_STATE/$z.ips")))
+		[ $# -gt 0 ] || : > "$LF_RUN/$z.new"
+	done
+	rm -f "$LF_RUN/remove.ips"
+	persist
+	refresh_sets
+	write_status
+	lock_release
+	if [ "$g" = all ]; then what="every game"; else what="$g"; fi
+	n=$((kept - left + learned))
+	log notice "removed $([ $# -gt 0 ] && echo "$# chosen server(s)" || echo "the servers list") of $what: $((kept - left)) kept location(s), $learned learned server(s)"
+	if [ $# -gt 0 ]; then
+		echo "removed $# chosen server(s) of $what$([ "$learned" -gt 0 ] && echo " - $learned of them were learned by zones set to it; if they show up again they are learned again")"
+	else
+		echo "removed $n server(s) of $what$([ "$learned" -gt 0 ] && echo " - $learned were learned by zones set to it; they are learned again while you play")"
+	fi
+}
+
+# allow | block | unlist <zone> <address...>: per-server rules, live
+do_override() {
+	local action="$1" z="$2" list ip
+	shift 2
+	case "$action" in allow|block|unlist) ;; *) die "unknown action $action";; esac
+	[ $# -gt 0 ] || die "usage: lobbyfence $action <zone> <address> [address...]"
+	have uci || die "uci not found"
+	zone_or_die "$z"
+	list="$(echo "$@" | tr ' ,' '\n\n' | lfawk addrs | awk '$1 == "4" || $1 == "6" { print $2 }')"
+	[ -n "$list" ] || die "no valid address given"
+	lock_acquire
+	for ip in $list; do
+		uci -q del_list "$LF_CONFIG.$z.allow_ip=$ip"
+		uci -q del_list "$LF_CONFIG.$z.block_ip=$ip"
+		case "$action" in
+			allow) uci add_list "$LF_CONFIG.$z.allow_ip=$ip";;
+			block) uci add_list "$LF_CONFIG.$z.block_ip=$ip";;
+		esac
+	done
+	uci commit "$LF_CONFIG"
+	load_config
+	zone_load "$z"
+	# swap the zone's allow/block sets in one transaction - no restart needed
+	if [ "$Z_ENABLED" = 1 ] && fw_exists; then
+		fw_override "$z" || { lock_release; die "could not update the firewall sets"; }
+	fi
+	[ "$action" = block ] && kick $list
+	write_status
+	lock_release
+	log info "zone $z: $action $(echo $list)"
+	printf '{"ok":true,"zone":"%s","action":"%s","allow":[%s],"block":[%s]}\n' \
+		"$z" "$action" "$(json_addr_array $Z_ALLOW)" "$(json_addr_array $Z_BLOCK)"
+}
+
+do_forget() {
+	local z="$1"; shift
+	zone_or_die "$z"
+	lock_acquire
+	: > "$LF_RUN/$z.new"
+	if [ $# -eq 0 ]; then
+		: > "$LF_STATE/$z.ips"
+		echo "forgot all servers of zone $z"
+	else
+		echo "$@" | tr ' ' '\n' > "$LF_RUN/forget.tmp"
+		awk 'FILENAME == ARGV[1] { drop[$1] = 1; next } !($1 in drop)' \
+			"$LF_RUN/forget.tmp" "$LF_STATE/$z.ips" > "$LF_STATE/$z.ips.new" && \
+			mv "$LF_STATE/$z.ips.new" "$LF_STATE/$z.ips"
+		rm -f "$LF_RUN/forget.tmp"
+		echo "forgot $# address(es) in zone $z"
+	fi
+	persist
+	refresh_sets
+	write_status
+	lock_release
+}
+
+do_whereis() {
+	local ip="$1" row z
+	[ -n "$ip" ] || die "usage: lobbyfence whereis <address>"
+	echo "$ip" | lfawk public | grep -q . || die "$ip is not a public address"
+	load_config
+	restore
+	row="$(awk -v ip="$ip" '$1 == ip { r = $0 } END { print r }' "$LF_STATE/geo.cache")"
+	if [ -z "$row" ]; then
+		echo "$ip" > "$LF_RUN/whereis.tmp"
+		lock_acquire
+		geo_lookup "$LF_RUN/whereis.tmp" "$(now)" || { lock_release; die "lookup failed: ${GEO_ERR:-}"; }
+		lock_release
+		rm -f "$LF_RUN/whereis.tmp"
+		row="$(awk -v ip="$ip" '$1 == ip { r = $0 } END { print r }' "$LF_STATE/geo.cache")"
+	fi
+	set -- $row
+	if [ "$2" = "-" ]; then echo "$ip: location unknown"; else echo "$ip: lat $2, lon $3, country $4"; fi
+	echo "$ip 0" > "$LF_RUN/whereis.tmp"
+	for z in $ZONES; do
+		zone_load "$z"
+		awk -v op=classify -v circles="$Z_CIRCLES" -v polygons="$Z_POLYGONS" -v countries="$Z_COUNTRIES" -f "$LF_AWK" \
+			"$LF_STATE/geo.cache" "$LF_RUN/whereis.tmp" | \
+			while read -r _ st _; do echo "  zone $z: $st"; done
+	done
+	rm -f "$LF_RUN/whereis.tmp"
+}
+
+uptime_ms() { awk '{ printf "%d", $1 * 1000 }' /proc/uptime 2>/dev/null || echo 0; }
+
+# One live lookup to prove the geolocation service answers. Prints JSON.
+do_apitest() {
+	local ip="${1:-8.8.8.8}" t url resp row err="" t0 t1 ms
+	echo "$ip" | lfawk public | grep -q . || die "$ip is not a public address"
+	load_config
+	ensure_dirs
+	restore
+	lock_acquire
+	t="$(now)"
+	if [ "$(geo_budget)" -le 0 ]; then
+		lock_release
+		printf '{"ok":false,"error":"%s","url":"%s","ms":0}\n' \
+			"rate limit reached ($GEO_RATE_LIMIT lookups per minute, or the service asked to wait) - try again in a minute" "$(json_str "$G_GEO_URL")"
+		return 1
+	fi
+	t0="$(uptime_ms)"
+	resp="$(geo_call "[\"$ip\"]")"
+	t1="$(uptime_ms)"
+	# (in awk: uptime in ms outgrows 32-bit shell arithmetic after 24 days)
+	ms="$(awk -v a="$t0" -v b="$t1" 'BEGIN { d = b - a; printf "%d", (d > 0 ? d : 0) }')"
+	row="$(printf '%s' "$resp" | lfawk georesp -v now="$t")"
+	set -- $row
+	if [ -z "$resp" ]; then
+		err="no answer - check the router's internet connection and DNS, or the service is rate limiting"
+	elif [ -z "$row" ]; then
+		err="unexpected answer from the service"
+	elif [ "$2" = "-" ]; then
+		err="the service answered but could not locate $ip"
+	fi
+	if [ -n "$err" ]; then
+		echo "$t $err" > "$LF_RUN/geo.error"
+		write_status
+		lock_release
+		printf '{"ok":false,"error":"%s","url":"%s","ms":%d}\n' "$(json_str "$err")" "$(json_str "$G_GEO_URL")" "$ms"
+		return 1
+	fi
+	# (a wait the service asked for stays: its count may be used up now)
+	rm -f "$LF_RUN/geo.error"
+	echo "$t" > "$LF_RUN/geo.last"
+	write_status
+	lock_release
+	printf '{"ok":true,"ip":"%s","lat":%s,"lon":%s,"country":"%s","ms":%d,"url":"%s"}\n' \
+		"$ip" "$2" "$3" "$4" "$ms" "$(json_str "$G_GEO_URL")"
+}
+
+# devices the router knows on the LAN: MAC, hostname, IPv4 and IPv6 addresses (JSON)
+do_devices() {
+	{
+		awk 'NR > 1 && $3 != "0x0" { print "ip", $4, $1 }' "$LF_ARP" 2>/dev/null
+		[ -f "$LF_LEASES" ] && awk '{ print "lease", $2, $3, $4 }' "$LF_LEASES"
+		ip -6 neigh show 2>/dev/null | awk '{ for (i = 1; i < NF; i++) if ($i == "lladdr") print "ip", $(i + 1), $1 }'
+	} | lfawk devices
+}
+
+# "<ip> <age> <packets/s>" for the servers a zone's devices sent to recently;
+# the rate comes from the per-server packet counters and the previous call
+active_rates() {
+	local z="$1" t cur="$LF_RUN/live.$1.cur" prev="$LF_RUN/live.$1.prev"
+	t="$(uptime_ms)"
+	fw_now "$z" > "$cur"
+	[ -f "$prev" ] || : > "$prev"
+	awk -v t="$t" -v f="$prev" 'BEGIN { while ((getline l < f) > 0) { split(l, a, " "); pp[a[1]] = a[2]; pt[a[1]] = a[3] } }
+		{ r = -1
+		  # (-1: the router has no packet count for this server - unknown rate)
+		  if ($3 >= 0 && ($1 in pp) && pp[$1] >= 0 && t - pt[$1] >= 900 && $3 >= pp[$1]) r = ($3 - pp[$1]) * 1000 / (t - pt[$1])
+		  printf "%s %d %.1f\n", $1, $2, r }' "$cur"
+	# remember the counters (keep samples younger than 2 s so two viewers do not disturb the rate)
+	awk -v t="$t" -v f="$prev" 'BEGIN { while ((getline l < f) > 0) { split(l, a, " "); if (t - a[3] < 2000) keep[a[1]] = l } }
+		{ print (($1 in keep) ? keep[$1] : $1 " " $3 " " t) }' "$cur" > "$prev.new" && mv "$prev.new" "$prev"
+	rm -f "$cur"
+}
+
+# quick per-zone counters for the map page (no learning, no locking)
+do_live() {
+	local z first=1 rates ar
+	load_config
+	# switched off: nothing is counted or learned - answer at once (the open map asks every 5 s)
+	if [ "$G_ENABLED" != 1 ]; then printf '{"time":%s,"zones":{}}\n' "$(now)"; return 0; fi
+	counters_load
+	printf '{"time":%s,"zones":{' "$(now)"
+	for z in $ZONES_ON; do
+		zone_load "$z"
+		[ "$first" = 1 ] && first=0 || printf ','
+		rates="$(active_rates "$z")"
+		# "active" and "rate" lists in one go: "<active>|<rate>"
+		ar="$(echo "$rates" | awk 'BEGIN { ORS = "" } NF == 3 { a = a (n ? "," : "") "\"" $1 "\":" $2; r = r (n++ ? "," : "") "\"" $1 "\":" $3 } END { print a "|" r }')"
+		printf '"%s":{"active":{%s},"rate":{%s},"active_window":%s,"packets":%s,"blocked":%s,"open_left":%s,"opened":%s}' "$z" \
+			"${ar%%|*}" "${ar#*|}" \
+			"$LF_NOW_TIMEOUT" \
+			"$(counter_of "z_${z}_match")" "$(counter_of "z_${z}_hit")" \
+			"$([ "$Z_BURST" -gt 0 ] && fw_open_left "$z" || echo 0)" \
+			"$([ "$Z_BURST" -gt 0 ] && counter_of "z_${z}_opened" || echo 0)"
+	done
+	printf '}}\n'
+}
+
+do_status() {
+	load_config
+	[ "$1" = json ] || [ "$1" = --json ] && { cat "$LF_RUN/status.json" 2>/dev/null || echo '{}'; return; }
+	ensure_dirs
+	restore
+	lock_acquire; refresh_sets; write_status; lock_release
+	counters_load
+	echo "LobbyFence $LF_VERSION - $([ "$G_ENABLED" = 1 ] && echo enabled || echo disabled), firewall rules $(fw_exists && echo loaded || echo 'not loaded')"
+	[ -f "$LF_RUN/geo.error" ] && echo "last geolocation error: $(cut -d' ' -f2- "$LF_RUN/geo.error")"
+	echo "addresses waiting for geolocation: $(lines "$LF_RUN/pending")"
+	printf '\n%-16s %-8s %-10s %7s %7s %7s %8s %10s %9s\n' ZONE STATE MODE SERVERS INSIDE OUTSIDE PENDING PACKETS BLOCKED
+	for z in $ZONES; do
+		zone_load "$z"
+		set -- $(awk '{c[$2]++} END {printf "%d %d %d %d", NR, c["in"], c["out"], c["pending"] + c["unloc"]}' \
+			"$LF_RUN/$z.servers" 2>/dev/null || echo 0 0 0 0)
+		printf '%-16s %-8s %-10s %7s %7s %7s %8s %10s %9s\n' "$z" \
+			"$([ "$Z_ENABLED" = 1 ] && echo on || echo off)" \
+			"$Z_MODE$([ "$Z_STRICT" = 1 ] && echo '+s')" "$1" "$2" "$3" "$4" \
+			"$([ "$Z_ENABLED" = 1 ] && counter_of "z_${z}_match" || echo -)" \
+			"$([ "$Z_ENABLED" = 1 ] && counter_of "z_${z}_hit" || echo -)"
+	done
+	echo
+	echo "(BLOCKED counts packets that were dropped - or, in monitor mode, would have been)"
+}
+
+# what the map would show and why - for "my servers don't show up"
+do_diag() {
+	local z t n
+	load_config
+	ensure_dirs
+	restore
+	echo "LobbyFence $LF_VERSION ($LF_FW) - $([ "$G_ENABLED" = 1 ] && echo enabled || echo DISABLED), rules $(fw_exists && echo loaded || echo 'NOT loaded')"
+	echo "learning loop: $(p="$(cat "$LF_RUN/daemon.pid" 2>/dev/null)"; is_loop "$p" && echo "running (pid $p)" || echo 'NOT running')"
+	[ -f "$LF_RUN/geo.error" ] && echo "geolocation: last error: $(cut -d' ' -f2- "$LF_RUN/geo.error")"
+	echo "connection packet counts: $(cat /proc/sys/net/netfilter/nf_conntrack_acct 2>/dev/null || echo '?')"
+	have fw_diag && fw_diag
+	t="$(now)"
+	for z in $ZONES_ON; do
+		zone_load "$z"
+		classify_zone "$z"
+		echo
+		echo "zone $z ($Z_LABEL): $Z_MODE$([ "$Z_STRICT" = 1 ] && echo ', strict'), $Z_PROTO, ports: ${Z_RPORT:+server $Z_RPORT }${Z_LPORT:+device $Z_LPORT }${Z_PORT:+either $Z_PORT}"
+		echo "  device addresses now: $(tr '\n' ' ' 2>/dev/null < "$LF_RUN/$z.dev")"
+		set -- $(awk '{c[$2]++} END {printf "%d %d %d %d %d", NR, c["in"], c["out"], c["pending"], c["unloc"]}' "$LF_RUN/$z.servers" 2>/dev/null)
+		echo "  learned: ${1:-0} (inside ${2:-0}, outside ${3:-0}, waiting for a location ${4:-0}, not locatable ${5:-0} - only located servers are drawn)"
+		n="$(awk -v t="$t" '$6 >= t - 120' "$LF_RUN/$z.servers" 2>/dev/null | wc -l)"
+		echo "  seen in the last 2 minutes: $n"
+		echo "  active now (address, seconds since the device last sent, packets):"
+		fw_now "$z" | sed 's/^/    /'
+		diag_ports "$z"
+	done
+}
+
+# conntrack, where the system keeps it (empty when it doesn't)
+ct_file() {
+	local ct="${LF_CONNTRACK:-/proc/net/nf_conntrack}"
+	[ -r "$ct" ] || ct=/proc/net/ip_conntrack
+	[ -r "$ct" ] && echo "$ct"
+}
+
+# the lines of the connection list that can be the zone's devices': grep -F
+# sifts a big list (thousands of lines on a busy network) many times faster
+# than awk alone (IPv6: every IPv6 line - awk picks the devices' out)
+ct_sift() { # zone conntrack-file
+	awk '/^[0-9.]+$/ { print "src=" $1 " "; print "dst=" $1 " "; next } /:/ { v6 = 1 } END { if (v6) print "ipv6 " }' \
+		"$LF_RUN/$1.dev" > "$LF_RUN/$1.ctpat" 2>/dev/null
+	[ -s "$LF_RUN/$1.ctpat" ] || return 0
+	grep -F -f "$LF_RUN/$1.ctpat" "$2"
+}
+
+# "Ports seen": on passes with game traffic, the server ports the zone's
+# device talks to (from conntrack) are added to $LF_STATE/<zone>.ports - so
+# a zone on a wide preset (Any game, Apex Legends) can be narrowed to the
+# ports its game really uses. Only on passes with game traffic: cheap.
+tally_ports() {
+	local z="$1" t="$2" ct last=0
+	ct="$(ct_file)" || return 0
+	[ -s "$LF_RUN/$z.dev" ] || return 0
+	# (once a pass at most - passes come every 2 s while a game looks for servers)
+	read -r last 2>/dev/null < "$LF_RUN/$z.ports.at"
+	is_uint "$last" && [ $((t - last)) -lt "$G_INTERVAL" ] && [ "$t" -ge "$last" ] && return 0
+	echo "$t" > "$LF_RUN/$z.ports.at"
+	ct_sift "$z" "$ct" | lfawk ct_ports -v devs="$LF_RUN/$z.dev" -v proto="$Z_PROTO" > "$LF_RUN/ports.now" 2>/dev/null
+	if [ -s "$LF_RUN/ports.now" ]; then
+		[ -f "$LF_STATE/$z.ports" ] || : > "$LF_STATE/$z.ports"
+		lfawk ports_merge -v now="$t" "$LF_STATE/$z.ports" "$LF_RUN/ports.now" | \
+			sort -k5,5nr -k3,3nr | head -n 200 > "$LF_STATE/$z.ports.new" && mv "$LF_STATE/$z.ports.new" "$LF_STATE/$z.ports"
+	fi
+	rm -f "$LF_RUN/ports.now"
+}
+
+# ports <zone> [clear]: the zone's "Ports seen" list, busiest first:
+# "<proto>/<port> <servers at once> <packets, peak> <first seen> <last seen> <passes> <covered 1|0>"
+do_ports() {
+	local z="$1"
+	zone_or_die "$z"
+	restore
+	if [ "$2" = clear ]; then
+		lock_acquire
+		rm -f "$LF_STATE/$z.ports" "$G_DATA/zones/$z.ports"
+		lock_release
+		echo "cleared the ports seen for zone $z"
+		return 0
+	fi
+	[ -n "$2" ] && die "usage: lobbyfence ports <zone> [clear]"
+	zone_load "$z"
+	[ -s "$LF_STATE/$z.ports" ] || return 0
+	lfawk ports_show -v lp="$Z_LPORT" -v rp="$Z_RPORT" -v pp="$Z_PORT" "$LF_STATE/$z.ports" | sort -k3,3nr -k6,6nr
+}
+
+# Which server ports the zone's device uses right now (from the router's
+# connection list), and whether the zone's ports cover them - when a game
+# preset's ports are wrong, the game's servers show up here as "NOT covered".
+diag_ports() {
+	local ct p="$Z_PROTO"
+	ct="$(ct_file)" && [ -s "$LF_RUN/$1.dev" ] || return 0
+	[ "$p" = both ] && p=""
+	echo "  server ports the device uses now (servers, packets it sent; * = NOT covered by this zone's ports):"
+	ct_sift "$1" "$ct" | lfawk ct_ports -v devs="$LF_RUN/$1.dev" -v proto="${p:-both}" -v lp="$Z_LPORT" -v rp="$Z_RPORT" -v pp="$Z_PORT" 2>/dev/null \
+		| sort -k2,2nr -k3,3nr | head -n 15 \
+		| awk '{ printf "    %s%s: %d server(s), %s packets\n", ($4 == 1 ? "  " : "* "), $1, $2, ($3 < 0 ? "?" : $3) }'
+}
+
+# ------------------------------------------------------------------- debug
+
+DEBUG_MAX=240000   # bytes (LuCI hands at most 256 KB of a command's output to the page)
+
+sect() { printf '\n==== %s\n' "$1"; }
+
+debug_system() {
+	local k v nv="${LF_NVRAM:-nvram}"
+	echo "LobbyFence $LF_VERSION, firewall backend: $LF_FW"
+	echo "report made: $(date '+%F %T %Z' 2>/dev/null)$(clock_ok || echo ' - the router clock is NOT set yet (no time from the internet)')"
+	echo "router up for: $(awk '{ printf "%d days %02d:%02d", $1 / 86400, $1 % 86400 / 3600, $1 % 3600 / 60 }' /proc/uptime 2>/dev/null), load $(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null)"
+	echo "kernel: $(uname -a 2>/dev/null)"
+	[ -f /etc/openwrt_release ] && grep -E '^DISTRIB_(DESCRIPTION|TARGET|ARCH)=' /etc/openwrt_release
+	[ -f /tmp/sysinfo/model ] && echo "model: $(cat /tmp/sysinfo/model)"
+	# (only these few keys: the rest of nvram holds passwords)
+	if have "$nv"; then
+		for k in DD_BOARD os_version os_date buildno extendno firmver productid odmpid t_model_name sfe ctf_disable; do
+			v="$($nv get "$k" 2>/dev/null)"
+			[ -n "$v" ] && echo "nvram $k: $v"
+		done
+	fi
+	awk -F': *' 'tolower($1) ~ /^(model name|system type|cpu model|hardware)/ && !s[$1]++ { print "cpu: " $2 } /^processor/ { n++ } END { print "cpu cores: " n + 0 }' /proc/cpuinfo 2>/dev/null
+	awk '/^(MemTotal|MemFree|MemAvailable|Cached):/ { printf "%s %d MB  ", $1, $2 / 1024 } END { print "" }' /proc/meminfo 2>/dev/null
+	echo "space (learned data / memory files):"
+	df -k "$G_DATA" "$LF_RUN" 2>/dev/null
+}
+
+debug_tools() {
+	local t l=""
+	for t in awk curl wget uclient-fetch nft iptables ip6tables iptables-restore ipset tc conntrack logger logread lighttpd; do
+		have "$t" && l="$l $t" || l="$l (no $t)"
+	done
+	echo "tools:$l"
+	busybox 2>&1 | head -n 1
+	have nft && nft --version 2>&1 | head -n 1
+	have iptables && iptables -V 2>&1 | head -n 1
+	have ipset && ipset -v 2>&1 | head -n 1
+	echo "connection packet counts (nf_conntrack_acct): $(cat /proc/sys/net/netfilter/nf_conntrack_acct 2>/dev/null || echo '?')"
+}
+
+# the system log's LobbyFence lines (logread on OpenWrt / DD-WRT, files elsewhere)
+debug_syslog() {
+	local out=""
+	have logread && out="$(logread 2>/dev/null | grep -i lobbyfence | tail -n 150)"
+	if [ -z "$out" ]; then
+		out="$(for f in /tmp/syslog.log-1 /tmp/syslog.log /jffs/syslog.log-1 /jffs/syslog.log /var/log/messages.0 /var/log/messages; do
+			[ -f "$f" ] && grep -i lobbyfence "$f" 2>/dev/null
+		done | tail -n 150)"
+	fi
+	[ -n "$out" ] && echo "$out" || echo "(none found - the router's system log may be switched off)"
+}
+
+debug_data() {
+	local z f
+	for z in $ZONES; do
+		f="$LF_STATE/$z.ips"
+		echo "zone $z: $(lines "$f") server address(es) learned, server list revision $(cat "$LF_RUN/$z.rev" 2>/dev/null || echo 0)"
+	done
+	echo "locations known: $(lines "$LF_STATE/geo.cache")"
+	echo "lookups in the last minute: $(awk -v t="$(geo_now)" '$1 > t - 61' "$LF_RUN/geo.calls" 2>/dev/null | wc -l) of $GEO_RATE_LIMIT allowed$(b="$(cat "$LF_RUN/geo.backoff" 2>/dev/null)"; is_uint "$b" && [ "$b" -gt "$(geo_now)" ] && echo ", waiting $((b - $(geo_now))) s (the service asked)")"
+	echo "last saved to flash: $(p="$(cat "$LF_RUN/persisted_at" 2>/dev/null)"; is_uint "$p" && echo "$(( $(now) - p )) s ago" || echo never)$([ -f "$LF_RUN/persist.err" ] && echo ' - SAVING FAILED (see the log)')"
+	echo
+	echo "saved on flash ($G_DATA):"
+	ls -l "$G_DATA" "$G_DATA/zones" 2>&1 | head -n 40
+	echo
+	echo "files in memory ($LF_RUN):"
+	ls -l "$LF_RUN" 2>&1 | head -n 80
+}
+
+debug_clear() {
+	load_config
+	rm -f "$(crash_file)" "$LF_RUN/crash.log" "$LF_RUN/last_error"
+	write_status 2>/dev/null
+	log notice "crash records and the last error cleared"
+	echo "cleared"
+}
+
+# everything someone needs to find out what went wrong, as one text: no
+# passwords, MAC addresses partly hidden (lobbyfence debug [clear])
+do_debug() {
+	[ "$1" = clear ] && { debug_clear; return 0; }
+	load_config
+	ensure_dirs
+	restore
+	{
+		echo "LobbyFence debug report"
+		echo "(No passwords. MAC addresses are partly hidden. It does show your zones' regions and"
+		echo " the game servers' addresses - look through it before posting it publicly.)"
+		sect "System"; debug_system
+		sect "Tools"; debug_tools
+		sect "Crashes on record (newest last)"
+		if [ -s "$(crash_file)" ] || [ -s "$LF_RUN/crash.log" ]; then cat "$(crash_file)" "$LF_RUN/crash.log" 2>/dev/null; else echo "(none)"; fi
+		sect "Last error"; if [ -s "$LF_RUN/last_error" ]; then read -r t e < "$LF_RUN/last_error"; echo "$(( $(now) - ${t:-0} )) s ago: $e"; else echo "(none)"; fi
+		sect "What LobbyFence sees (diag)"; do_diag
+		sect "Status file"; cat "$LF_RUN/status.json" 2>/dev/null || echo "(none yet)"
+		sect "LobbyFence's own log (in memory, newest last)"; tail -n 200 "$LF_RUN/log" 2>/dev/null || echo "(empty)"
+		sect "System log lines about LobbyFence"; debug_syslog
+		sect "Error output of the learning loop (newest last)"; tail -n 100 "$LF_RUN/daemon.err" 2>/dev/null || echo "(none)"
+		sect "Learning loop"; echo "last step: $(cat "$LF_RUN/phase" 2>/dev/null || echo '?')"
+		sect "Settings"
+		cat "${LF_CONF_FILE:-/etc/config/$LF_CONFIG}" 2>/dev/null || echo "(settings file not found)"
+		[ -f "${LF_CONF_STAGED:-/nonexistent}" ] && { echo; echo "(changes saved on the page but not applied yet:)"; cat "$LF_CONF_STAGED"; }
+		sect "Firewall"; have fw_debug && fw_debug
+		sect "Learned data"; debug_data
+		sect "Processes"; ps 2>/dev/null | grep -E 'lobbyfence|lighttpd|lf-lagd' | grep -v -E 'grep|ps$'
+		[ -n "${LF_DEBUG_EXTRA:-}" ] && $LF_DEBUG_EXTRA
+		sect "End of report"
+	} 2>&1 | tr -d '\000-\010\013-\037\177' | lfawk maskmac -v max="$DEBUG_MAX"   # (control characters out: some log lines carry them)
+}
+
+usage() {
+	cat <<-EOF
+	LobbyFence $LF_VERSION - geographic game-server filter
+
+	Usage: lobbyfence <command> [arguments]
+
+	  status [json]            show zones, learned servers and counters
+	  list <zone> [state]      list a zone's servers (state: in, out, pending, unloc)
+	  whereis <address>        locate one address and check it against every zone
+	  apitest [address]        check that the geolocation service answers (JSON)
+	  live                     current counters and "open for server tests" state (JSON)
+	  devices                  devices on the network with their addresses (JSON)
+	  import <zone> <file|->   add server addresses (one or more per line)
+	  export                   the located servers by game, as a file another router
+	                           can import (no lookups needed for those servers)
+	  import-servers <file|->  use another router's export: its locations are used
+	                           before asking the geolocation service
+	  remove-servers <game|all> [addr...]
+	                           delete a game's servers list (kept, imported and
+	                           learned by zones set to that game), or just those
+	                           servers of it
+	  ports <zone> [clear]     the server ports the zone's device used while playing
+	                           (to narrow a wide preset to its game's real ports)
+	  forget <zone> [addr...]  remove learned addresses (all when none given)
+	  allow <zone> <addr...>   always allow these servers (takes effect at once)
+	  block <zone> <addr...>   always block these servers (takes effect at once)
+	  unlist <zone> <addr...>  remove allow/block rules for these servers
+	  cycle                    run one learn/locate/update pass now
+	  apply                    rebuild the firewall table from the configuration
+	  persist                  save learned data to flash now
+	  teardown                 save data and remove the firewall table
+	  daemon                   run the learning loop (started by the init script)
+	  fwhook                   put the rules back after the system rebuilt its firewall
+	  diag                     what the map shows and why (servers missing?)
+	  debug [clear]            a report for finding problems (logs, crashes, settings,
+	                           firewall); "clear" forgets the crash records
+	EOF
+}
+
+cmd="$1"; [ $# -gt 0 ] && shift
+case "$cmd" in
+	apply) lock_acquire; do_apply; rc=$?; lock_release; exit $rc;;
+	cycle) lock_acquire; do_cycle; rc=$?; lock_release; exit $rc;;
+	fwhook) lock_acquire; do_fwhook; rc=$?; lock_release; exit $rc;;
+	teardown|stop) lock_acquire 20; do_teardown; lock_release;;
+	persist) load_config; lock_acquire; persist; lock_release;;
+	daemon) do_daemon;;
+	status) do_status "$@";;
+	list) do_list "$@";;
+	import) do_import "$@";;
+	export) do_export;;
+	import-servers) do_import_servers "$@";;
+	remove-servers) do_remove_servers "$@";;
+	ports) do_ports "$@";;
+	forget) do_forget "$@";;
+	allow|block|unlist) do_override "$cmd" "$@";;
+	whereis) do_whereis "$@";;
+	diag) do_diag;;
+	debug) do_debug "$@";;
+	apitest) do_apitest "$@";;
+	live) do_live;;
+	devices) do_devices;;
+	version|-v|--version) echo "$LF_VERSION";;
+	''|help|-h|--help) usage;;
+	*) usage >&2; exit 1;;
+esac
