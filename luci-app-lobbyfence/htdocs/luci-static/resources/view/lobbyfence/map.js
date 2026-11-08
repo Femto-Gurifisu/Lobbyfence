@@ -3157,22 +3157,23 @@ return view.extend({
 		if (geo && geo.error)
 			api = line(t.blocked, [ _('API problem: '), E('span', { 'class': 'lf-muted' }, geo.error) ]);
 		else if (geo && geo.last_ok)
-			api = line(t.allowed, [ _('API OK'), muted(_('last lookup %s').format(ago(geo.last_ok))) ]);
+			api = line(t.allowed, [ _('API OK'), muted(_('last lookup %s').format(ago(geo.last_ok, self.routerNow()))) ]);
 		else
 			api = line(t.unknown, _('API not used yet'));
 		if (geo && geo.pending)
 			api.lastChild.appendChild(muted(_('%d waiting').format(geo.pending)));
 		sec.appendChild(api);
 
-		/* problems the router recorded: the background service crashing, the last error */
-		var pr = st && st.problems, nowS = Date.now() / 1000;
+		/* problems the router recorded: the background service crashing, the last error
+		   (their times are the router's, so they're measured by its clock, not this PC's) */
+		var pr = st && st.problems, nowS = self.routerNow();
 		if (pr && pr.crashes > 0 && nowS - pr.crash_time < 7 * 86400)
 			sec.appendChild(line(t.blocked, [ E('span', { 'class': 'lf-warn' }, pr.crashes > 1
-				? _('The background service stopped unexpectedly %d times (last %s) and was started again.').format(pr.crashes, ago(pr.crash_time))
-				: _('The background service stopped unexpectedly (%s) and was started again.').format(ago(pr.crash_time))), ' ',
+				? _('The background service stopped unexpectedly %d times (last %s) and was started again.').format(pr.crashes, ago(pr.crash_time, nowS))
+				: _('The background service stopped unexpectedly (%s) and was started again.').format(ago(pr.crash_time, nowS))), ' ',
 				E('a', { 'href': '#', 'class': 'lf-link', 'click': function(ev) { ev.preventDefault(); self.openDebug(); } }, _('Details…')) ], 'lf-sm lf-problem'));
 		if (pr && pr.error && nowS - pr.error_time < 86400)
-			sec.appendChild(line(t.blocked, [ _('Last error, %s: ').format(ago(pr.error_time)), E('span', { 'class': 'lf-muted' }, pr.error) ], 'lf-sm lf-problem'));
+			sec.appendChild(line(t.blocked, [ _('Last error, %s: ').format(ago(pr.error_time, nowS)), E('span', { 'class': 'lf-muted' }, pr.error) ], 'lf-sm lf-problem'));
 
 		if (res)
 			sec.appendChild(res.ok
@@ -3513,7 +3514,7 @@ return view.extend({
 		ui.showModal(_('Debug report'), [
 			E('p', {}, _('If something in LobbyFence is not working right, download this report and attach it to your problem report. It is made on the router right now: its logs, recorded crashes, settings, firewall rules - and what this browser ran into.')),
 			E('p', { 'style': 'font-size:90%;opacity:.8' }, _('No passwords, and MAC addresses are partly hidden. It does show your regions and the game servers\' addresses, so look through it before posting it publicly.')),
-			(pr && pr.crashes > 0) ? E('p', { 'class': 'lf-warn' }, _('Crashes on record: %d (last %s) - their details are in the report.').format(pr.crashes, ago(pr.crash_time))) : null,
+			(pr && pr.crashes > 0) ? E('p', { 'class': 'lf-warn' }, _('Crashes on record: %d (last %s) - their details are in the report.').format(pr.crashes, ago(pr.crash_time, self.routerNow()))) : null,
 			stateNode,
 			preview,
 			E('div', { 'class': 'right' }, [
@@ -3582,7 +3583,7 @@ return view.extend({
 				listNode.appendChild(E('p', { 'class': 'lf-servers-empty' }, _('No located servers saved yet. Play a little (or import a file), and they show up here.')));
 				return;
 			}
-			var now = Date.now() / 1000, MAX = 300;
+			var now = self.routerNow(), MAX = 300;
 			games.forEach(function(g) {
 				var imp = g.rows.filter(function(r) { return r.imported; }).length, cc = {}, top;
 				g.rows.forEach(function(r) { cc[r.cc] = (cc[r.cc] || 0) + 1; });
@@ -4716,7 +4717,7 @@ return view.extend({
 				preview();
 				return;
 			}
-			var now = Date.now() / 1000;
+			var now = self.routerNow();   /* "last seen" is the router's time: measure it by the router's clock */
 			listNode.appendChild(E('table', { 'class': 'lf-servers-table' }, [
 				E('tr', {}, [ head(''), head(_('Server port'), 'port'), head(_('Packets'), 'total'), head(_('Servers'), 'servers'),
 					head(_('Seen in'), 'passes'), head(_('Last seen'), 'last') ])

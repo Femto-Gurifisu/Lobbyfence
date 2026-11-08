@@ -897,12 +897,18 @@ def main():
         page.wait_for_timeout(6000)
         check("closed: no more reading", page.evaluate("window.__execs.filter(e => e[1] === 'ports').length") == n)
         # sorting: Sort by (or a click on a column), highest first; remembered for next time
+        # (the router's clock here is far from this PC's - like a router that has not synced its time)
+        page.evaluate("window.__live = { time: 1000, zones: {} }")
+        page.evaluate("window.__poll()")
+        page.wait_for_timeout(200)
         page.evaluate("t => { window.__execResult = { code: 0, stdout: t }; }",
                       "udp/30000 1 60 100 200 9 1 100\nudp/20000 3 500 100 300 2 1 900\nudp/10000 1 50 100 250 5 1 200\n")
         page.locator(".lf-portsseen").click()
         page.wait_for_function("document.querySelectorAll('.lf-ports-pick').length === 3")
         order = lambda: page.evaluate("[...document.querySelectorAll('.lf-ports-pick')].map(c => +c.value)")
         check("Ports seen: busiest first by default", order() == [20000, 10000, 30000], order())
+        seen = page.evaluate("[...document.querySelectorAll('.lf-ports-pick')].map(c => c.closest('tr').lastChild.innerText)")
+        check("Last seen is measured by the router's clock, not the PC's", seen == ["11 min ago", "12 min ago", "13 min ago"], seen)
         page.locator(".lf-ports-pick[value='30000']").check()
         page.locator(".lf-ports-sort").select_option("passes")
         check("Sort by Seen in: most passes first", order() == [30000, 10000, 20000], order())
@@ -928,7 +934,15 @@ def main():
               and page.locator(".lf-ports-sort").input_value() == "passes", order())
         page.locator(".lf-ports-sort").select_option("total")
         page.locator("#modal").get_by_role("button", name="Cancel").click()
-        page.evaluate("window.__execResult = null")
+        page.evaluate("window.__execResult = null; window.__live = null")
+        page.evaluate("window.__poll()")
+        page.wait_for_timeout(200)
+        # a crash and an error the router recorded an hour ago by its own clock (years behind this PC's)
+        page.evaluate("""() => { const s = window.view.status; window.__upd = s.updated; s.updated = 1700000000;
+            s.problems = { crashes: 1, crash_time: 1699996400, error: 'test error', error_time: 1699999000 }; window.view.renderStatus(); }""")
+        txt = page.locator(".lf-panel").inner_text()
+        check("crash and error notes go by the router's clock", "stopped unexpectedly (1 h ago)" in txt and "Last error, 16 min ago" in txt, txt[-400:])
+        page.evaluate("() => { const s = window.view.status; s.updated = window.__upd; delete s.problems; window.view.renderStatus(); }")
 
         # ---- 6b. Servers file: see the saved servers by game, download / copy / import / paste
         sfile = "# LobbyFence servers file\nlobbyfence-servers 1\ngame game Test game\n45.10.0.1 51.5 -0.1 GB 1700000000\n80.20.0.1 40.7 -74.0 US 1700000000\ngame apex\n99.1.1.1 52.5 13.4 DE 1700000000 imported\n"
