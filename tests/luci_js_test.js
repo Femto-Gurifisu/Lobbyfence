@@ -50,7 +50,7 @@ const HELPERS = [ 'distanceKm', 'destination', 'circleRing', 'wrapLon', 'parseCi
 	'themedStyle', 'rasterStyle', 'THEMES', 'THEME_ORDER', 'DEFAULT_THEME', 'flag', 'ago', 'ringBounds',
 	'PRESETS', 'PRESET_GROUPS', 'DEFAULT_PRESET', 'presetById', 'presetSummary', 'burstAdvice', 'presetOn', 'needsPlatform', 'PLATFORMS', 'isMac', 'validDevice',
 	'mercY', 'normalizePolygon', 'inPolygon', 'parsePolygons', 'formatPolygon', 'v4num', 'v6groups', 'cidrMatch', 'inList',
-	'edgeKind', 'alignedKind', 'straightenPolygon', 'mercArea', 'SNAP_TOLERANCE', 'satelliteStyle',
+	'edgeKind', 'alignedKind', 'straightenPolygon', 'mercArea', 'satelliteStyle',
 	'parseAddressList', 'deviceLabel', 'RANGES', 'addExtraLabels', 'WORLD_BOUNDS' ];
 
 // even-odd point in polygon on plain lon/lat (what the map draws in mercator)

@@ -1061,8 +1061,6 @@ function inPolygon(pts, lat, lon) {
 
 /* ------------------------------------------------- straight edges */
 
-var SNAP_TOLERANCE = 20;   /* degrees from horizontal / vertical that count as "meant to be straight" */
-
 function mercDeg(lat) { return toDeg(mercY(lat)); }
 function invMercDeg(y) { return toDeg(2 * Math.atan(Math.exp(toRad(y))) - Math.PI / 2); }
 
@@ -4684,17 +4682,18 @@ return view.extend({
 			}
 			var now = Date.now() / 1000;
 			listNode.appendChild(E('table', { 'class': 'lf-servers-table' }, [
-				E('tr', {}, [ E('th', {}, ''), E('th', {}, _('Server port')), E('th', {}, _('Packets (peak)')), E('th', {}, _('Servers')), E('th', {}, _('Seen in')), E('th', {}, _('Last seen')) ])
+				E('tr', {}, [ E('th', {}, ''), E('th', {}, _('Server port')), E('th', {}, _('Packets')), E('th', {}, _('Servers')), E('th', {}, _('Seen in')), E('th', {}, _('Last seen')) ])
 			].concat(rows.map(function(r) {
 				var key = r.proto + '/' + r.port;
 				var c = E('input', { 'type': 'checkbox', 'class': 'lf-ports-pick', 'value': r.port, 'change': function() { userSet[key] = c.checked; preview(); } });
-				/* real game traffic is busy; short bursts on many ports are the game's data-centre pings */
-				c.checked = key in userSet ? userSet[key] : r.packets >= 50;
+				/* real game traffic is busy; short bursts on many ports are the game's data-centre pings
+				   (by the most in one pass: a ping port seen often adds up to a big total too) */
+				c.checked = key in userSet ? userSet[key] : r.peak >= 50;
 				picks.push(c);
 				return E('tr', {}, [
 					E('td', {}, c),
 					E('td', { 'class': 'lf-mono' }, E('label', { 'style': 'cursor:pointer', 'click': function(ev) { if (ev.target.tagName !== 'INPUT') { c.checked = !c.checked; userSet[key] = c.checked; preview(); } } }, key)),
-					E('td', {}, String(r.packets)), E('td', {}, String(r.servers)),
+					E('td', { 'title': _('Most in one pass: %d').format(r.peak) }, String(r.total)), E('td', {}, String(r.servers)),
 					E('td', {}, _('%d pass(es)').format(r.passes)), E('td', {}, ago(r.last, now))
 				]);
 			}))));
@@ -4711,8 +4710,9 @@ return view.extend({
 				if (!r || r.code !== 0)
 					throw new Error(r && (r.stderr || r.stdout) || _('no answer'));
 				rows = String(r.stdout || '').split(/\n/).map(function(l) {
-					var m = l.match(/^(udp|tcp)\/([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([01])$/);
-					return m && { proto: m[1], port: +m[2], servers: +m[3], packets: +m[4], first: +m[5], last: +m[6], passes: +m[7], covered: m[8] === '1' };
+					var m = l.match(/^(udp|tcp)\/([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([01])(?: ([0-9]+))?$/);
+					return m && { proto: m[1], port: +m[2], servers: +m[3], peak: +m[4], first: +m[5], last: +m[6], passes: +m[7],
+						covered: m[8] === '1', total: m[9] != null ? +m[9] : +m[4] };
 				}).filter(Boolean);
 				render();
 				liveNode.textContent = _('Updates by itself while this is open - last checked %s.').format(new Date().toLocaleTimeString());
@@ -4751,7 +4751,7 @@ return view.extend({
 			E('label', { 'style': 'display:block;font-size:90%;margin:.4em 0' }, [ round, ' ', _('Round to blocks of 100 ports (the game\'s next servers often use a nearby port)') ]),
 			previewNode,
 			liveNode,
-			E('p', { 'style': 'font-size:90%;opacity:.8' }, _('Ticked for you: ports with real game traffic (50+ packets). The many short ones are usually the game measuring the ping to its data centres - tick those too to keep far data centres blocked there as well.')),
+			E('p', { 'style': 'font-size:90%;opacity:.8' }, _('Packets: what the device sent on the port while LobbyFence watched - it grows while you play. Ticked for you: ports with real game traffic (50+ packets in one pass). The many short ones are usually the game measuring the ping to its data centres - tick those too to keep far data centres blocked there as well.')),
 			stateNode,
 			E('div', { 'class': 'right' }, [
 				E('button', { 'class': 'cbi-button', 'click': ui.hideModal }, _('Cancel')), ' ',

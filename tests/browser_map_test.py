@@ -854,14 +854,17 @@ def main():
 
         # ---- 6a. Ports seen: narrow the zone to the ports its game really used
         zid = page.evaluate("document.querySelector('.lf-zonesel') ? document.querySelector('.lf-zonesel').value : null") or "game"
-        ports_out = "udp/10200 1 7922 100 200 5 1\nudp/10600 1 4371 100 200 3 1\nudp/27019 2 8 100 200 2 1\nudp/27054 1 8 100 200 1 1\n"
+        ports_out = "udp/10200 1 7922 100 200 5 1 25000\nudp/10600 1 4371 100 200 3 1\nudp/27019 2 8 100 200 2 1 400\nudp/27054 1 8 100 200 1 1\n"
         page.evaluate("t => { window.__execResult = { code: 0, stdout: t }; }", ports_out)
         page.locator(".lf-portsseen").click()
         pm = page.locator("#modal")
         page.wait_for_function("document.querySelectorAll('.lf-ports-pick').length === 4")
         check("Ports… asks the router for the zone's ports", page.evaluate("window.__execs.slice(-1)[0]")[:2] == ["/usr/sbin/lobbyfence", "ports"])
         ticked = page.evaluate("[...document.querySelectorAll('.lf-ports-pick')].map(c => c.checked)")
-        check("busy ports ticked for you, the short ping ones not", ticked == [True, True, False, False], ticked)
+        check("busy ports ticked for you, the short ping ones not (by the most in one pass, not the total)", ticked == [True, True, False, False], ticked)
+        cells = page.evaluate("[...document.querySelectorAll('.lf-ports-list tr')].slice(1).map(r => [r.cells[2].innerText, r.cells[2].title])")
+        check("Packets shows the total sent, the busiest pass on hover", cells[0] == ["25000", "Most in one pass: 7922"] and cells[2] == ["400", "Most in one pass: 8"], cells)
+        check("...a port from before totals were kept shows its peak", cells[1][0] == "4371", cells)
         check("preview rounds to blocks of 100", "10200-10299, 10600-10699" in pm.locator(".lf-ports-preview").inner_text(), pm.locator(".lf-ports-preview").inner_text())
         pm.locator(".lf-ports-pick").nth(2).check(); pm.locator(".lf-ports-pick").nth(3).check()
         check("ping ports merge into one block", "10200-10299, 10600-10699, 27000-27099" in pm.locator(".lf-ports-preview").inner_text(), pm.locator(".lf-ports-preview").inner_text())

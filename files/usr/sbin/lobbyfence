@@ -823,7 +823,7 @@ cleanup_zones() {
 		rm -f "$G_DATA/zones/$z.game"
 		rm -f "$LF_STATE/$z.ports" "$G_DATA/zones/$z.ports"
 		rm -f "$LF_STATE/$z.ips" "$G_DATA/zones/$z.ips" "$LF_RUN/$z.servers" "$LF_RUN/$z.rev" "$LF_RUN/$z.sig" "$LF_RUN/$z.cls" "$LF_RUN/$z.new" "$LF_RUN/$z.merged" "$LF_RUN/$z.counts" "$LF_RUN/$z.state.last" "$LF_RUN/$z.out.last" \
-			"$LF_RUN/$z.dev" "$LF_RUN/$z.mip" "$LF_RUN/$z.macs"
+			"$LF_RUN/$z.dev" "$LF_RUN/$z.mip" "$LF_RUN/$z.macs" "$LF_RUN/$z.ctlast" "$LF_RUN/$z.ctpat" "$LF_RUN/$z.ports.at"
 		log info "removed the learned servers of deleted zone $z"
 	done
 }
@@ -1522,7 +1522,12 @@ tally_ports() {
 	read -r last 2>/dev/null < "$LF_RUN/$z.ports.at"
 	is_uint "$last" && [ $((t - last)) -lt "$G_INTERVAL" ] && [ "$t" -ge "$last" ] && return 0
 	echo "$t" > "$LF_RUN/$z.ports.at"
-	ct_sift "$z" "$ct" | lfawk ct_ports -v devs="$LF_RUN/$z.dev" -v proto="$Z_PROTO" > "$LF_RUN/ports.now" 2>/dev/null
+	# (each connection's packet count is kept for the next pass: a port's total
+	# grows by what its connections sent in between)
+	: > "$LF_RUN/$z.ctlast.new"
+	ct_sift "$z" "$ct" | lfawk ct_ports -v devs="$LF_RUN/$z.dev" -v proto="$Z_PROTO" \
+		-v ctlast="$LF_RUN/$z.ctlast" -v ctnext="$LF_RUN/$z.ctlast.new" > "$LF_RUN/ports.now" 2>/dev/null
+	mv -f "$LF_RUN/$z.ctlast.new" "$LF_RUN/$z.ctlast"
 	if [ -s "$LF_RUN/ports.now" ]; then
 		[ -f "$LF_STATE/$z.ports" ] || : > "$LF_STATE/$z.ports"
 		lfawk ports_merge -v now="$t" "$LF_STATE/$z.ports" "$LF_RUN/ports.now" | \
@@ -1547,7 +1552,7 @@ do_ports() {
 	[ -n "$2" ] && die "usage: lobbyfence ports <zone> [clear]"
 	zone_load "$z"
 	[ -s "$LF_STATE/$z.ports" ] || return 0
-	lfawk ports_show -v lp="$Z_LPORT" -v rp="$Z_RPORT" -v pp="$Z_PORT" "$LF_STATE/$z.ports" | sort -k3,3nr -k6,6nr
+	lfawk ports_show -v lp="$Z_LPORT" -v rp="$Z_RPORT" -v pp="$Z_PORT" "$LF_STATE/$z.ports" | sort -k8,8nr -k3,3nr
 }
 
 # Which server ports the zone's device uses right now (from the router's

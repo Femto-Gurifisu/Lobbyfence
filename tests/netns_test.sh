@@ -574,7 +574,7 @@ lf ports game clear > /dev/null
 probe 45.10.0.1 > /dev/null
 inr env LF_CONNTRACK="$W/ct.txt" $LF cycle 2>>"$W/stderr.log"
 out="$(lf ports game)"
-echo "$out" | head -1 | grep -q '^udp/41215 2 1600 [0-9]* [0-9]* 1 [01]$' && echo "$out" | grep -q '^udp/3074 1 120 ' && ! echo "$out" | grep -q 'udp/5000' \
+echo "$out" | head -1 | grep -q '^udp/41215 2 1600 [0-9]* [0-9]* 1 [01] 1600$' && echo "$out" | grep -q '^udp/3074 1 120 ' && ! echo "$out" | grep -q 'udp/5000' \
 	&& pass "ports: the device's server ports tallied, busiest first, other devices left out" || fail "ports: $out"
 sleep 1; probe 45.10.0.1 > /dev/null
 inr env LF_CONNTRACK="$W/ct.txt" $LF cycle 2>>"$W/stderr.log"
@@ -582,7 +582,12 @@ lf ports game | grep -q '^udp/41215 2 1600 [0-9]* [0-9]* 1 ' && pass "ports: tal
 rm -f "$W/run/game.ports.at"
 probe 45.10.0.1 > /dev/null
 inr env LF_CONNTRACK="$W/ct.txt" $LF cycle 2>>"$W/stderr.log"
-lf ports game | grep -q '^udp/41215 2 1600 [0-9]* [0-9]* 2 ' && pass "ports: seen again -> 2 passes" || fail "ports again: $(lf ports game)"
+lf ports game | grep -q '^udp/41215 2 1600 [0-9]* [0-9]* 2 [01] 1600$' && pass "ports: seen again -> 2 passes (nothing sent since: the total stays)" || fail "ports again: $(lf ports game)"
+# the game keeps sending: the total counts it, the peak follows the busiest pass
+sed -i 's/packets=900 /packets=1500 /' "$W/ct.txt"
+sleep 1; rm -f "$W/run/game.ports.at"; probe 45.10.0.1 > /dev/null
+inr env LF_CONNTRACK="$W/ct.txt" $LF cycle 2>>"$W/stderr.log"
+lf ports game | grep -q '^udp/41215 2 2200 [0-9]* [0-9]* 3 [01] 2200$' && pass "ports: the packets the game sent since the pass before are added" || fail "ports total: $(lf ports game | head -2)"
 lf persist
 lf teardown; rm -rf "$W/run/state"; lf apply
 lf ports game | grep -q '^udp/41215 ' && pass "ports: kept on flash, back after a restart" || fail "ports restore: $(ls "$W/data/zones")"

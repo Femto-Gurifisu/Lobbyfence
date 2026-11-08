@@ -134,6 +134,19 @@ t "conntrack: ports the device uses, covered by the zone's ports or not" "udp/30
 	"$(ra ct_ports -v devs=/tmp/lf_dev.$$ -v rp='30000-30010' < /tmp/lf_ct.$$ | tr '\n' '|')"
 t "conntrack: ports, one protocol" "udp/30000 1 120 1|udp/30001 1 5 1|udp/53 1 1 1|udp/40000 1 -1 1|udp/3478 1 40 1|" \
 	"$(ra ct_ports -v devs=/tmp/lf_dev.$$ -v proto=udp < /tmp/lf_ct.$$ | tr '\n' '|')"
+# Ports seen: what each connection sent since the pass before (first pass: all of it)
+rm -f /tmp/lf_cl.$$; : > /tmp/lf_cn.$$
+t "conntrack: first pass - each connection's packets so far" "udp/30000 1 120 1 120|udp/40000 1 -1 1 -1|udp/3478 1 40 1 40|" \
+	"$(ra ct_ports -v devs=/tmp/lf_dev.$$ -v proto=udp -v ctlast=/tmp/lf_cl.$$ -v ctnext=/tmp/lf_cn.$$ < /tmp/lf_ct.$$ | grep -v -e udp/30001 -e udp/53 | tr '\n' '|')"
+t "...and their counts kept for the next pass" "4" "$(wc -l < /tmp/lf_cn.$$ | tr -d ' ')"
+mv /tmp/lf_cn.$$ /tmp/lf_cl.$$; : > /tmp/lf_cn.$$
+sed 's/packets=120 /packets=170 /; s/packets=40 /packets=40 /' /tmp/lf_ct.$$ > /tmp/lf_ct2.$$
+t "conntrack: next pass - only what was sent since (a still connection adds nothing)" "udp/30000 1 170 1 50|udp/3478 1 40 1 0|" \
+	"$(ra ct_ports -v devs=/tmp/lf_dev.$$ -v proto=udp -v ctlast=/tmp/lf_cl.$$ -v ctnext=/tmp/lf_cn.$$ < /tmp/lf_ct2.$$ | grep -e udp/30000 -e udp/3478 | tr '\n' '|')"
+sed 's/packets=170 /packets=20 /' /tmp/lf_ct2.$$ > /tmp/lf_ct3.$$; mv /tmp/lf_cn.$$ /tmp/lf_cl.$$
+t "conntrack: a connection that started over counts from 0" "udp/30000 1 20 1 20|" \
+	"$(ra ct_ports -v devs=/tmp/lf_dev.$$ -v proto=udp -v ctlast=/tmp/lf_cl.$$ -v ctnext=/dev/null < /tmp/lf_ct3.$$ | grep udp/30000 | tr '\n' '|')"
+rm -f /tmp/lf_cl.$$ /tmp/lf_cn.$$ /tmp/lf_ct2.$$ /tmp/lf_ct3.$$
 t "ipset ages: unknown packet count is -1" "45.10.0.1 3 120|80.20.0.1 13 -1|" \
 	"$(printf '45.10.0.1 120\n' > /tmp/lf_pk.$$; printf 'Name: lf_game_now4\nType: hash:ip\nMembers:\n45.10.0.1 timeout 12\n80.20.0.1 timeout 2\n' | ra ipset_ages -v window=15 -v pk=/tmp/lf_pk.$$ | tr '\n' '|')"
 
@@ -186,14 +199,19 @@ t "export: kept servers found by this router are not marked imported" "lobbyfenc
 rm -f /tmp/lf_o1.$$ /tmp/lf_o2.$$ /tmp/lf_e0.$$
 printf 'udp/10200 1 500 100 100 1\nudp/27019 2 8 100 100 1\nbad line\n' > /tmp/lf_pt.$$
 printf 'udp/10200 1 900 1\nudp/10600 1 4000 0\nudp/443 3 99 0\ntcp/80 1 5 0\n' > /tmp/lf_pn.$$
-t "ports_merge: peaks kept, new ports added, web / DNS ports never counted" "udp/10200 1 900 100 200 2|udp/27019 2 8 100 100 1|udp/10600 1 4000 200 200 1|" \
+t "ports_merge: peaks kept, new ports added, web / DNS ports never counted" "udp/10200 1 900 100 200 2 500|udp/27019 2 8 100 100 1 8|udp/10600 1 4000 200 200 1 0|" \
 	"$(ra ports_merge -v now=200 /tmp/lf_pt.$$ /tmp/lf_pn.$$ | tr '\n' '|')"
-t "ports_merge: unused for 30 days -> forgotten" "udp/10600 1 4000 2592100 2592100 1|" \
+t "ports_merge: unused for 30 days -> forgotten" "udp/10600 1 4000 2592100 2592100 1 0|" \
 	"$(ra ports_merge -v now=2592100 /tmp/lf_pt.$$ /tmp/lf_pn.$$ | grep -v 10200 | tr '\n' '|')"
-t "ports_show: covered by the zone's ports or not" "udp/10200 1 500 100 100 1 1|udp/27019 2 8 100 100 1 0|" \
+t "ports_show: covered by the zone's ports or not, then the total (a line from before totals: its peak)" "udp/10200 1 500 100 100 1 1 500|udp/27019 2 8 100 100 1 0 8|" \
 	"$(ra ports_show -v rp='10000-10999' /tmp/lf_pt.$$ | tr '\n' '|')"
-t "clean_ports: damaged lines left out and counted" "udp/10200 1 500 100 100 1|udp/27019 2 8 100 100 1|1" \
+t "clean_ports: damaged lines left out and counted" "udp/10200 1 500 100 100 1 500|udp/27019 2 8 100 100 1 8|1" \
 	"$(ra clean_ports -v statf=/tmp/lf_st.$$ /tmp/lf_pt.$$ | tr '\n' '|')$(cat /tmp/lf_st.$$)"
+# totals: what each pass added (5th field from ct_ports) is added up; the peak stays the most in one pass
+printf 'udp/10200 1 900 100 200 2 1500\n' > /tmp/lf_pt.$$
+printf 'udp/10200 1 700 1 650\nudp/10600 2 30 0 30\nudp/27019 1 -1 0 -1\n' > /tmp/lf_pn.$$
+t "ports_merge: the total grows by what was sent since the pass before" "udp/10200 1 900 100 300 3 2150|udp/10600 2 30 300 300 1 30|udp/27019 1 0 300 300 1 0|" \
+	"$(ra ports_merge -v now=300 /tmp/lf_pt.$$ /tmp/lf_pn.$$ | tr '\n' '|')"
 rm -f /tmp/lf_pt.$$ /tmp/lf_pn.$$
 t "shared_hit: the waiting addresses found among the imported locations, as cache lines" "8.8.8.8 2 2 US 20|" \
 	"$(printf '8.8.8.8\n7.7.7.7\n' > /tmp/lf_w.$$; printf '8.8.8.8 2 2 US 20 fortnite\n8.8.8.8 3 3 US 5 apex\n1.1.1.1 1 1 AU 1 cod\n' | ra shared_hit /tmp/lf_w.$$ - | tr '\n' '|')"

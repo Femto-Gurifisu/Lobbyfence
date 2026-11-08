@@ -736,37 +736,48 @@ function port_line_ok() {
 	return $1 ~ /^(udp|tcp)\/[0-9]+$/ && NF >= 6 && $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ && \
 		$4 ~ /^[0-9]+$/ && $5 ~ /^[0-9]+$/ && $6 ~ /^[0-9]+$/ && port_ok(substr($1, 5) + 0)
 }
+# the packets counted on a port so far (lines from before totals were kept: their peak)
+function port_total() {
+	return (NF >= 7 && $7 ~ /^[0-9]+$/) ? $7 + 0 : $3 + 0
+}
 function port_ok(n) {      # web, DNS, time, mDNS / SSDP: never a game's server port
 	return n >= 1 && n <= 65535 && n != 53 && n != 80 && n != 123 && n != 443 && n != 853 && n != 1900 && n != 5353
 }
 op == "clean_ports" {
-	if (port_line_ok()) print $1, $2, $3, $4, $5, $6
+	if (port_line_ok()) print $1, $2, $3, $4, $5, $6, port_total()
 	else if ($0 != "") bad++
 	next
 }
 op == "ports_merge" && FILENAME == ARGV[1] {
 	if (!port_line_ok()) next
 	if (!($1 in tpv)) tpo[++tnpo] = $1
-	tpv[$1] = 1; tps[$1] = $2; tpk[$1] = $3; tpf[$1] = $4; tpl[$1] = $5; tpn[$1] = $6
+	tpv[$1] = 1; tps[$1] = $2; tpk[$1] = $3; tpf[$1] = $4; tpl[$1] = $5; tpn[$1] = $6; tpt[$1] = port_total()
 	next
 }
 op == "ports_merge" {
 	if ($1 !~ /^(udp|tcp)\/[0-9]+$/ || !port_ok(substr($1, 5) + 0) || $2 !~ /^[0-9]+$/) next
-	if (!($1 in tpv)) { tpo[++tnpo] = $1; tpv[$1] = 1; tps[$1] = 0; tpk[$1] = 0; tpf[$1] = now; tpn[$1] = 0 }
+	if (!($1 in tpv)) { tpo[++tnpo] = $1; tpv[$1] = 1; tps[$1] = 0; tpk[$1] = 0; tpf[$1] = now; tpn[$1] = 0; tpt[$1] = 0 }
 	if ($2 + 0 > tps[$1]) tps[$1] = $2 + 0
+	# peak: the most in one pass; total: the packets sent since the pass before, added up
 	if ($3 ~ /^[0-9]+$/ && $3 + 0 > tpk[$1]) tpk[$1] = $3 + 0
+	if ($5 ~ /^[0-9]+$/) tpt[$1] += $5
 	if (tpl[$1] != now) tpn[$1]++
 	tpl[$1] = now
 	next
 }
 op == "ports_show" {
 	if (!port_line_ok()) next
-	print $1, $2, $3, $4, $5, $6, game_ports(-1, substr($1, 5) + 0)
+	print $1, $2, $3, $4, $5, $6, game_ports(-1, substr($1, 5) + 0), port_total()
 	next
 }
 (op == "ct_packets" || op == "ct_ports") && FNR == 1 && NR == 1 {
 	while ((getline l < devs) > 0) if (l != "") ctdev[(index(l, ":") ? v6_norm(l) : l)] = 1
 	close(devs)
+	# (Ports seen: each connection's packet count at the pass before - -v ctlast)
+	if (ctlast != "") {
+		while ((getline ctl < ctlast) > 0) if (split(ctl, ctla, " ") == 2) cprev[ctla[1]] = ctla[2] + 0
+		close(ctlast)
+	}
 }
 op == "ct_packets" || op == "ct_ports" {
 	if (proto != "" && proto != "both" && $3 != proto) next
@@ -792,7 +803,15 @@ op == "ct_packets" || op == "ct_ports" {
 		pk = $3 "/" ctdp[d]
 		if (!(pk in cpn)) { pord[++npt] = pk; cpk[pk] = -1; cpin[pk] = game_ports(ctsp[d], ctdp[d]) }
 		if (!((pk, sv) in cpsv)) { cpsv[pk, sv] = 1; cpn[pk]++ }
-		if (d in ctpk) cpk[pk] = (cpk[pk] < 0 ? 0 : cpk[pk]) + ctpk[d]
+		if (d in ctpk) {
+			cpk[pk] = (cpk[pk] < 0 ? 0 : cpk[pk]) + ctpk[d]
+			# the packets sent since the pass before (-v ctnext: where this pass's counts go)
+			if (ctnext != "") {
+				ck = $3 "|" ctsrc[1] "|" ctsp[1] "|" ctdst[1] "|" ctdp[1]
+				cdel[pk] += (ck in cprev && ctpk[d] >= cprev[ck]) ? ctpk[d] - cprev[ck] : ctpk[d]
+				print ck, ctpk[d] > ctnext
+			}
+		}
 		next
 	}
 	if (!game_ports(ctsp[d], ctdp[d])) next
@@ -950,9 +969,11 @@ END {
 		for (i = 1; i <= nct; i++) print cord[i], ctp[cord[i]]
 	} else if (op == "ports_merge") {
 		# forgotten after 30 days unused
-		for (i = 1; i <= tnpo; i++) if (now - tpl[tpo[i]] < 2592000) print tpo[i], tps[tpo[i]], tpk[tpo[i]], tpf[tpo[i]], tpl[tpo[i]], tpn[tpo[i]]
+		for (i = 1; i <= tnpo; i++) if (now - tpl[tpo[i]] < 2592000) print tpo[i], tps[tpo[i]], tpk[tpo[i]], tpf[tpo[i]], tpl[tpo[i]], tpn[tpo[i]], tpt[tpo[i]]
 	} else if (op == "ct_ports") {
-		for (i = 1; i <= npt; i++) print pord[i], cpn[pord[i]], cpk[pord[i]], cpin[pord[i]]
+		for (i = 1; i <= npt; i++)
+			if (ctnext != "") print pord[i], cpn[pord[i]], cpk[pord[i]], cpin[pord[i]], (cpk[pord[i]] < 0 ? -1 : cdel[pord[i]] + 0)
+			else print pord[i], cpn[pord[i]], cpk[pord[i]], cpin[pord[i]]
 	} else if (op == "ipt_counts") {
 		for (i = 1; i <= nic; i++) print iord[i], icnt[iord[i]]
 	} else if (op == "clean_ips" || op == "clean_cache" || op == "clean_ports") {
