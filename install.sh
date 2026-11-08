@@ -8,7 +8,7 @@
 #   sh /usr/share/lobbyfence/install.sh --uninstall [--purge]
 #
 # To install straight from the repository, set LF_SOURCE to its raw base URL:
-#   LF_SOURCE=https://raw.githubusercontent.com/Femto-Gurifisu/lobbyfence/main sh install.sh
+#   LF_SOURCE=https://raw.githubusercontent.com/Femto-Gurifisu/Lobbyfence/main sh install.sh
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 

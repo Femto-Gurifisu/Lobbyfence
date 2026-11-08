@@ -91,7 +91,7 @@ and they are restored after a reboot.
 ## Install
 
 Download the package for your router's firmware from the
-[latest release](https://github.com/Femto-Gurifisu/lobbyfence/releases/latest):
+[latest release](https://github.com/Femto-Gurifisu/Lobbyfence/releases/latest):
 
 | Firmware | Package | Logs in as | Before the first install |
 |---|---|---|---|
@@ -178,8 +178,8 @@ from this repository (the latest code, over HTTPS), in an SSH session on the
 router:
 
 ```sh
-uclient-fetch -q -O /tmp/lf-install.sh https://raw.githubusercontent.com/Femto-Gurifisu/lobbyfence/main/install.sh
-LF_SOURCE=https://raw.githubusercontent.com/Femto-Gurifisu/lobbyfence/main sh /tmp/lf-install.sh
+uclient-fetch -q -O /tmp/lf-install.sh https://raw.githubusercontent.com/Femto-Gurifisu/Lobbyfence/main/install.sh
+LF_SOURCE=https://raw.githubusercontent.com/Femto-Gurifisu/Lobbyfence/main sh /tmp/lf-install.sh
 ```
 
 On a phone, the map page offers to put LobbyFence on your home screen (a tip
