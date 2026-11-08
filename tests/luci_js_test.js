@@ -175,7 +175,7 @@ const inDrawn = (ring, lon, lat) => [ -360, 0, 360 ].some((k) => inRing(ring, lo
 		assert(h.needsPlatform(P('cod')) && h.needsPlatform(P('fortnite')) && !h.needsPlatform(P('any_udp')) && !h.needsPlatform(P('codm')));
 		assert.deepStrictEqual(h.presetOn(P('fortnite'), 'ps').remote, [ '9000-9199', '15000-15199', '22200-22299', '36300-36399', '41700-41799', '53700-53799' ]);
 		assert.deepStrictEqual(h.presetOn(P('fortnite'), 'pc').remote, [ '9000-9199', '10500-10599', '15000-15199', '22200-22299', '30300-30399', '32900-32999', '35000-35099', '36800-36899', '39200-39299', '45100-45199' ]);
-		assert.deepStrictEqual(h.presetOn(P('apex'), 'pc').remote, [ '7700-7799', '10000-10299', '10400-10599', '10700-10899' ]);
+		assert.deepStrictEqual(h.presetOn(P('apex'), 'pc').remote, [ '7700-7799', '9000-9099', '10000-10099', '10200-10499', '10800-10899', '15000-15099', '22200-22299', '27000-27199', '49000-49099' ]);
 		assert.deepStrictEqual(h.presetOn(P('apex'), 'ps').remote, [ '7700-7799', '10000-10199', '10300-10499', '10900-10999' ]);
 		assert.deepStrictEqual(h.presetOn(P('apex'), 'xbox').remote, [ '1024-65535' ], 'Xbox not measured: every port');
 		assert.deepStrictEqual(h.presetOn(P('cod'), 'ps').either, [ '3074-3079' ], 'same ports on every device type');

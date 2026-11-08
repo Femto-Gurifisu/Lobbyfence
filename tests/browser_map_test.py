@@ -277,7 +277,7 @@ def main():
         platform.select_option("pc")
         check("Fortnite on PC: its own ports", ports.input_value().startswith("9000-9199 10500-10599") and ports.input_value().endswith("45100-45199"), ports.input_value())
         game.select_option("apex")
-        check("Apex Legends on PC: its own ports", ports.input_value() == "7700-7799 10000-10299 10400-10599 10700-10899", ports.input_value())
+        check("Apex Legends on PC: its own ports", ports.input_value() == "7700-7799 9000-9099 10000-10099 10200-10499 10800-10899 15000-15099 22200-22299 27000-27199 49000-49099", ports.input_value())
         platform.select_option("ps")
         check("Apex Legends on PlayStation: its own ports", ports.input_value() == "7700-7799 10000-10199 10300-10499 10900-10999", ports.input_value())
         platform.select_option("xbox")

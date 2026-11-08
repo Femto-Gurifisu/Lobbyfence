@@ -831,7 +831,7 @@ var PRESETS = [
 	{ id: 'lol', group: 'pc', label: 'League of Legends', proto: 'udp', remote: [ '5000-5500' ], source: 'Riot Games', official: true },
 	{ id: 'apex', group: 'pc', label: 'Apex Legends', proto: 'udp', remote: [ '1024-65535' ], source: _('players\' routers'), wide: true, burst: 2,
 	  platforms: {
-		pc: [ '7700-7799', '10000-10299', '10400-10599', '10700-10899' ],
+		pc: [ '7700-7799', '9000-9099', '10000-10099', '10200-10499', '10800-10899', '15000-15099', '22200-22299', '27000-27199', '49000-49099' ],
 		ps: [ '7700-7799', '10000-10199', '10300-10499', '10900-10999' ]
 	  },
 	  note: _('PC and PlayStation: the ports players\' routers saw in matches. Xbox (not measured yet): every UDP port - narrow it with Ports… after a few matches.') },
