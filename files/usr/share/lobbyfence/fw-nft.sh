@@ -431,7 +431,13 @@ fw_commit() {
 	nft_apply "$FW_RULES"
 }
 
-fw_post_apply() { lag_apply; }
+fw_post_apply() {
+	# per-connection packet counts (OpenWrt has them off): Ports seen's packet
+	# column and the packets/s of "active now" servers
+	[ -w /proc/sys/net/netfilter/nf_conntrack_acct ] && [ "$(cat /proc/sys/net/netfilter/nf_conntrack_acct)" != 1 ] && \
+		echo 1 > /proc/sys/net/netfilter/nf_conntrack_acct
+	lag_apply
+}
 
 fw_remove() {
 	table_exists && $NFT delete table inet "$LF_TABLE"

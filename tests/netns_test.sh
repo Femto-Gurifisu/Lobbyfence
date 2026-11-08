@@ -567,6 +567,9 @@ echo "$out" | grep -q "^    \* udp/41215: 2 server(s), 1600 packets$" && echo "$
 	&& pass "diag: ports in use, the one the zone misses marked (other devices left out)" || fail "diag ports: $(echo "$out" | grep -A4 'server ports')"
 
 # --- 13c2. "Ports seen": the server ports the device used, tallied on passes with game traffic
+# (their packet counts come from the connections: OpenWrt counts none unless asked to)
+[ "$(inr cat /proc/sys/net/netfilter/nf_conntrack_acct 2>/dev/null)" = 1 ] && pass "connection packet counts switched on" \
+	|| fail "nf_conntrack_acct: $(inr cat /proc/sys/net/netfilter/nf_conntrack_acct 2>&1)"
 lf ports game clear > /dev/null
 probe 45.10.0.1 > /dev/null
 inr env LF_CONNTRACK="$W/ct.txt" $LF cycle 2>>"$W/stderr.log"
