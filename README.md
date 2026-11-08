@@ -7,6 +7,8 @@ circles and polygons you draw on a map, country codes, or any mix of them.
 Zones filter **strictly** by default: only servers located inside your region
 (or allowed by you) get through.
 
+https://github.com/user-attachments/assets/8853105d-9a10-4cfd-ab1b-c39192d5d10d
+
 > **Use at your own risk.** LobbyFence runs as root on your router and changes
 > its firewall. It is free software with **no warranty**: the author is not
 > liable for a bricked or unreachable router, lost connections or anything
