@@ -146,7 +146,7 @@ function starTile(n, seed) {
 
 /* decoration drawn over the map for the Galaxy theme (never catches clicks) */
 function themeFx(kind) {
-	var r, nodes = [], i, x, w, h;
+	var r, nodes = [], i;
 	if (kind === 'galaxy') {
 		r = seeded(21);
 		nodes.push(E('div', { 'class': 'lf-fx-nebula' }));
@@ -606,9 +606,9 @@ var STYLE_CSS = [
 	'.lf-wno .lf-wmark{color:#ef4444}',
 	'.lf-wsteps{font-size:13px;color:var(--lf-muted)}',
 	'.lf-credit{margin-top:12px;font-size:12px;color:var(--lf-muted);text-align:right;font-style:italic;letter-spacing:.02em}',
-	'.lf-wfoot{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:4px 12px;margin-top:12px}',
-	'.lf-wfoot .lf-credit{margin-top:0}',
-	'.lf-version{font-size:12px;color:var(--lf-muted)}',
+	'.lf-sechead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:2px 10px;margin:0 0 6px}',
+	'.lf-sechead h4{margin:0!important}',
+	'.lf-version{font-size:11.5px;color:var(--lf-muted)}',
 	'.lf-version a{color:inherit;text-decoration:underline}',
 	'.lf-version .lf-newer{color:var(--lf-accent);font-weight:600}',
 	'.lf-laghead{display:flex;align-items:center;gap:6px;margin-bottom:4px}',
@@ -813,8 +813,10 @@ var PRESET_GROUPS = [
 	[ 'mobile', _('Mobile') ]
 ];
 var EPIC_PORTS = [ '3478-3479', '5060', '5062', '6250', '12000-65000' ];
-/* the device a PC & console game runs on - some games use other ports on each */
-var PLATFORMS = [ [ 'pc', _('PC') ], [ 'ps', _('PlayStation') ], [ 'xbox', _('Xbox') ] ];
+/* the device a PC & console game runs on - some games use other ports on each
+   ([ id, name, a console ]) */
+var PLATFORMS = [ [ 'pc', _('PC') ], [ 'ps', _('PlayStation'), true ], [ 'xbox', _('Xbox'), true ],
+	[ 'switch', _('Nintendo Switch'), true ] ];
 /* mobile games find their match over TCP: 443 (HTTPS, used by most of them)
  * plus the TCP ports the big mobile games are known to use - Call of Duty:
  * Mobile (Activision: 443, 65010 lobby, 65050 chat; players: 3013, 18082),
@@ -842,7 +844,7 @@ var PRESETS = [
 		pc: [ '7700-7799', '8100-8199', '9000-9099', '10000-10599', '10700-10899', '15000-15099', '22200-22299', '27000-27199', '49000-49099' ],
 		ps: [ '1000-1099', '1900-1999', '3000-3199', '7700-7799', '8100-8199', '10000-10999', '27000-27199', '27500-27599', '34100-34199' ]
 	  },
-	  note: _('PC and PlayStation: the ports players\' routers saw in matches. Xbox (not measured yet): every UDP port - narrow it with Ports… after a few matches.') },
+	  note: _('PC and PlayStation: the ports players\' routers saw in matches. Xbox and Nintendo Switch (not measured yet): every UDP port - narrow it with Ports… after a few matches.') },
 	{ id: 'fortnite', group: 'pc', label: 'Fortnite', proto: 'udp', remote: EPIC_PORTS, source: 'Epic Games', official: true, wide: true, burst: 2,
 	  platforms: {
 		pc: [ '9000-9199', '10500-10599', '15000-15199', '22200-22299', '30300-30399', '32900-32999', '35000-35099', '36800-36899', '39200-39299', '45100-45199' ],
@@ -901,11 +903,13 @@ function presetOn(p, platform) {
 	return q;
 }
 
+/* PC, then the consoles in their own group */
 function platformSelect(cls) {
+	function opt(x) { return E('option', { 'value': x[0] }, x[1]); }
 	return E('select', { 'class': 'cbi-input-select ' + cls, 'style': 'width:100%' },
-		[ E('option', { 'value': '' }, _('Choose the device type…')) ].concat(PLATFORMS.map(function(x) {
-			return E('option', { 'value': x[0] }, x[1]);
-		})));
+		[ E('option', { 'value': '' }, _('Choose the device type…')) ]
+			.concat(PLATFORMS.filter(function(x) { return !x[2]; }).map(opt))
+			.concat([ E('optgroup', { 'label': _('Consoles') }, PLATFORMS.filter(function(x) { return x[2]; }).map(opt)) ]));
 }
 
 function presetSummary(p) {
@@ -2551,11 +2555,8 @@ return view.extend({
 			var lz = self.live && self.live.zones && self.live.zones[zone];
 			self.openUntil = lz && lz.open_left > 0 ? Date.now() + lz.open_left * 1000 : 0;
 			var inst = (r[1] && r[1].lobbyfence && r[1].lobbyfence.instances) || {}, z;
-			var ver = self.status && self.status.version;
 			self.status = r[0];
 			self.running = Object.keys(inst).some(function(k) { return inst[k].running; });
-			if (self.welcomeVersion && (self.status && self.status.version) !== ver)
-				self.fillVersion(self.welcomeVersion);
 			z = self.zoneStatus();
 			if (z && z.allow && z.block && zone === self.zone)
 				self.rules = { allow: z.allow, block: z.block };
@@ -2564,7 +2565,6 @@ return view.extend({
 			/* nothing the map or the list shows has changed (same server list, same
 			 * live traffic, same rules and filters): skip the redraw - at least once a
 			 * minute it still happens, for "last seen" texts and the time filters */
-			var lz = self.live && self.live.zones && self.live.zones[zone];
 			var sig = [ r[2] != null ? Math.random() : self.serversRev, self.servers.length, JSON.stringify(lz ? [ lz.active, lz.rate ] : null),
 				JSON.stringify(self.rules || null), self.range, self.ccFilter || '', self.filter || '', Math.floor(self.routerNow() / 60) ].join('|');
 			var same = sig === self.drawnSig && zone === self.drawnZone, ok = true;
@@ -2645,10 +2645,7 @@ return view.extend({
 				'class': 'lf-btn lf-primary',
 				'click': function(ev) { ev.preventDefault(); self.openNewZone(); }
 			}, _('Create your first zone')),
-			E('div', { 'class': 'lf-wfoot' }, [
-				this.welcomeVersion = this.fillVersion(E('div', { 'class': 'lf-version' })),
-				E('div', { 'class': 'lf-credit' }, _('Created by Darkness'))
-			])
+			E('div', { 'class': 'lf-credit' }, _('Created by Darkness'))
 		]));
 	},
 
@@ -2694,7 +2691,6 @@ return view.extend({
 				return;
 			self.latestVersion = v;
 			store('latest', { v: v, t: Date.now() });
-			self.fillVersion(self.welcomeVersion);
 			if (!self.editingPanel())
 				self.renderStatus();
 		}).catch(function() {});
@@ -2980,7 +2976,7 @@ return view.extend({
 			}, label);
 		}
 
-		var actions = [];
+		var actions;
 		if (one && rule === 'allow')
 			actions = [ act('block', _('Block instead')), act('unlist', _('Remove rule')) ];
 		else if (one && rule === 'block')
@@ -3174,7 +3170,7 @@ return view.extend({
 	/* ------------------------------------------------------- status */
 
 	renderStatus: function() {
-		var self = this, t = this.theme().overlay, st = this.status, z = this.zoneStatus(), sec = this.statusSec;
+		var self = this, t = this.theme().overlay, st = this.status, z, sec = this.statusSec;
 		var enabled = uci.get('lobbyfence', 'globals', 'enabled') === '1', geo = st && st.geo, api, res = this.apiResult;
 
 		/* one status line: coloured dot + text that may wrap under itself */
@@ -3188,7 +3184,10 @@ return view.extend({
 		}
 
 		sec.innerHTML = '';
-		sec.appendChild(E('h4', {}, _('Status')));
+		sec.appendChild(E('div', { 'class': 'lf-sechead' }, [
+			E('h4', {}, _('Status')),
+			this.fillVersion(E('div', { 'class': 'lf-version lf-panel-version' }))
+		]));
 		this.renderLag();
 
 		if (!enabled)
@@ -3311,7 +3310,6 @@ return view.extend({
 				'click': function(ev) { ev.preventDefault(); self.openServersFile(); }
 			}, _('Servers file…'))
 		]));
-		sec.appendChild(this.fillVersion(E('div', { 'class': 'lf-version lf-panel-version', 'style': 'margin-top:6px' })));
 	},
 
 	/* ------------------------------------------- lag simulator (netem) */
@@ -3473,7 +3471,7 @@ return view.extend({
 
 	/* "Open for server tests" settings and live state */
 	renderBurst: function(sec, line) {
-		var self = this, t = this.theme().overlay, zone = this.zone, z = this.zoneLive() || {};
+		var self = this, zone = this.zone, z = this.zoneLive() || {};
 		var bs = uci.get('lobbyfence', zone, 'burst_servers');
 		var n = (bs == null || bs === '') ? 0 : +bs, open = +(uci.get('lobbyfence', zone, 'burst_open') || 20);
 
@@ -3992,7 +3990,7 @@ return view.extend({
 	/* Home is drawn inside the map (a symbol layer), not as an HTML marker: page
 	 * styles can then never paint a box around it, and it moves with the map. */
 	drawHome: function() {
-		var self = this, h = this.home(), map = this.map;
+		var h = this.home(), map = this.map;
 		this.homeButton.classList.toggle('lf-on', !!h);
 		if (!map || !this.styleReady || !map.getSource)
 			return;
@@ -4702,7 +4700,7 @@ return view.extend({
 		}
 
 		function draw() {
-			var list = (self.rules || {})[kind] || [], other = kind === 'allow' ? 'block' : 'allow';
+			var list = (self.rules || {})[kind] || [];
 			body.innerHTML = '';
 			body.appendChild(E('div', { 'class': 'cbi-tabmenu', 'style': 'margin-bottom:.8em' }, [ 'allow', 'block' ].map(function(k) {
 				return E('li', { 'class': 'tabmenu-item-' + k + (k === kind ? ' cbi-tab' : ' cbi-tab-disabled') }, E('a', {
@@ -5091,7 +5089,7 @@ return view.extend({
 				.format(oldName, oldName, preset.label) : '';
 		}
 		game.value = old.id;
-		platform.value = /^(pc|ps|xbox)$/.test(sec.platform || '') ? sec.platform : '';
+		platform.value = platformName(sec.platform) ? sec.platform : '';
 		game.addEventListener('change', function() { fill(false); });
 		platform.addEventListener('change', function() { fill(false); });
 		fill(true);
@@ -5118,7 +5116,7 @@ return view.extend({
 					'click': function() {
 						var list = parsePorts(ports.value), bn = parseInt(burst.value || '0', 10);
 						if (needsPlatform(preset) && !platform.value)
-							return (error.textContent = _('Choose the device type - %s.').format(_('PC, PlayStation or Xbox')));
+							return (error.textContent = _('Choose the device type - %s.').format(_('PC or a console')));
 						if (list === null)
 							return (error.textContent = _('Ports must be numbers (1-65535) or ranges like 30000-45000.'));
 						if (!list.length)
@@ -5298,7 +5296,7 @@ return view.extend({
 						var dev = (devicePick.options.length && devicePick.value) ? devicePick.value : device.value.trim();
 						var label = name.value.trim() || preset.label, list = parsePorts(ports.value);
 						if (needsPlatform(preset) && !platform.value)
-							return (error.textContent = _('Choose the device type - %s.').format(_('PC, PlayStation or Xbox')));
+							return (error.textContent = _('Choose the device type - %s.').format(_('PC or a console')));
 						if (!validDevice(dev))
 							return (error.textContent = _('Pick a device, or enter a valid IPv4/IPv6 or MAC address.'));
 						if (list === null)

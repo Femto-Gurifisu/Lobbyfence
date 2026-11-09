@@ -97,7 +97,6 @@ return view.extend({
 	},
 
 	stage: function() {
-		var self = this;
 		window.clearTimeout(this.timer);
 		this.timer = window.setTimeout(function() {
 			uci.save().catch(function(err) {

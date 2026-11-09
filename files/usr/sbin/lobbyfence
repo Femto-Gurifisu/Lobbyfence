@@ -593,7 +593,7 @@ geo_lookup() { # file with addresses -> appends to cache, returns 1 on failure
 }
 
 locate() {
-	local t="$1" b=0 budget backoff n last known
+	local t="$1" b=0 budget n last known
 	# only look for unlocated servers when there is something to find: new
 	# servers this pass, lookups still waiting, or hourly (for the weekly retries)
 	last="$(cat "$LF_RUN/pending.at" 2>/dev/null)"; is_uint "$last" || last=0

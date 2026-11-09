@@ -223,21 +223,22 @@ def main():
         fresh = {"globals": {".name": "globals", ".type": "globals", "enabled": "0"}}
         world = [[-175, -75], [175, 78]]
 
-        # ---- 0. the version on the welcome screen, with the newest one on GitHub
+        # ---- 0. LobbyFence's version in the Status section (also before the first zone), with the newest one on GitHub
         vst = {"version": "1.1.0", "enabled": True, "active": True, "updated": 1, "interval": 20, "zones": []}
         boot(page, fresh, {"/tmp/lobbyfence/status.json": json.dumps(vst)})
-        wv = page.locator(".lf-welcome .lf-version")
-        page.wait_for_function("document.querySelector('.lf-welcome .lf-version') && document.querySelector('.lf-welcome .lf-version').innerText.includes('up to date')", timeout=5000)
-        check("welcome screen: LobbyFence's version, up to date", wv.inner_text() == "LobbyFence 1.1.0 · up to date" and latest["asked"] == 1,
-              [wv.inner_text(), latest["asked"]])
+        wv = page.locator(".lf-sechead .lf-panel-version")
+        page.wait_for_function("document.querySelector('.lf-panel-version') && document.querySelector('.lf-panel-version').innerText.includes('up to date')", timeout=5000)
+        check("Status section: LobbyFence's version next to the heading, up to date", wv.is_visible() and wv.inner_text() == "LobbyFence 1.1.0 · up to date"
+              and latest["asked"] == 1, [wv.inner_text(), latest["asked"]])
+        check("...not on the welcome screen any more", page.locator(".lf-welcome .lf-version").count() == 0 and page.locator(".lf-welcome").count() == 1)
         latest["tag"] = "v1.2.0"
         boot(page, fresh, {"/tmp/lobbyfence/status.json": json.dumps(vst)}, clear_storage=False)
         page.wait_for_timeout(500)
         check("...GitHub is asked at most twice a day", latest["asked"] == 1 and "up to date" in wv.inner_text(), [latest["asked"], wv.inner_text()])
         boot(page, fresh, {"/tmp/lobbyfence/status.json": json.dumps(vst)})     # (another browser asks again)
-        page.wait_for_function("document.querySelector('.lf-welcome .lf-version a.lf-newer')", timeout=5000)
+        page.wait_for_function("document.querySelector('.lf-panel-version a.lf-newer')", timeout=5000)
         nl = wv.locator("a.lf-newer")
-        check("a newer version on GitHub: the welcome screen says so, with a link to it", "version 1.2.0 is out" in nl.inner_text()
+        check("a newer version on GitHub: the Status section says so, with a link to it", "version 1.2.0 is out" in nl.inner_text()
               and nl.get_attribute("href") == "https://github.com/Femto-Gurifisu/Lobbyfence/releases/latest" and latest["asked"] == 2,
               [wv.inner_text(), latest["asked"]])
         latest["tag"] = "v1.1.0"
@@ -275,7 +276,7 @@ def main():
         game, platform, picker, proto = modal.locator("select").nth(0), modal.locator(".lf-nz-platform"), modal.locator("select").nth(2), modal.locator("select").nth(3)
         check("Any game: no device type to choose", not platform.is_visible())
         ports = modal.locator("input").nth(2)
-        groups = page.evaluate("[...document.querySelectorAll('#modal optgroup')].map(g => g.label)")
+        groups = page.evaluate("[...document.querySelectorAll('#modal optgroup')].filter(g => !g.closest('.lf-nz-platform')).map(g => g.label)")
         check("presets grouped: any / PC & console / mobile", groups == ["Any game", "PC & console", "Mobile"], groups)
         check("default preset is Any game", game.input_value() == "any_udp" and ports.input_value() == "1024-65535")
         check("Any game fills in its name like the others", modal.locator("input").nth(1).input_value() == "Any game")
@@ -312,6 +313,12 @@ def main():
         check("Apex Legends on PlayStation: its own ports", ports.input_value() == "1000-1099 1900-1999 3000-3199 7700-7799 8100-8199 10000-10999 27000-27199 27500-27599 34100-34199", ports.input_value())
         platform.select_option("xbox")
         check("Apex Legends on Xbox (not measured): every port", ports.input_value() == "1024-65535", ports.input_value())
+        groups = platform.evaluate("s => [...s.children].map(c => c.tagName === 'OPTGROUP' ? c.label + ': ' + [...c.children].map(o => o.textContent).join(', ') : c.textContent)")
+        check("device type: PC, then the consoles in their own group - Nintendo Switch too",
+              groups == ["Choose the device type…", "PC", "Consoles: PlayStation, Xbox, Nintendo Switch"], groups)
+        platform.select_option("switch")
+        check("Apex Legends on Nintendo Switch (not measured): every port", ports.input_value() == "1024-65535", ports.input_value())
+        platform.select_option("xbox")
         game.select_option("codm")
         check("CoD Mobile preset: UDP 7500-8000, official",
               ports.input_value() == "7500-8000" and proto.input_value() == "udp" and modal.get_by_text("published by Activision", exact=False).is_visible())

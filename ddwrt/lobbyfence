@@ -244,7 +244,7 @@ web_start() {
 }
 
 web_stop() {
-	local p n=0 left
+	local p n=0
 	for p in $(web_pid) $(web_pids); do kill "$p" 2>/dev/null; done
 	while [ -n "$(web_pids)" ] && [ "$n" -lt 10 ]; do sleep 1; n=$((n + 1)); done
 	for p in $(web_pids); do kill -9 "$p" 2>/dev/null; done

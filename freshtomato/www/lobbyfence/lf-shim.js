@@ -471,7 +471,6 @@ var BaseView = {
 	render: function() { return E('div'); },
 	handleSave: function() { return uci.save(); },
 	handleSaveApply: function() {
-		var self = this;
 		return Promise.resolve(this.handleSave()).then(function() {
 			if (!uci.staged) {
 				ui.addNotification(null, E('p', {}, [ _('There are no changes to apply.') ]), 'info');

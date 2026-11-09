@@ -188,9 +188,9 @@ On a phone, the map page offers to put LobbyFence on your home screen (a tip
 above the map, with the steps for your browser); the icon opens straight to
 the map.
 
-**Which version do I have?** The welcome screen and the bottom of the map
-page's Status section show it - *LobbyFence 1.1.0 · up to date*, or *version
-1.2.0 is out - update* with a link to the latest release. To know that, your
+**Which version do I have?** The map page's Status section shows it next to
+its heading - *LobbyFence 1.1.1 · up to date*, or *version 1.2.0 is out -
+update* with a link to the latest release. To know that, your
 browser (not the router) asks GitHub for the newest release, at most twice a
 day; nothing else is sent. From the command line: `lobbyfence version`.
 
@@ -560,11 +560,11 @@ them); "community" means players reported them, so they may be incomplete.
 If a game isn't listed - or nothing shows up on the map - use
 **Any game (all UDP traffic)**.
 
-PC & console games are picked together with the **device type** - PC,
-PlayStation or Xbox - because some games use other ports on each (Fortnite
-and Apex Legends below); the others use the same ports everywhere. The zone
-panel shows it next to the game (*Fortnite · PlayStation*), and **Change…**
-switches it.
+PC & console games are picked together with the **device type** - PC, or a
+console: PlayStation, Xbox or Nintendo Switch - because some games use other
+ports on each (Fortnite and Apex Legends below); the others use the same ports
+everywhere. The zone panel shows it next to the game (*Fortnite ·
+PlayStation*), and **Change…** switches it.
 
 | Preset | Ports | Source |
 |--------|-------|--------|
@@ -574,8 +574,8 @@ switches it.
 | Call of Duty (BO7/BO6, Warzone, MW III) | UDP 3074-3079, either side | official - [Activision](https://support.activision.com/content/atvi/support/web/en/articles/ports-used-for-call-of-duty-games.html) |
 | VALORANT | UDP 7000-8000, 8180-8181 | official - [Riot](https://support.riotgames.com/en-us/valorant/support-tools/how-to-set-up-port-forwarding) |
 | League of Legends | UDP 5000-5500 | official - Riot, via [British Esports](https://britishesports.org/wp-content/uploads/2023/02/PORT-IP-24-25.pdf) |
-| Apex Legends | PC: UDP 7700-7799, 8100-8199, 9000-9099, 10000-10599, 10700-10899, 15000-15099, 22200-22299, 27000-27199, 49000-49099 · PlayStation: UDP 1000-1099, 1900-1999, 3000-3199, 7700-7799, 8100-8199, 10000-10999, 27000-27199, 27500-27599, 34100-34199 · Xbox: UDP 1024-65535 (not measured yet) | players' routers (EA's own list - 1024-1124, 37000-40000 - misses the match ports) |
-| Fortnite | PC: UDP 9000-9199, 10500-10599, 15000-15199, 22200-22299, 30300-30399, 32900-32999, 35000-35099, 36800-36899, 39200-39299, 45100-45199 · PlayStation: UDP 9000-9199, 10100-10199, 15000-15199, 22200-22299, 36300-36399, 37500-37599, 39900-39999, 41700-41799, 42100-42199, 48200-48299, 51100-51199, 53700-53799, 56100-56199 · Xbox and mobile: UDP 3478-3479, 5060, 5062, 6250, 12000-65000 ([Epic Games](https://fortnitehelp.epicgames.com/help/en-US/c5719335176219/c5719372265755/a000084266), wide range) | players' routers (PC, PlayStation); Epic Games (Xbox, mobile) |
+| Apex Legends | PC: UDP 7700-7799, 8100-8199, 9000-9099, 10000-10599, 10700-10899, 15000-15099, 22200-22299, 27000-27199, 49000-49099 · PlayStation: UDP 1000-1099, 1900-1999, 3000-3199, 7700-7799, 8100-8199, 10000-10999, 27000-27199, 27500-27599, 34100-34199 · Xbox and Nintendo Switch: UDP 1024-65535 (not measured yet) | players' routers (EA's own list - 1024-1124, 37000-40000 - misses the match ports) |
+| Fortnite | PC: UDP 9000-9199, 10500-10599, 15000-15199, 22200-22299, 30300-30399, 32900-32999, 35000-35099, 36800-36899, 39200-39299, 45100-45199 · PlayStation: UDP 9000-9199, 10100-10199, 15000-15199, 22200-22299, 36300-36399, 37500-37599, 39900-39999, 41700-41799, 42100-42199, 48200-48299, 51100-51199, 53700-53799, 56100-56199 · Xbox, Nintendo Switch and mobile: UDP 3478-3479, 5060, 5062, 6250, 12000-65000 ([Epic Games](https://fortnitehelp.epicgames.com/help/en-US/c5719335176219/c5719372265755/a000084266), wide range) | players' routers (PC, PlayStation); Epic Games (Xbox, Nintendo Switch, mobile) |
 | Overwatch 2 | UDP 3478-3479, 5060, 5062, 6250, 12000-64000 | official - Blizzard, via [NASEF](https://www.nasef.org/overwatch-it-help-page) (wide range) |
 | Rocket League | UDP 7000-9000 | official - Psyonix, via [British Esports](https://britishesports.org/wp-content/uploads/2023/02/PORT-IP-24-25.pdf) |
 | Counter-Strike 2 / Dota 2 | UDP 27000-27100 | community |
