@@ -715,12 +715,15 @@ games.
 
 LobbyFence also comes with a list of known **Apex Legends** and **Call of
 Duty** servers and where they are (`/usr/share/lobbyfence/servers.txt`, the
-same format as a servers file). A router that sees one of them places it
-straight away, with no lookup - even before anything has been imported - and
-it shows up on the map as soon as the device plays on it. The router's own
-and imported locations come first. The list holds game servers in data
-centres only: players' own addresses, which peer-to-peer traffic (party
-chat, some lobbies) also shows, are never added to it.
+same format as a servers file). The Servers file window lists them under
+**Comes with LobbyFence**, by game (read-only: they are part of LobbyFence);
+from the command line, `lobbyfence builtin-servers`. A router that sees one
+of them places it straight away, with no lookup - even before anything has
+been imported - and it shows up on the map as soon as the device plays on it
+(and from then on in the game's list above, as found by this router). The
+router's own and imported locations come first. The list holds game servers
+in data centres only: players' own addresses, which peer-to-peer traffic
+(party chat, some lobbies) also shows, are never added to it.
 
 Servers are filed under the game the zone was set to when it found them.
 Switch a zone to another game (**Change game**) and its learned servers stay

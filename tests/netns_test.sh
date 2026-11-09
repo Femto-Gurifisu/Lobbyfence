@@ -543,6 +543,10 @@ grep -q '^45\.32\.7\.134 40\.4993 -74\.399 US ' "$W/run/state/geo.cache" \
 	&& pass "a Call of Duty server from the list LobbyFence comes with: located with no lookup" \
 	|| fail "built-in list: $(grep -c . "$W/run/state/geo.cache") located, log: $(tail -2 "$W/run/log")"
 expect "...and sorted out straight away (New Jersey: outside the region)" "45.32.7.134 blocked" "$(probe 45.32.7.134)"
+out="$(lf builtin-servers)"
+[ "$(echo "$out" | head -1)" = "lobbyfence-servers 1" ] && echo "$out" | grep -qx 'game apex Apex Legends' && echo "$out" | grep -qx 'game cod Call of Duty' \
+	&& [ "$(echo "$out" | grep -c '^[0-9]')" = "$(grep -c '^[0-9]' "$LF_SHARE/servers.txt")" ] && ! echo "$out" | grep -q '^#' \
+	&& pass "builtin-servers: the list LobbyFence comes with, as a servers file (for the Servers file window)" || fail "builtin-servers: $(echo "$out" | head -3)"
 cp "$W/data/shared.cache" "$W/shared.before"
 printf '<html>a web page</html>\n' > "$W/notservers.txt"
 lf import-servers "$W/notservers.txt" >/dev/null; rc=$?

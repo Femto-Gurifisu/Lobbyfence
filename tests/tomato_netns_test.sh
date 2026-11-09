@@ -484,6 +484,9 @@ python3 -c "import json,sys; d=json.loads(sys.argv[1]); assert d['code']==0 and 
 out="$(cgi "$TOKEN" "exec export")"
 python3 -c "import json,sys; d=json.loads(sys.argv[1]); assert d['code']==0 and '\nlobbyfence-servers 1\n' in d['stdout'], d" "$out" \
 	&& pass "CGI: servers file download" || fail "CGI export: $(echo "$out" | head -c 300)"
+out="$(cgi "$TOKEN" "exec builtin-servers")"
+python3 -c "import json,sys; d=json.loads(sys.argv[1]); o=d['stdout']; assert d['code']==0 and o.startswith('lobbyfence-servers 1') and '\ngame apex Apex Legends\n' in o and '\ngame cod Call of Duty\n' in o and sum(1 for l in o.splitlines() if l[:1].isdigit()) > 100, d" "$out" \
+	&& pass "CGI: the servers LobbyFence comes with (for the Servers file window)" || fail "CGI builtin-servers: $(echo "$out" | head -c 300)"
 sf="$(printf 'lobbyfence-servers 1\ngame fortnite Fortnite\n45.77.0.9 51.5 -0.1 GB 1700000000\n10.0.0.1 1 1 GB 1700000000\n')"
 out="$(cgi "$TOKEN" "import-servers" "$sf")"
 python3 -c "import json,sys; d=json.loads(sys.argv[1]); assert d['code']==0 and 'imported 1 new' in d['stdout'], d" "$out" \

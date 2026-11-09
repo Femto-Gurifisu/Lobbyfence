@@ -31,13 +31,14 @@ def allowed(argv, perm="exec"):
 # every fs.exec('<path>', [ '<literal>', ... ]) in the views, with sample arguments for the rest
 calls = []
 for f in ("map.js", "zones.js"):
-    for m in re.finditer(r"fs\.exec\('([^']+)',\s*\[\s*('([a-z]*)'|[A-Za-z_]+)", (VIEWS / f).read_text()):
+    for m in re.finditer(r"fs\.exec\('([^']+)',\s*\[\s*('([a-z-]*)'|[A-Za-z_]+)", (VIEWS / f).read_text()):
         if m.group(3) is None:
             continue   # a variable (allow / block / unlist) - checked separately below
         calls.append((f, m.group(1), m.group(3)))
 check("found the commands the pages run", len(calls) >= 7, calls)
 samples = {"forget": ["game", "80.20.0.1"], "allow": ["game", "80.20.0.1", "2a00::/32"], "block": ["game", "1.2.3.4"],
-           "unlist": ["game", "1.2.3.4"], "ports": ["game"], "remove-servers": ["apex", "1.2.3.4"]}
+           "unlist": ["game", "1.2.3.4"], "ports": ["game"], "remove-servers": ["apex", "1.2.3.4"],
+           "import-servers": ["/tmp/lobbyfence/servers-import.txt"]}
 for f, path, first in calls:
     argv = [path] + ([first] if first else [])
     argv_full = argv + samples.get(first, [])

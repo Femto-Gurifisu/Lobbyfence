@@ -258,7 +258,7 @@ web_run() { # id file
 	: > "$out"; : > "$err"
 	case "$cmd" in
 		# (8>&-: what they start must not keep the request lock)
-		live|devices|cycle|apitest|export)
+		live|devices|cycle|apitest|export|builtin-servers)
 			"$MAIN" "$cmd" > "$out" 2> "$err" < /dev/null 8>&-; rc=$?;;
 		import-servers)
 			# the rest of the request: another router's servers file

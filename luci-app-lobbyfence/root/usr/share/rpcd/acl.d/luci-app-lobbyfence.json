@@ -51,6 +51,9 @@
 				"/usr/sbin/lobbyfence export": [
 					"exec"
 				],
+				"/usr/sbin/lobbyfence builtin-servers": [
+					"exec"
+				],
 				"/usr/sbin/lobbyfence forget *": [
 					"exec"
 				],

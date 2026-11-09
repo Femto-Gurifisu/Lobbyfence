@@ -124,6 +124,7 @@ window.fs = {
   exec: (cmd, args) => {
     if (args && args[0] === 'devices') return Promise.resolve({ code: 0, stdout: JSON.stringify(window.__devices || []) });
     if (args && args[0] === 'live') return Promise.resolve(window.__live ? { code: 0, stdout: JSON.stringify(window.__live) } : { code: 1, stdout: '' });
+    if (args && args[0] === 'builtin-servers') return Promise.resolve(window.__builtin != null ? { code: 0, stdout: window.__builtin } : { code: 1, stdout: '', stderr: 'unknown command' });
     (window.__execs = window.__execs || []).push([cmd].concat(args)); return Promise.resolve(window.__execResult || { code: 0, stdout: '' }); }
 };
 window.ui = {
@@ -961,10 +962,31 @@ def main():
         # ---- 6b. Servers file: see the saved servers by game, download / copy / import / paste
         sfile = "# LobbyFence servers file\nlobbyfence-servers 1\ngame game Test game\n45.10.0.1 51.5 -0.1 GB 1700000000\n80.20.0.1 40.7 -74.0 US 1700000000\ngame apex\n99.1.1.1 52.5 13.4 DE 1700000000 imported\n"
         page.evaluate("t => { window.__execResult = { code: 0, stdout: t }; }", sfile)
+        # an older router without the list LobbyFence comes with: the window works as before, no error
+        page.get_by_role("button", name="Servers file…").click()
+        page.wait_for_function("document.querySelectorAll('.lf-servers-game').length === 2")
+        page.wait_for_timeout(300)
+        check("no built-in list from the router: that part is just not shown",
+              page.locator(".lf-builtin-game").count() == 0 and "Could not" not in page.locator(".lf-servers-state").inner_text())
+        page.locator("#modal").get_by_role("button", name="Close").click()
+        page.evaluate("t => { window.__builtin = t; }", "lobbyfence-servers 1\ngame apex Apex Legends\n3.67.124.64 50.1 8.7 DE 1794184212\n"
+                      "13.113.128.68 35.7 139.7 JP 1794184212\n63.177.165.222 50.1 8.7 DE 1794184212\ngame cod Call of Duty\n45.32.7.134 40.5 -74.4 US 1794182174\n")
         page.get_by_role("button", name="Servers file…").click()
         sm = page.locator("#modal")
         page.wait_for_function("document.querySelectorAll('.lf-servers-game').length === 2")
         check("dialog opens with the servers saved on the router", page.evaluate("window.__execs.slice(-1)[0]") == ["/usr/sbin/lobbyfence", "export"])
+        page.wait_for_function("document.querySelectorAll('.lf-builtin-game').length === 2")
+        bi = sm.locator(".lf-servers-builtin")
+        b1 = bi.locator(".lf-builtin-game").nth(0).locator("summary").inner_text()
+        check("the servers LobbyFence comes with have their own part, one line per game",
+              "Comes with LobbyFence" in bi.inner_text() and b1.startswith("Apex Legends") and "3 server(s)" in b1 and "DE 2, JP 1" in b1
+              and bi.locator(".lf-builtin-game").nth(1).locator("summary").inner_text().startswith("Call of Duty - 1 server(s)"), b1)
+        bi.locator(".lf-builtin-game").nth(0).locator("summary").click()
+        cells = bi.locator(".lf-builtin-game").nth(0).locator("tr").nth(1).locator("td")
+        check("opening one lists its servers (address, country)", cells.count() == 2 and cells.nth(0).inner_text() == "3.67.124.64" and cells.nth(1).inner_text() == "DE",
+              [cells.nth(k).inner_text() for k in range(cells.count())])
+        check("...read-only: nothing to tick or delete there", bi.locator("input, button").count() == 0)
+        bi.locator(".lf-builtin-game").nth(0).locator("summary").click()
         g1 = sm.locator(".lf-servers-game").nth(0).locator("summary").inner_text()
         g2 = sm.locator(".lf-servers-game").nth(1).locator("summary").inner_text()
         check("one line per game: name, count, this router vs imported, countries",

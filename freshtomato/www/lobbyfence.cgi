@@ -86,7 +86,7 @@ case "$cmd" in
 	exec)
 		sub="$1"; [ $# -gt 0 ] && shift
 		case "$sub" in
-			live|devices|cycle|export) run "$LF" "$sub";;
+			live|devices|cycle|export|builtin-servers) run "$LF" "$sub";;
 			apitest) run "$LF" apitest;;
 			restart) run "$LF" restart;;
 			debug)

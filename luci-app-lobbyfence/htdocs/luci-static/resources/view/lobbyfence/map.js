@@ -503,8 +503,11 @@ var STYLE_CSS = [
 	'.lf-debug-text{display:block;width:100%;box-sizing:border-box;max-height:40vh;margin:0 0 10px;font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;white-space:pre;overflow:auto;resize:vertical}',
 	'.lf-debug-state{margin:8px 0 6px}',
 	'.lf-servers-list{max-height:45vh;overflow:auto;margin:6px 0 8px}',
-	'.lf-servers-game{margin:0 0 6px;padding:6px 8px;border:1px solid rgba(128,128,128,.35);border-radius:6px}',
-	'.lf-servers-game summary{cursor:pointer}',
+	'.lf-servers-game,.lf-builtin-game{margin:0 0 6px;padding:6px 8px;border:1px solid rgba(128,128,128,.35);border-radius:6px}',
+	'.lf-servers-game summary,.lf-builtin-game summary{cursor:pointer}',
+	'.lf-servers-builtin{max-height:35vh;overflow:auto;margin:6px 0 8px}',
+	'.lf-servers-builtin .lf-muted{opacity:.75}',
+	'.lf-servers-builtin h5{margin:.2em 0}',
 	'.lf-servers-table{width:100%;border-collapse:collapse;margin:6px 0 2px;font-size:12px}',
 	'.lf-servers-table th,.lf-servers-table td{text-align:left;padding:2px 8px 2px 0;border-bottom:1px solid rgba(128,128,128,.2)}',
 	'.lf-servers-table tr.lf-imp td{opacity:.75}',
@@ -3576,6 +3579,7 @@ return view.extend({
 		var self = this, PATH = '/tmp/lobbyfence/servers-import.txt', current = '', busy = false;
 		var stateNode = E('p', { 'class': 'lf-debug-state lf-servers-state' }, '');
 		var listNode = E('div', { 'class': 'lf-servers-list' }, E('em', {}, _('Looking up the servers saved on the router…')));
+		var builtinNode = E('div', { 'class': 'lf-servers-builtin' });
 		var input = E('input', { 'type': 'file', 'accept': '.txt,text/plain', 'class': 'lf-servers-input', 'style': 'display:none' });
 		var paste = E('textarea', { 'class': 'lf-debug-text lf-servers-paste', 'rows': 6, 'spellcheck': 'false',
 			'placeholder': _('Paste a servers file here (it starts with "lobbyfence-servers 1")') });
@@ -3700,6 +3704,42 @@ return view.extend({
 			var d = listNode.querySelector('details[open]');
 			return d ? d.getAttribute('data-game') : null;
 		}
+		/* the game servers LobbyFence comes with: read-only (they are part of LobbyFence) */
+		function renderBuiltin(games) {
+			builtinNode.innerHTML = '';
+			if (!games.length)
+				return;
+			builtinNode.appendChild(E('h5', {}, _('Comes with LobbyFence')));
+			builtinNode.appendChild(E('p', { 'class': 'lf-muted', 'style': 'font-size:90%;margin:0 0 6px' }, _('Game servers every LobbyFence knows from the start. When your device plays on one, it is placed on the map straight away, with no lookup - and then it is in the list above too, as found by this router. They are part of LobbyFence, so there is nothing to delete here.')));
+			games.forEach(function(g) {
+				var cc = {};
+				g.rows.forEach(function(r) { cc[r.cc] = (cc[r.cc] || 0) + 1; });
+				var top = Object.keys(cc).sort(function(a, b) { return cc[b] - cc[a]; }).slice(0, 4)
+					.map(function(c) { return (c === '--' ? '?' : c) + ' ' + cc[c]; }).join(', ');
+				/* by country, the busiest first, then as listed */
+				var rows = g.rows.map(function(r, i) { return { r: r, i: i }; }).sort(function(a, b) {
+					return cc[b.r.cc] - cc[a.r.cc] || (a.r.cc < b.r.cc ? -1 : a.r.cc > b.r.cc ? 1 : 0) || a.i - b.i;
+				}).map(function(x) { return x.r; });
+				builtinNode.appendChild(E('details', { 'class': 'lf-builtin-game', 'data-game': g.id }, [
+					E('summary', {}, [
+						E('strong', {}, g.name), ' - ',
+						E('span', { 'class': 'lf-servers-count' }, _('%d server(s)').format(g.rows.length)),
+						top ? E('span', { 'class': 'lf-muted' }, ' (' + top + ')') : ''
+					]),
+					E('table', { 'class': 'lf-servers-table' }, [
+						E('tr', {}, [ E('th', {}, _('Server')), E('th', {}, _('Country')) ])
+					].concat(rows.slice(0, 500).map(function(r) {
+						return E('tr', {}, [ E('td', { 'class': 'lf-mono' }, r.ip), E('td', {}, r.cc === '--' ? '?' : r.cc) ]);
+					})))
+				]));
+			});
+		}
+		function loadBuiltin() {
+			return fs.exec('/usr/sbin/lobbyfence', [ 'builtin-servers' ]).then(function(r) {
+				var text = r && r.code === 0 && r.stdout || '';
+				renderBuiltin(isFile(text) ? parse(text) : []);
+			}).catch(function() { renderBuiltin([]); });   /* (an older router: just not shown) */
+		}
 		function load(keepOpen) {
 			return fs.exec('/usr/sbin/lobbyfence', [ 'export' ]).then(function(r) {
 				var text = r && r.stdout || '';
@@ -3774,7 +3814,8 @@ return view.extend({
 		ui.showModal(_('Servers file'), [
 			E('p', {}, _('Every server LobbyFence has located, by game, with where it is. Share them with another router - or keep them for after a reset - and those servers are known straight away, without asking the geolocation service again.')),
 			listNode,
-			E('p', { 'style': 'font-size:90%;opacity:.8' }, _('Holds the game servers\' addresses and locations only - nothing about your devices, your address or your regions. Importing adds locations; it does not change your zones or what they block. LobbyFence also comes with the locations of known Apex Legends and Call of Duty servers - those are placed without a lookup too.')),
+			builtinNode,
+			E('p', { 'style': 'font-size:90%;opacity:.8' }, _('Holds the game servers\' addresses and locations only - nothing about your devices, your address or your regions. Importing adds locations; it does not change your zones or what they block.')),
 			pasteBox,
 			stateNode,
 			input,
@@ -3786,7 +3827,7 @@ return view.extend({
 		load().catch(function(err) {
 			listNode.innerHTML = '';
 			fail(_('Could not read the servers on the router: %s'), err);
-		});
+		}).then(loadBuiltin);
 	},
 
 	serversFileName: function() {

@@ -1171,6 +1171,15 @@ do_export() {
 	rm -f "$LF_RUN/export.names" "$LF_RUN/export.pairs" "$LF_RUN/export.cache" "$LF_RUN/export.shared"
 }
 
+# builtin-servers: the game servers LobbyFence comes with ($LF_SHARE/servers.txt, read
+# in locate() after the router's own and imported locations), as a servers file - the
+# Servers file window lists them. They are part of LobbyFence: nothing to delete.
+do_builtin_servers() {
+	echo "lobbyfence-servers 1"
+	[ -s "$LF_SHARE/servers.txt" ] || return 0
+	awk '{ sub(/\r$/, "") } /^[ \t]*(#|$)/ || /^lobbyfence-servers / { next } { print }' "$LF_SHARE/servers.txt"
+}
+
 # import-servers <file|->: another router's export. Its locations are kept (on
 # flash, in data_dir) and used before asking the geolocation service; the
 # zones' own server lists are not changed.
@@ -1707,6 +1716,8 @@ usage() {
 	                           can import (no lookups needed for those servers)
 	  import-servers <file|->  use another router's export: its locations are used
 	                           before asking the geolocation service
+	  builtin-servers          the game servers LobbyFence comes with, as a servers
+	                           file (they are placed with no lookup either)
 	  remove-servers <game|all> [addr...]
 	                           delete a game's servers list (kept, imported and
 	                           learned by zones set to that game), or just those
@@ -1742,6 +1753,7 @@ case "$cmd" in
 	import) do_import "$@";;
 	export) do_export;;
 	import-servers) do_import_servers "$@";;
+	builtin-servers) do_builtin_servers;;
 	remove-servers) do_remove_servers "$@";;
 	ports) do_ports "$@";;
 	forget) do_forget "$@";;
