@@ -168,6 +168,9 @@ def boot(page, config, files=None, services=None, fail_gl=False, storage=None, c
     page.evaluate("""(src) => {
         const v = new Function('view', 'uci', 'fs', 'ui', 'rpc', 'poll', 'network', src)(viewApi, uci, fs, ui, rpc, poll, network);
         window.view = v;
+        // these tests drive every refresh themselves (__poll): the page's own timers stay off
+        // unless a test turns them on
+        v.watchdogMs = 0; v.serversFollowMs = 0;
         return v.load().then(() => { document.getElementById('root').appendChild(v.render()); });
     }""", MAP_JS)
     if not fail_gl:
@@ -209,9 +212,35 @@ def main():
         page.route("https://tiles.openfreemap.org/styles/positron",
                    lambda r: r.fulfill(content_type="application/json", body=json.dumps(FAKE_STYLE),
                                        headers={"Access-Control-Allow-Origin": "*"}))
+        # the page asks GitHub (from the browser) for the newest LobbyFence
+        latest = {"tag": "v1.1.0", "asked": 0}
+        def github(route):
+            latest["asked"] += 1
+            route.fulfill(content_type="application/json", body=json.dumps({"tag_name": latest["tag"], "name": "LobbyFence"}),
+                          headers={"Access-Control-Allow-Origin": "*"})
+        page.route("https://api.github.com/repos/Femto-Gurifisu/Lobbyfence/releases/latest", github)
 
         fresh = {"globals": {".name": "globals", ".type": "globals", "enabled": "0"}}
         world = [[-175, -75], [175, 78]]
+
+        # ---- 0. the version on the welcome screen, with the newest one on GitHub
+        vst = {"version": "1.1.0", "enabled": True, "active": True, "updated": 1, "interval": 20, "zones": []}
+        boot(page, fresh, {"/tmp/lobbyfence/status.json": json.dumps(vst)})
+        wv = page.locator(".lf-welcome .lf-version")
+        page.wait_for_function("document.querySelector('.lf-welcome .lf-version') && document.querySelector('.lf-welcome .lf-version').innerText.includes('up to date')", timeout=5000)
+        check("welcome screen: LobbyFence's version, up to date", wv.inner_text() == "LobbyFence 1.1.0 · up to date" and latest["asked"] == 1,
+              [wv.inner_text(), latest["asked"]])
+        latest["tag"] = "v1.2.0"
+        boot(page, fresh, {"/tmp/lobbyfence/status.json": json.dumps(vst)}, clear_storage=False)
+        page.wait_for_timeout(500)
+        check("...GitHub is asked at most twice a day", latest["asked"] == 1 and "up to date" in wv.inner_text(), [latest["asked"], wv.inner_text()])
+        boot(page, fresh, {"/tmp/lobbyfence/status.json": json.dumps(vst)})     # (another browser asks again)
+        page.wait_for_function("document.querySelector('.lf-welcome .lf-version a.lf-newer')", timeout=5000)
+        nl = wv.locator("a.lf-newer")
+        check("a newer version on GitHub: the welcome screen says so, with a link to it", "version 1.2.0 is out" in nl.inner_text()
+              and nl.get_attribute("href") == "https://github.com/Femto-Gurifisu/Lobbyfence/releases/latest" and latest["asked"] == 2,
+              [wv.inner_text(), latest["asked"]])
+        latest["tag"] = "v1.1.0"
 
         # ---- 1. fresh install
         hints = [{"mac": "aa:bb:cc:dd:ee:01", "name": "Sams-iPhone", "ip": "192.168.1.23"},
@@ -278,7 +307,7 @@ def main():
         platform.select_option("pc")
         check("Fortnite on PC: its own ports", ports.input_value().startswith("9000-9199 10500-10599") and ports.input_value().endswith("45100-45199"), ports.input_value())
         game.select_option("apex")
-        check("Apex Legends on PC: its own ports", ports.input_value() == "7700-7799 9000-9099 10000-10099 10200-10499 10800-10899 15000-15099 22200-22299 27000-27199 49000-49099", ports.input_value())
+        check("Apex Legends on PC: its own ports", ports.input_value() == "7700-7799 8100-8199 9000-9099 10000-10599 10700-10899 15000-15099 22200-22299 27000-27199 49000-49099", ports.input_value())
         platform.select_option("ps")
         check("Apex Legends on PlayStation: its own ports", ports.input_value() == "1000-1099 1900-1999 3000-3199 7700-7799 8100-8199 10000-10499 10600-10999 27100-27199 27500-27599 34100-34199", ports.input_value())
         platform.select_option("xbox")
@@ -588,6 +617,9 @@ def main():
         check("panel: packet counters", panel.get_by_text("Game packets: 12,345").is_visible() and panel.get_by_text("Blocked: 67").is_visible())
         check("panel: API problem shown", panel.get_by_text("API problem:").is_visible())
         check("panel: device addresses", panel.get_by_text("Device at 192.168.1.23 + 1 IPv6").is_visible())
+        page.wait_for_function("document.querySelector('.lf-panel-version') && document.querySelector('.lf-panel-version').innerText.includes('is out')", timeout=5000)
+        check("panel: LobbyFence's version, and that a newer one is out", page.locator(".lf-panel-version").inner_text() == "LobbyFence 1.0.0 · version 1.1.0 is out - update",
+              page.locator(".lf-panel-version").inner_text())
         check("panel: no 'no traffic' warning while packets flow", panel.get_by_text("No game traffic").count() == 0)
         tabs = page.locator(".lf-tab").all_inner_texts()
         check("tabs count allowed / blocked / unknown", [t.split()[-1] for t in tabs] == ["1", "2", "1"], tabs)
@@ -1074,6 +1106,61 @@ def main():
         page.locator("#modal").get_by_role("button", name="Close").click()
         page.evaluate("window.__execResult = null")
 
+        # ---- 6c. the lists follow the router by themselves
+        page.evaluate("window.__live = null")
+        page.locator(".lf-search select").last.select_option("all")
+        page.locator(".lf-tab", has_text="Allowed").click()
+        allowed = lambda: int(page.locator(".lf-tab[data-tab=in] .lf-muted").inner_text())
+        a0 = allowed()
+        def more_servers(*ips):
+            page.evaluate("t => { window.__files['/tmp/lobbyfence/game.servers'] += t; }",
+                          "".join("%s in 50.11 8.68 DE 1700000400\n" % ip for ip in ips))
+        more_servers("45.10.0.7", "45.10.0.8")
+        # (nobody clicks, LuCI's own refresh loop is paused: the page's own check every few seconds)
+        page.evaluate("window.view.watchdogMs = 300")
+        try:
+            page.wait_for_function(f"+document.querySelector('.lf-tab[data-tab=in] .lf-muted').innerText === {a0 + 2}", timeout=6000)
+            ok = True
+        except Exception:
+            ok = False
+        check("the server list updates by itself, also while LuCI's refresh loop is paused", ok, [a0, allowed()])
+        page.evaluate("window.view.watchdogMs = 0")
+        # one part failing (the map) must not keep the list from updating
+        page.evaluate("""() => { const v = window.view, d = v.drawServers;
+            v.drawServers = function() { v.drawServers = d; throw new Error('test: map failed'); }; }""")
+        more_servers("45.10.0.9")
+        page.evaluate("window.__poll()")
+        page.wait_for_timeout(300)
+        check("...and when drawing the map fails once, the list still updates", allowed() == a0 + 3, [a0, allowed()])
+        page.evaluate("window.__poll()")
+        page.wait_for_timeout(300)
+        check("...and the map is drawn again on the next refresh", page.evaluate("window.__map.sources['lf-servers'].data.features.length") >= a0 + 3,
+              page.evaluate("window.__map.sources['lf-servers'].data.features.length"))
+        # the Servers file window: new servers show up while it is open (not while some are ticked)
+        page.evaluate("window.view.serversFollowMs = 400")
+        page.evaluate("t => { window.__execResult = { code: 0, stdout: t }; window.__builtin = null; }", sfile)
+        page.get_by_role("button", name="Servers file…").click()
+        page.wait_for_function("document.querySelectorAll('.lf-servers-game').length === 2")
+        c0 = page.locator(".lf-servers-game").nth(0).locator(".lf-servers-count").inner_text()
+        page.locator(".lf-servers-game").nth(0).locator("summary").click()
+        page.locator(".lf-servers-game").nth(0).locator(".lf-servers-pick").nth(0).check()
+        page.evaluate("t => { window.__execResult = { code: 0, stdout: t }; }", sfile.replace("game game Test game\n", "game game Test game\n45.10.0.9 50.1 8.7 DE 1700000400\n"))
+        page.wait_for_timeout(1200)
+        check("Servers file: nothing is redrawn while servers are ticked", page.locator(".lf-servers-game").nth(0).locator(".lf-servers-count").inner_text() == c0
+              and page.locator(".lf-servers-pick:checked").count() == 1)
+        page.locator(".lf-servers-game").nth(0).locator(".lf-servers-pick").nth(0).uncheck()
+        try:
+            page.wait_for_function(f"document.querySelector('.lf-servers-game .lf-servers-count').innerText !== {json.dumps(c0)}", timeout=4000)
+            ok = True
+        except Exception:
+            ok = False
+        c1 = page.locator(".lf-servers-game").nth(0).locator(".lf-servers-count").inner_text()
+        check("Servers file: new servers show up while the window is open", ok and c1 != c0, [c0, c1])
+        check("...the game that was open stays open, and the window says it follows", page.locator(".lf-servers-game").nth(0).evaluate("d => d.open")
+              and "Updates by itself" in page.locator(".lf-servers-live").inner_text())
+        page.locator("#modal").get_by_role("button", name="Close").click()
+        page.evaluate("window.view.serversFollowMs = 0; window.__execResult = null")
+
         if SHOTS:
             SHOTS.mkdir(parents=True, exist_ok=True)
             page.locator(".lf-tab", has_text="Blocked").click()
@@ -1281,7 +1368,7 @@ def main():
 
         browser.close()
 
-    real_errors = [e for e in errors if "no webgl2" not in e]
+    real_errors = [e for e in errors if "no webgl2" not in e and "test: map failed" not in e]
     check("no JavaScript errors", not real_errors, real_errors)
     failed = [r for r in results if not r[1]]
     print("ALL BROWSER TESTS PASSED" if not failed else f"{len(failed)} FAILED")

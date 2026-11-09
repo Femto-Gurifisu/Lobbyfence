@@ -145,8 +145,7 @@ for n, line in code_lines(main):
 
 # The servers list LobbyFence comes with is published: game servers in data centres only.
 # Peer-to-peer traffic (party chat, some lobbies) shows players' home addresses too - those
-# must never be added. Every address must be in a hosting network listed here, or be one
-# of the few servers named below (seen only in the games' data-centre ping rounds).
+# must never be added. Every address must be in a hosting network listed here.
 import ipaddress
 HOSTING = """
   45.32.0.0/16 45.63.0.0/16 45.76.0.0/15 64.176.0.0/15 64.237.32.0/19 66.42.32.0/19 66.42.64.0/18 66.135.0.0/19
@@ -157,14 +156,14 @@ HOSTING = """
   209.222.0.0/19 216.238.64.0/18 217.69.0.0/20
   34.0.0.0/15 35.208.0.0/12
   3.0.0.0/9 13.112.0.0/14 13.228.0.0/14 15.128.0.0/10 16.0.0.0/8 18.128.0.0/9 35.152.0.0/13 35.160.0.0/13
-  43.192.0.0/10 44.192.0.0/10 52.0.0.0/10 52.192.0.0/11 54.0.0.0/8 63.176.0.0/15 107.20.0.0/14 184.32.0.0/14
-  216.244.0.0/18
+  43.192.0.0/10 44.192.0.0/10 52.0.0.0/10 52.88.0.0/13 52.192.0.0/11 54.0.0.0/8 63.176.0.0/15 107.20.0.0/14
+  184.32.0.0/14 216.244.0.0/18
   155.133.224.0/19 162.254.192.0/21 146.66.152.0/21 185.25.180.0/22 103.10.124.0/23 103.28.54.0/23 205.196.6.0/24
   45.121.184.0/22
-"""   # Vultr / Choopa, Google Cloud, Amazon, Valve's relays
-NAMED_SERVERS = {"103.43.72.137", "103.43.72.141", "189.1.164.208", "189.1.164.210", "95.141.40.173", "95.141.40.175",
-                 "185.34.107.128", "185.34.107.129", "185.34.107.184", "212.102.63.140", "89.222.108.161",
-                 "89.222.117.200", "152.233.52.97"}
+  103.43.72.0/24 189.1.164.0/24 95.141.40.0/24 185.34.107.0/24 212.102.63.0/24 89.222.108.0/24 89.222.117.0/24
+  152.233.52.0/24 216.198.196.0/24 216.198.246.0/24
+"""   # Vultr / Choopa, Google Cloud, Amazon, Valve's relays; then data-centre blocks seen only in the
+      # games' data-centre ping rounds, next to the ones above (never a home connection)
 nets = [ipaddress.ip_network(c) for c in HOSTING.split()]
 n_srv = 0
 for n, line in enumerate((REPO / "files/usr/share/lobbyfence/servers.txt").read_text().splitlines(), 1):
@@ -177,7 +176,7 @@ for n, line in enumerate((REPO / "files/usr/share/lobbyfence/servers.txt").read_
     except ValueError:
         problems.append(f"servers.txt:{n}: not an address: {line}")
         continue
-    if t[0] not in NAMED_SERVERS and not any(a in net for net in nets):
+    if not any(a in net for net in nets):
         problems.append(f"servers.txt:{n}: {t[0]} is not in a data-centre network listed in safety_static.py"
                         " - a player's home address must never be published")
 

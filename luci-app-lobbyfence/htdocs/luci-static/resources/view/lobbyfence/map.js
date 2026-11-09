@@ -606,6 +606,11 @@ var STYLE_CSS = [
 	'.lf-wno .lf-wmark{color:#ef4444}',
 	'.lf-wsteps{font-size:13px;color:var(--lf-muted)}',
 	'.lf-credit{margin-top:12px;font-size:12px;color:var(--lf-muted);text-align:right;font-style:italic;letter-spacing:.02em}',
+	'.lf-wfoot{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:4px 12px;margin-top:12px}',
+	'.lf-wfoot .lf-credit{margin-top:0}',
+	'.lf-version{font-size:12px;color:var(--lf-muted)}',
+	'.lf-version a{color:inherit;text-decoration:underline}',
+	'.lf-version .lf-newer{color:var(--lf-accent);font-weight:600}',
 	'.lf-laghead{display:flex;align-items:center;gap:6px;margin-bottom:4px}',
 	'.lf-laghead h4{margin:0!important}',
 	'.lf-app .lf-laghead .lf-btn{padding:0 7px;line-height:18px;border-radius:50%}',
@@ -834,7 +839,7 @@ var PRESETS = [
 	{ id: 'lol', group: 'pc', label: 'League of Legends', proto: 'udp', remote: [ '5000-5500' ], source: 'Riot Games', official: true },
 	{ id: 'apex', group: 'pc', label: 'Apex Legends', proto: 'udp', remote: [ '1024-65535' ], source: _('players\' routers'), wide: true, burst: 2,
 	  platforms: {
-		pc: [ '7700-7799', '9000-9099', '10000-10099', '10200-10499', '10800-10899', '15000-15099', '22200-22299', '27000-27199', '49000-49099' ],
+		pc: [ '7700-7799', '8100-8199', '9000-9099', '10000-10599', '10700-10899', '15000-15099', '22200-22299', '27000-27199', '49000-49099' ],
 		ps: [ '1000-1099', '1900-1999', '3000-3199', '7700-7799', '8100-8199', '10000-10499', '10600-10999', '27100-27199', '27500-27599', '34100-34199' ]
 	  },
 	  note: _('PC and PlayStation: the ports players\' routers saw in matches. Xbox (not measured yet): every UDP port - narrow it with Ports… after a few matches.') },
@@ -1359,6 +1364,19 @@ function store(key, value) {
 	catch (e) {}
 	return null;
 }
+
+/* is version a newer than b? ("1.10.0" is newer than "1.9.2") */
+function newerVersion(a, b) {
+	var x = String(a).split('.'), y = String(b).split('.');
+	for (var i = 0; i < Math.max(x.length, y.length); i++) {
+		var d = (parseInt(x[i], 10) || 0) - (parseInt(y[i], 10) || 0);
+		if (d)
+			return d > 0;
+	}
+	return false;
+}
+
+var RELEASES_URL = 'https://github.com/Femto-Gurifisu/Lobbyfence/releases/latest';
 
 /* LobbyFence was called RegionGate before: what this browser remembered under
  * the old name (theme, view, panel, ...) moves over once */
@@ -2512,6 +2530,7 @@ return view.extend({
 	refresh: function() {
 		var self = this, zone = this.zone;
 		this.lastRefresh = Date.now();
+		this.refreshing = this.lastRefresh;
 		return Promise.all([
 			fs.read('/tmp/lobbyfence/status.json').then(JSON.parse).catch(function() { return null; }),
 			L.resolveDefault(callServiceList('lobbyfence'), {})
@@ -2532,8 +2551,11 @@ return view.extend({
 			var lz = self.live && self.live.zones && self.live.zones[zone];
 			self.openUntil = lz && lz.open_left > 0 ? Date.now() + lz.open_left * 1000 : 0;
 			var inst = (r[1] && r[1].lobbyfence && r[1].lobbyfence.instances) || {}, z;
+			var ver = self.status && self.status.version;
 			self.status = r[0];
 			self.running = Object.keys(inst).some(function(k) { return inst[k].running; });
+			if (self.welcomeVersion && (self.status && self.status.version) !== ver)
+				self.fillVersion(self.welcomeVersion);
 			z = self.zoneStatus();
 			if (z && z.allow && z.block && zone === self.zone)
 				self.rules = { allow: z.allow, block: z.block };
@@ -2545,22 +2567,30 @@ return view.extend({
 			var lz = self.live && self.live.zones && self.live.zones[zone];
 			var sig = [ r[2] != null ? Math.random() : self.serversRev, self.servers.length, JSON.stringify(lz ? [ lz.active, lz.rate ] : null),
 				JSON.stringify(self.rules || null), self.range, self.ccFilter || '', self.filter || '', Math.floor(self.routerNow() / 60) ].join('|');
-			if (sig === self.drawnSig && zone === self.drawnZone) {
+			var same = sig === self.drawnSig && zone === self.drawnZone, ok = true;
+			/* each part on its own: one that fails (it shouldn't) must not keep the others
+			   - the server list above all - from updating; it is tried again next time */
+			function part(name, fn) {
+				try { fn(); }
+				catch (e) { ok = false; console.error('LobbyFence: ' + name + ':', e); }
+			}
+			if (!same)
+				part('map', function() { self.drawServers(); });
+			/* don't rebuild the boxes the user is typing in; catch up when they leave */
+			part('panel', function() {
 				if (self.editingPanel())
 					self.statusDeferred = true;
 				else
 					self.renderStatus();
-				return;
+			});
+			if (!same)
+				part('server list', function() { self.renderServers(); });
+			if (!same && ok) {
+				self.drawnSig = sig;
+				self.drawnZone = zone;
 			}
-			self.drawnSig = sig;
-			self.drawnZone = zone;
-			self.drawServers();
-			/* don't rebuild the boxes the user is typing in; catch up when they leave */
-			if (self.editingPanel())
-				self.statusDeferred = true;
-			else
-				self.renderStatus();
-			self.renderServers();
+		}).finally(function() {
+			self.refreshing = 0;
 		});
 	},
 
@@ -2615,8 +2645,59 @@ return view.extend({
 				'class': 'lf-btn lf-primary',
 				'click': function(ev) { ev.preventDefault(); self.openNewZone(); }
 			}, _('Create your first zone')),
-			E('div', { 'class': 'lf-credit' }, _('Created by Darkness'))
+			E('div', { 'class': 'lf-wfoot' }, [
+				this.welcomeVersion = this.fillVersion(E('div', { 'class': 'lf-version' })),
+				E('div', { 'class': 'lf-credit' }, _('Created by Darkness'))
+			])
 		]));
+	},
+
+	/* "LobbyFence 1.1.0 - up to date", or the newer version on GitHub (when this
+	   browser could ask), or just a link to the latest release */
+	fillVersion: function(el) {
+		var v = this.status && this.status.version, latest = this.latestVersion;
+		if (!el)
+			return el;
+		this.askLatest();
+		el.innerHTML = '';
+		el.appendChild(document.createTextNode(v ? _('LobbyFence %s').format(v) : 'LobbyFence'));
+		el.appendChild(document.createTextNode(' · '));
+		if (v && latest && newerVersion(latest, v))
+			el.appendChild(E('a', { 'class': 'lf-newer', 'href': RELEASES_URL, 'target': '_blank', 'rel': 'noopener noreferrer' },
+				_('version %s is out - update').format(latest)));
+		else if (v && latest)
+			el.appendChild(document.createTextNode(_('up to date')));
+		else
+			el.appendChild(E('a', { 'href': RELEASES_URL, 'target': '_blank', 'rel': 'noopener noreferrer' }, _('latest version')));
+		return el;
+	},
+
+	/* the newest LobbyFence on GitHub, asked by this browser (not the router) at most
+	   twice a day - nothing is sent but the question itself */
+	askLatest: function() {
+		var self = this, c = store('latest'), now = Date.now();
+		if (this.latestAsked)
+			return;
+		this.latestAsked = true;
+		if (c && typeof c.v === 'string' && now >= +c.t && now - c.t < 12 * 3600 * 1000) {
+			this.latestVersion = c.v;
+			return;
+		}
+		if (typeof window.fetch !== 'function')
+			return;
+		window.fetch('https://api.github.com/repos/Femto-Gurifisu/Lobbyfence/releases/latest',
+			{ credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store' }).then(function(r) {
+			return r.ok ? r.json() : null;
+		}).then(function(j) {
+			var v = j && typeof j.tag_name === 'string' ? j.tag_name.replace(/^v/i, '') : '';
+			if (!/^\d+(\.\d+){1,3}$/.test(v))
+				return;
+			self.latestVersion = v;
+			store('latest', { v: v, t: Date.now() });
+			self.fillVersion(self.welcomeVersion);
+			if (!self.editingPanel())
+				self.renderStatus();
+		}).catch(function() {});
 	},
 
 	hasRegion: function() {
@@ -3230,6 +3311,7 @@ return view.extend({
 				'click': function(ev) { ev.preventDefault(); self.openServersFile(); }
 			}, _('Servers file…'))
 		]));
+		sec.appendChild(this.fillVersion(E('div', { 'class': 'lf-version lf-panel-version', 'style': 'margin-top:6px' })));
 	},
 
 	/* ------------------------------------------- lag simulator (netem) */
@@ -3439,7 +3521,7 @@ return view.extend({
 
 	/* once a second: smooth countdown, and redraw the panel when the zone closes */
 	tick: function() {
-		var el = this.statusSec && this.statusSec.querySelector('.lf-open-left'), left = this.openLeft();
+		var el = this.statusSec && this.statusSec.querySelector('.lf-open-left'), left = this.openLeft(), now = Date.now();
 		if (el && left > 0)
 			el.textContent = String(left);
 		else if (el || (this.openUntil && left === 0)) {
@@ -3449,6 +3531,15 @@ return view.extend({
 			else
 				this.renderStatus();
 		}
+		/* the page normally refreshes every 5 s through LuCI's own loop - which stops when
+		   LuCI's "Refreshing / Paused" switch at the top is paused, and waits while an answer
+		   is late. Keep the map and the server list live anyway: every 15 s at most (30 s
+		   while LobbyFence is off), never while the page is hidden or a question is out */
+		var off = this.status && this.status.enabled === false, wait = this.watchdogMs != null ? this.watchdogMs : 15000;
+		if (wait > 0 && !document.hidden && this.app && document.body.contains(this.app) &&
+			now - (this.lastRefresh || 0) > (off ? Math.max(wait, 30000) : wait) &&
+			(!this.refreshing || now - this.refreshing > 60000))
+			this.refresh().catch(function() {});
 	},
 
 	startService: function() {
@@ -3576,9 +3667,10 @@ return view.extend({
 	/* the located servers by game, as a file: downloaded here, imported on another
 	   router (or this one after a reset) - those servers then need no lookup */
 	openServersFile: function() {
-		var self = this, PATH = '/tmp/lobbyfence/servers-import.txt', current = '', busy = false;
+		var self = this, PATH = '/tmp/lobbyfence/servers-import.txt', current = '', busy = false, armedN = 0, polling = false;
 		var stateNode = E('p', { 'class': 'lf-debug-state lf-servers-state' }, '');
 		var listNode = E('div', { 'class': 'lf-servers-list' }, E('em', {}, _('Looking up the servers saved on the router…')));
+		var liveNode = E('p', { 'class': 'lf-muted lf-servers-live', 'style': 'font-size:90%;margin:0 0 6px' }, '');
 		var builtinNode = E('div', { 'class': 'lf-servers-builtin' });
 		var input = E('input', { 'type': 'file', 'accept': '.txt,text/plain', 'class': 'lf-servers-input', 'style': 'display:none' });
 		var paste = E('textarea', { 'class': 'lf-debug-text lf-servers-paste', 'rows': 6, 'spellcheck': 'false',
@@ -3679,14 +3771,16 @@ return view.extend({
 				if (busy || b.disabled) return;
 				if (!armed) {
 					armed = what();
+					armedN++;
 					b.textContent = armed.ask;
 					stateNode.textContent = armed.explain;
-					timer = window.setTimeout(function() { armed = null; b.textContent = b.label; }, 6000);
+					timer = window.setTimeout(function() { armed = null; armedN--; b.textContent = b.label; }, 6000);
 					return;
 				}
 				var args = armed.args;
 				window.clearTimeout(timer);
 				armed = null;
+				armedN--;
 				setBusy(true);
 				stateNode.textContent = _('Removing…');
 				fs.exec('/usr/sbin/lobbyfence', args).then(function(r) {
@@ -3758,6 +3852,30 @@ return view.extend({
 		function count(games) {
 			return games.reduce(function(n, g) { return n + g.rows.length; }, 0);
 		}
+		/* while the window is open the lists follow the router - the servers learned while
+		   you play - every 10 s; not while something is being done here or servers are ticked */
+		function servers(text) { return String(text).replace(/^#.*\n?/gm, ''); }
+		function quiet() { return busy || armedN > 0 || !!listNode.querySelector('.lf-servers-pick:checked'); }
+		var follow = (self.serversFollowMs != null ? self.serversFollowMs : 10000) > 0 && window.setInterval(function() {
+			if (!document.body.contains(listNode)) { window.clearInterval(follow); return; }
+			if (document.hidden || polling || quiet() || !current)
+				return;
+			polling = true;
+			fs.exec('/usr/sbin/lobbyfence', [ 'export' ]).then(function(r) {
+				var text = r && r.code === 0 && r.stdout || '';
+				if (!isFile(text) || !document.body.contains(listNode))
+					return;
+				liveNode.textContent = _('Updates by itself while this is open - last checked %s.').format(new Date().toLocaleTimeString());
+				if (servers(text) === servers(current) || quiet())
+					return;
+				var open = openGame(), scroll = listNode.scrollTop, d;
+				current = text;
+				render(parse(text));
+				if (open && (d = listNode.querySelector('details[data-game="' + open + '"]')))
+					d.open = true;
+				listNode.scrollTop = scroll;
+			}).catch(function() {}).then(function() { polling = false; });
+		}, self.serversFollowMs != null ? self.serversFollowMs : 10000);
 		function sendFile(text) {
 			if (!isFile(text)) { stateNode.textContent = _('That is not a LobbyFence servers file (made with Download servers or Copy).'); return; }
 			if (text.length > 1024 * 1024) { stateNode.textContent = _('That is too big (more than 1 MB).'); return; }
@@ -3814,6 +3932,7 @@ return view.extend({
 		ui.showModal(_('Servers file'), [
 			E('p', {}, _('Every server LobbyFence has located, by game, with where it is. Share them with another router - or keep them for after a reset - and those servers are known straight away, without asking the geolocation service again.')),
 			listNode,
+			liveNode,
 			builtinNode,
 			E('p', { 'style': 'font-size:90%;opacity:.8' }, _('Holds the game servers\' addresses and locations only - nothing about your devices, your address or your regions. Importing adds locations; it does not change your zones or what they block.')),
 			pasteBox,

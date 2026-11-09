@@ -46,6 +46,7 @@ def main():
         page.route("https://tiles.maps.eox.at/**", lambda r: r.abort())
         page.route("https://server.arcgisonline.com/**", lambda r: r.abort())
         page.route("https://tile.openstreetmap.org/**", lambda r: r.abort())
+        page.route("https://api.github.com/repos/Femto-Gurifisu/Lobbyfence/releases/latest", lambda r: r.fulfill(content_type="application/json", body='{"tag_name": "v1.1.0"}', headers={"Access-Control-Allow-Origin": "*"}))   # (the page asks GitHub for the newest version)
 
         cfg = {"globals": {".name": "globals", ".type": "globals", "enabled": "1", "home": "40.75060,-73.99710", "home_label": "10001, Manhattan"},
                "game": {".name": "game", ".type": "zone", "label": "Game", "enabled": "1", "mode": "enforce", "device": ["192.168.1.23"],

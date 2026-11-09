@@ -46,7 +46,7 @@ const stubs = {
 	network: { getHostHints: () => Promise.resolve(null) }
 };
 const HELPERS = [ 'distanceKm', 'destination', 'circleRing', 'wrapLon', 'parseCircles', 'formatCircle', 'parseServers',
-	'validAddress', 'parsePorts', 'portRanges', 'inRanges', 'rangesSize', 'sectionName', 'createZone', 'loadMaplibre', 'importModule', 'MAPLIBRE_BASES',
+	'validAddress', 'parsePorts', 'portRanges', 'inRanges', 'rangesSize', 'newerVersion', 'sectionName', 'createZone', 'loadMaplibre', 'importModule', 'MAPLIBRE_BASES',
 	'themedStyle', 'rasterStyle', 'THEMES', 'THEME_ORDER', 'DEFAULT_THEME', 'flag', 'ago', 'ringBounds',
 	'PRESETS', 'PRESET_GROUPS', 'DEFAULT_PRESET', 'presetById', 'presetSummary', 'burstAdvice', 'presetOn', 'needsPlatform', 'PLATFORMS', 'isMac', 'validDevice',
 	'mercY', 'normalizePolygon', 'inPolygon', 'parsePolygons', 'formatPolygon', 'v4num', 'v6groups', 'cidrMatch', 'inList',
@@ -175,7 +175,7 @@ const inDrawn = (ring, lon, lat) => [ -360, 0, 360 ].some((k) => inRing(ring, lo
 		assert(h.needsPlatform(P('cod')) && h.needsPlatform(P('fortnite')) && !h.needsPlatform(P('any_udp')) && !h.needsPlatform(P('codm')));
 		assert.deepStrictEqual(h.presetOn(P('fortnite'), 'ps').remote, [ '9000-9199', '15000-15199', '22200-22299', '36300-36399', '41700-41799', '53700-53799' ]);
 		assert.deepStrictEqual(h.presetOn(P('fortnite'), 'pc').remote, [ '9000-9199', '10500-10599', '15000-15199', '22200-22299', '30300-30399', '32900-32999', '35000-35099', '36800-36899', '39200-39299', '45100-45199' ]);
-		assert.deepStrictEqual(h.presetOn(P('apex'), 'pc').remote, [ '7700-7799', '9000-9099', '10000-10099', '10200-10499', '10800-10899', '15000-15099', '22200-22299', '27000-27199', '49000-49099' ]);
+		assert.deepStrictEqual(h.presetOn(P('apex'), 'pc').remote, [ '7700-7799', '8100-8199', '9000-9099', '10000-10599', '10700-10899', '15000-15099', '22200-22299', '27000-27199', '49000-49099' ]);
 		assert.deepStrictEqual(h.presetOn(P('apex'), 'ps').remote, [ '1000-1099', '1900-1999', '3000-3199', '7700-7799', '8100-8199', '10000-10499', '10600-10999', '27100-27199', '27500-27599', '34100-34199' ]);
 		assert.deepStrictEqual(h.presetOn(P('apex'), 'xbox').remote, [ '1024-65535' ], 'Xbox not measured: every port');
 		assert.deepStrictEqual(h.presetOn(P('cod'), 'ps').either, [ '3074-3079' ], 'same ports on every device type');
@@ -218,6 +218,11 @@ const inDrawn = (ring, lon, lat) => [ -360, 0, 360 ].some((k) => inRing(ring, lo
 		assert.strictEqual(h.parsePorts('70000'), null);
 		assert.strictEqual(h.parsePorts('500-100'), null);
 		assert.strictEqual(h.parsePorts('abc'), null);
+	});
+	await check('versions compared part by part (1.10.0 is newer than 1.9.2)', () => {
+		assert(h.newerVersion('1.1.0', '1.0.0') && h.newerVersion('1.10.0', '1.9.2') && h.newerVersion('2.0', '1.99.99'));
+		assert(h.newerVersion('1.1.1', '1.1') && !h.newerVersion('1.1', '1.1.0') && !h.newerVersion('1.0.0', '1.0.0'));
+		assert(!h.newerVersion('1.0.9', '1.1.0') && !h.newerVersion('', '1.0.0'));
 	});
 	await check('a zone\'s ports as ranges: in them or not, and how many ports they cover', () => {
 		assert.deepStrictEqual(h.portRanges([ '10000-10499', '3074' ]), [ [ 10000, 10499 ], [ 3074, 3074 ] ]);

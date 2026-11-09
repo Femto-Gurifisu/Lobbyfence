@@ -140,6 +140,7 @@ def router_context(b, **opts):
     ctx.route("https://tiles.openfreemap.org/styles/positron", lambda r: r.fulfill(content_type="application/json",
               body=json.dumps({"version": 8, "sources": {}, "layers": [{"id": "background", "type": "background"}]}), headers={"Access-Control-Allow-Origin": "*"}))
     ctx.route("https://**", lambda r: r.abort() if "unpkg.com" not in r.request.url and "openfreemap.org/styles" not in r.request.url else r.fallback())
+    ctx.route("https://api.github.com/repos/Femto-Gurifisu/Lobbyfence/releases/latest", lambda r: r.fulfill(content_type="application/json", body='{"tag_name": "v1.1.0"}', headers={"Access-Control-Allow-Origin": "*"}))   # (the page asks GitHub for the newest version)
     return ctx
 
 
