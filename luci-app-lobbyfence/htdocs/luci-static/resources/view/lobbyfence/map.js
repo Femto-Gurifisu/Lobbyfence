@@ -825,6 +825,10 @@ var PLATFORMS = [ [ 'pc', _('PC') ], [ 'ps', _('PlayStation'), true ], [ 'xbox',
  * (9330-9340), Dragon Nest (10514) */
 var MOBILE_TCP_PORTS = [ '443', '3013', '5001', '5003', '9001', '9330-9340', '10001-10094', '10514', '17500', '18082',
 	'30000-30999', '39003', '39698', '39779', '65010', '65050' ];
+/* games whose match ports nobody has published or measured yet: every UDP port for now */
+var UNMEASURED_NOTE = _('Narrow it with Ports… after a few matches.');
+/* Roblox picks a server port from its range for each game (Roblox support) */
+var ROBLOX_NOTE = _('Voice and video calls on this device (Discord and the like) use these ports too.');
 var PRESETS = [
 	{ id: 'any_udp', group: 'any', label: _('Any game (all UDP traffic)'), name: _('Any game'), proto: 'udp', remote: [ '1024-65535' ],
 	  note: _('Works for every game, including ones not listed. Voice and video calls from this device are checked as well, so start in Monitor mode.') },
@@ -836,31 +840,46 @@ var PRESETS = [
 	{ id: 'custom', group: 'any', label: _('Custom (your own ports)'), name: '', proto: 'udp', remote: [], custom: true,
 	  note: _('Enter the game\'s server ports yourself and give the zone a name.') },
 
-	{ id: 'cod', group: 'pc', label: 'Call of Duty (Black Ops 7/6, Warzone, MW III)', proto: 'udp', either: [ '3074-3079' ], source: 'Activision', official: true, burst: 0 },
-	{ id: 'valorant', group: 'pc', label: 'VALORANT', proto: 'udp', remote: [ '7000-8000', '8180-8181' ], source: 'Riot Games', official: true },
-	{ id: 'lol', group: 'pc', label: 'League of Legends', proto: 'udp', remote: [ '5000-5500' ], source: 'Riot Games', official: true },
+	/* PC & console games, A to Z */
 	{ id: 'apex', group: 'pc', label: 'Apex Legends', proto: 'udp', remote: [ '1024-65535' ], source: _('players\' routers'), wide: true, burst: 2,
 	  platforms: {
 		pc: [ '7700-7799', '8100-8199', '9000-9099', '10000-10599', '10700-10899', '15000-15099', '22200-22299', '27000-27199', '49000-49099' ],
 		ps: [ '1000-1099', '1900-1999', '3000-3199', '7700-7799', '8100-8199', '10000-10999', '27000-27199', '27500-27599', '34100-34199' ]
 	  },
 	  note: _('PC and PlayStation: the ports players\' routers saw in matches. Xbox and Nintendo Switch (not measured yet): every UDP port - narrow it with Ports… after a few matches.') },
+	{ id: 'arcraiders', group: 'pc', label: 'ARC Raiders', proto: 'udp', remote: [ '1024-65535' ], unmeasured: true, wide: true, note: UNMEASURED_NOTE },
+	{ id: 'battlefield', group: 'pc', label: 'Battlefield 6', proto: 'udp', remote: [ '1024-65535' ], unmeasured: true, wide: true, note: UNMEASURED_NOTE },
+	{ id: 'cod', group: 'pc', label: 'Call of Duty (Black Ops 7/6, Warzone, MW III)', proto: 'udp', either: [ '3074-3079' ], source: 'Activision', official: true, burst: 0 },
+	{ id: 'valve', group: 'pc', label: 'Counter-Strike 2 / Dota 2', proto: 'udp', remote: [ '27000-27100' ], source: _('Steam players') },
+	{ id: 'dbd', group: 'pc', label: 'Dead by Daylight', proto: 'udp', remote: [ '1024-65535' ], unmeasured: true, wide: true, note: UNMEASURED_NOTE },
+	{ id: 'eafc', group: 'pc', label: 'EA SPORTS FC 26', proto: 'udp', remote: [ '1024-65535' ], unmeasured: true, wide: true, note: UNMEASURED_NOTE },
 	{ id: 'fortnite', group: 'pc', label: 'Fortnite', proto: 'udp', remote: EPIC_PORTS, source: 'Epic Games', official: true, wide: true, burst: 2,
 	  platforms: {
 		pc: [ '9000-9199', '10500-10599', '15000-15199', '22200-22299', '30300-30399', '32900-32999', '35000-35099', '36800-36899', '39200-39299', '45100-45199' ],
 		ps: [ '9000-9199', '10100-10199', '15000-15199', '22200-22299', '36300-36399', '37500-37599', '39900-39999', '41700-41799', '42100-42199', '48200-48299', '51100-51199', '53700-53799', '56100-56199' ]
 	  } },
+	/* peer-to-peer: the session's players connect to each other, from 6672 when they can */
+	{ id: 'gta', group: 'pc', label: 'GTA Online (GTA V) / Red Dead Online', name: 'GTA Online', proto: 'udp', either: [ '6672', '61455-61458' ],
+	  source: 'Rockstar Games', official: true, burst: 0,
+	  note: _('Peer-to-peer: the other players connect to you directly, so it is where they are that counts - the smaller the region, the fewer players in your session.') },
+	{ id: 'lol', group: 'pc', label: 'League of Legends', proto: 'udp', remote: [ '5000-5500' ], source: 'Riot Games', official: true },
+	{ id: 'marvelrivals', group: 'pc', label: 'Marvel Rivals', proto: 'udp', remote: [ '1024-65535' ], unmeasured: true, wide: true, note: UNMEASURED_NOTE },
 	{ id: 'overwatch', group: 'pc', label: 'Overwatch 2', proto: 'udp', remote: [ '3478-3479', '5060', '5062', '6250', '12000-64000' ], source: 'Blizzard', official: true, wide: true },
+	{ id: 'pubg', group: 'pc', label: 'PUBG: BATTLEGROUNDS', name: 'PUBG', proto: 'udp', remote: [ '1024-65535' ], unmeasured: true, wide: true, note: UNMEASURED_NOTE },
+	{ id: 'r6', group: 'pc', label: 'Rainbow Six Siege X', proto: 'udp', remote: [ '3074', '6015', '10000-10099' ], source: _('players') },
+	{ id: 'roblox', group: 'pc', label: 'Roblox', proto: 'udp', remote: [ '49152-65535' ], source: 'Roblox', official: true, wide: true, note: ROBLOX_NOTE },
 	{ id: 'rocketleague', group: 'pc', label: 'Rocket League', proto: 'udp', remote: [ '7000-9000' ], source: 'Psyonix', official: true },
-	{ id: 'valve', group: 'pc', label: 'Counter-Strike 2 / Dota 2', proto: 'udp', remote: [ '27000-27100' ], source: _('Steam players') },
+	{ id: 'valorant', group: 'pc', label: 'VALORANT', proto: 'udp', remote: [ '7000-8000', '8180-8181' ], source: 'Riot Games', official: true },
 
+	/* mobile games, A to Z */
+	{ id: 'aov', group: 'mobile', label: 'Arena of Valor', proto: 'both', remote: [ '10001-10094', '17000' ], source: _('players') },
 	{ id: 'codm', group: 'mobile', label: 'Call of Duty: Mobile', proto: 'udp', remote: [ '7500-8000' ], source: 'Activision', official: true, burst: 0 },
+	{ id: 'supercell', group: 'mobile', label: 'Clash Royale / Clash of Clans', proto: 'both', remote: [ '9330-9340' ], source: _('players') },
 	{ id: 'fortnite_m', group: 'mobile', label: 'Fortnite (mobile)', proto: 'udp', remote: EPIC_PORTS, source: 'Epic Games', official: true, wide: true, burst: 2 },
-	{ id: 'pubgm', group: 'mobile', label: 'PUBG Mobile', proto: 'udp', remote: [ '10010-20002' ], source: _('players') },
 	{ id: 'freefire', group: 'mobile', label: 'Free Fire', proto: 'udp', remote: [ '10001-10012' ], source: _('players') },
 	{ id: 'mlbb', group: 'mobile', label: 'Mobile Legends: Bang Bang', proto: 'both', remote: [ '5001', '5003', '9001', '30000-30999' ], source: _('players') },
-	{ id: 'aov', group: 'mobile', label: 'Arena of Valor', proto: 'both', remote: [ '10001-10094', '17000' ], source: _('players') },
-	{ id: 'supercell', group: 'mobile', label: 'Clash Royale / Clash of Clans', proto: 'both', remote: [ '9330-9340' ], source: _('players') }
+	{ id: 'pubgm', group: 'mobile', label: 'PUBG Mobile', proto: 'udp', remote: [ '10010-20002' ], source: _('players') },
+	{ id: 'roblox_m', group: 'mobile', label: 'Roblox (mobile)', proto: 'udp', remote: [ '49152-65535' ], source: 'Roblox', official: true, wide: true, note: ROBLOX_NOTE }
 ];
 var DEFAULT_PRESET = 'any_udp';
 
@@ -918,7 +937,8 @@ function presetSummary(p) {
 	if (p.custom)
 		return p.note;
 	var where = p.either ? _('on either side') : _('server side');
-	var src = p.source ? (p.official ? _('published by %s').format(p.source) : _('reported by %s - may be incomplete').format(p.source)) : '';
+	var src = p.source ? (p.official ? _('published by %s').format(p.source) : _('reported by %s - may be incomplete').format(p.source))
+		: (p.unmeasured ? _('match ports not known yet') : '');
 	return [ proto + ' ' + ports + ' (' + where + ')', src, p.wide ? _('wide port range') : '', p.note || '' ]
 		.filter(function(x) { return x; }).join(' · ');
 }

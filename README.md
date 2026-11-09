@@ -189,7 +189,7 @@ above the map, with the steps for your browser); the icon opens straight to
 the map.
 
 **Which version do I have?** The map page's Status section shows it next to
-its heading - *LobbyFence 1.1.1 · up to date*, or *version 1.2.0 is out -
+its heading - *LobbyFence 1.2.0 · up to date*, or *version 1.3.0 is out -
 update* with a link to the latest release. To know that, your
 browser (not the router) asks GitHub for the newest release, at most twice a
 day; nothing else is sent. From the command line: `lobbyfence version`.
@@ -571,24 +571,43 @@ PlayStation*), and **Change…** switches it.
 | Any game | UDP 1024-65535 (server side) | - |
 | Any mobile game | TCP 443, 3013, 5001, 5003, 9001, 9330-9340, 10001-10094, 10514, 17500, 18082, 30000-30999, 39003, 39698, 39779, 65010, 65050 (server side); starts in Enforce | 443 / 65010 / 65050: official - [Activision](https://support.activision.com/content/atvi/support/web/en/articles/ports-used-for-call-of-duty-games.html) (CoD: Mobile); the rest: community - [Netduma forum list](https://forum.netduma.com/topic/55803-list-of-mobile-games-and-its-ports) |
 | Custom | your own ports and name | - |
-| Call of Duty (BO7/BO6, Warzone, MW III) | UDP 3074-3079, either side | official - [Activision](https://support.activision.com/content/atvi/support/web/en/articles/ports-used-for-call-of-duty-games.html) |
-| VALORANT | UDP 7000-8000, 8180-8181 | official - [Riot](https://support.riotgames.com/en-us/valorant/support-tools/how-to-set-up-port-forwarding) |
-| League of Legends | UDP 5000-5500 | official - Riot, via [British Esports](https://britishesports.org/wp-content/uploads/2023/02/PORT-IP-24-25.pdf) |
 | Apex Legends | PC: UDP 7700-7799, 8100-8199, 9000-9099, 10000-10599, 10700-10899, 15000-15099, 22200-22299, 27000-27199, 49000-49099 · PlayStation: UDP 1000-1099, 1900-1999, 3000-3199, 7700-7799, 8100-8199, 10000-10999, 27000-27199, 27500-27599, 34100-34199 · Xbox and Nintendo Switch: UDP 1024-65535 (not measured yet) | players' routers (EA's own list - 1024-1124, 37000-40000 - misses the match ports) |
-| Fortnite | PC: UDP 9000-9199, 10500-10599, 15000-15199, 22200-22299, 30300-30399, 32900-32999, 35000-35099, 36800-36899, 39200-39299, 45100-45199 · PlayStation: UDP 9000-9199, 10100-10199, 15000-15199, 22200-22299, 36300-36399, 37500-37599, 39900-39999, 41700-41799, 42100-42199, 48200-48299, 51100-51199, 53700-53799, 56100-56199 · Xbox, Nintendo Switch and mobile: UDP 3478-3479, 5060, 5062, 6250, 12000-65000 ([Epic Games](https://fortnitehelp.epicgames.com/help/en-US/c5719335176219/c5719372265755/a000084266), wide range) | players' routers (PC, PlayStation); Epic Games (Xbox, Nintendo Switch, mobile) |
-| Overwatch 2 | UDP 3478-3479, 5060, 5062, 6250, 12000-64000 | official - Blizzard, via [NASEF](https://www.nasef.org/overwatch-it-help-page) (wide range) |
-| Rocket League | UDP 7000-9000 | official - Psyonix, via [British Esports](https://britishesports.org/wp-content/uploads/2023/02/PORT-IP-24-25.pdf) |
+| Call of Duty (BO7/BO6, Warzone, MW III) | UDP 3074-3079, either side | official - [Activision](https://support.activision.com/content/atvi/support/web/en/articles/ports-used-for-call-of-duty-games.html) |
 | Counter-Strike 2 / Dota 2 | UDP 27000-27100 | community |
+| Fortnite | PC: UDP 9000-9199, 10500-10599, 15000-15199, 22200-22299, 30300-30399, 32900-32999, 35000-35099, 36800-36899, 39200-39299, 45100-45199 · PlayStation: UDP 9000-9199, 10100-10199, 15000-15199, 22200-22299, 36300-36399, 37500-37599, 39900-39999, 41700-41799, 42100-42199, 48200-48299, 51100-51199, 53700-53799, 56100-56199 · Xbox, Nintendo Switch and mobile: UDP 3478-3479, 5060, 5062, 6250, 12000-65000 ([Epic Games](https://fortnitehelp.epicgames.com/help/en-US/c5719335176219/c5719372265755/a000084266), wide range) | players' routers (PC, PlayStation); Epic Games (Xbox, Nintendo Switch, mobile) |
+| GTA Online (GTA V) / Red Dead Online | UDP 6672, 61455-61458, either side - peer-to-peer, see below | official - Rockstar ([GTA Online](https://support.rockstargames.com/articles/52C2oBx4yUOClVNK6enH8z), [Red Dead Online](https://support.rockstargames.com/articles/3LzU9sNfbcR8Z2sZ8gpFLH/red-dead-online-pc-connection-troubleshooting)) |
+| League of Legends | UDP 5000-5500 | official - Riot, via [British Esports](https://britishesports.org/wp-content/uploads/2023/02/PORT-IP-24-25.pdf) |
+| Overwatch 2 | UDP 3478-3479, 5060, 5062, 6250, 12000-64000 | official - Blizzard, via [NASEF](https://www.nasef.org/overwatch-it-help-page) (wide range) |
+| Rainbow Six Siege X | UDP 3074, 6015, 10000-10099 | community - [Netduma forum](https://forum.netduma.com/topic/38151-duma-not-recognizing-rainbow-six-siege-xr1000/), [IPFire forum](https://community.ipfire.org/t/rainbow-six-siege-server/4361) |
+| Roblox (PC, console and mobile) | UDP 49152-65535 (wide range) | official - [Roblox](https://en.help.roblox.com/hc/articles/203312880) |
+| Rocket League | UDP 7000-9000 | official - Psyonix, via [British Esports](https://britishesports.org/wp-content/uploads/2023/02/PORT-IP-24-25.pdf) |
+| VALORANT | UDP 7000-8000, 8180-8181 | official - [Riot](https://support.riotgames.com/en-us/valorant/support-tools/how-to-set-up-port-forwarding) |
+| ARC Raiders, Battlefield 6, Dead by Daylight, EA SPORTS FC 26, Marvel Rivals, PUBG: BATTLEGROUNDS | UDP 1024-65535 (server side) - their match ports aren't published or measured yet: narrow the zone with [Ports…](#narrowing-a-zone-to-its-games-real-ports-ports) after a few matches | - |
+| Arena of Valor | UDP/TCP 10001-10094, 17000 | community - [Netduma forum list](https://forum.netduma.com/topic/55803-list-of-mobile-games-and-its-ports) |
 | Call of Duty: Mobile | UDP 7500-8000 | official - [Activision](https://support.activision.com/content/atvi/support/web/en/articles/ports-used-for-call-of-duty-games.html) |
+| Clash Royale / Clash of Clans | UDP/TCP 9330-9340 | community - [Netduma forum list](https://forum.netduma.com/topic/55803-list-of-mobile-games-and-its-ports) |
+| Free Fire | UDP 10001-10012 | community - [Netduma forum list](https://forum.netduma.com/topic/55803-list-of-mobile-games-and-its-ports) |
+| Mobile Legends: Bang Bang | UDP/TCP 5001, 5003, 9001, 30000-30999 | community - [Netduma forum list](https://forum.netduma.com/topic/55803-list-of-mobile-games-and-its-ports), [OpenWrt forum](https://forum.openwrt.org/t/port-forward-mobile-legends-port/71959) |
 | PUBG Mobile | UDP 10010-20002 | community - [Netduma forum list](https://forum.netduma.com/topic/55803-list-of-mobile-games-and-its-ports) |
-| Free Fire | UDP 10001-10012 | community - same list |
-| Mobile Legends: Bang Bang | UDP/TCP 5001, 5003, 9001, 30000-30999 | community - same list, [OpenWrt forum](https://forum.openwrt.org/t/port-forward-mobile-legends-port/71959) |
-| Arena of Valor | UDP/TCP 10001-10094, 17000 | community - same list |
-| Clash Royale / Clash of Clans | UDP/TCP 9330-9340 | community - same list |
 
 *Open for server tests* is filled in per game: Apex Legends and Fortnite
-(PC/console and mobile) 2 (raise it if needed), Call of Duty and Call of
-Duty: Mobile 0 (off). Other games start at 0.
+(PC/console and mobile) 2 (raise it if needed); Call of Duty, Call of Duty:
+Mobile and GTA Online 0 (off). Other games start at 0.
+
+**GTA Online and Red Dead Online are peer-to-peer:** the other players in your
+session connect to your console or PC directly (from UDP 6672 when they can),
+so LobbyFence locates *them*, not servers - the smaller the region, the fewer
+players end up in your session. A session is many players at once, so *Open
+for server tests* stays off. Players' addresses are never added to the
+servers list LobbyFence comes with.
+
+**Games whose match ports aren't known yet** (ARC Raiders, Battlefield 6,
+Dead by Daylight, EA SPORTS FC 26, Marvel Rivals, PUBG: BATTLEGROUNDS) start
+with every UDP port, like *Any game*. After a few matches, **Ports…** shows the
+ports the game really used: keep those, and the device's other traffic (voice
+chat, other games) is left alone. **Roblox** uses its own wide range
+(49152-65535), which voice and video calls on the same device (Discord and the
+like) use too.
 
 **Changing a zone's game:** the panel shows the zone's game with a
 *Change…* button. Pick another preset to switch the zone to that game's

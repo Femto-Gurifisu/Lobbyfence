@@ -149,11 +149,35 @@ const inDrawn = (ring, lon, lat) => [ -360, 0, 360 ].some((k) => inRing(ring, lo
 			assert(!!p.remote !== !!p.either, p.id + ' needs exactly one of remote/either');
 			const ports = h.parsePorts((p.remote || p.either).join(' '));
 			assert(ports && (ports.length || p.custom), p.id + ' ports ' + (p.remote || p.either));
-			assert(p.group === 'any' || p.source, p.id + ' source');
+			// where the ports come from - or, not known yet, every UDP port to narrow with Ports…
+			assert(p.group === 'any' || p.source || (p.unmeasured && p.wide && p.remote.join() === '1024-65535'), p.id + ' source');
 			assert(h.presetSummary(p).length > 0);
 		});
 		assert(h.presetById(h.DEFAULT_PRESET).group === 'any');
 		assert(h.PRESET_GROUPS.every((g) => h.PRESETS.some((p) => p.group === g[0])), 'no empty group');
+		[ 'pc', 'mobile' ].forEach((g) => {
+			const labels = h.PRESETS.filter((p) => p.group === g).map((p) => p.label.toLowerCase());
+			assert.deepStrictEqual(labels, labels.slice().sort(), g + ' games A to Z');
+		});
+	});
+	await check('new games: Marvel Rivals, Roblox, GTA Online, Battlefield and more', () => {
+		const P = (id) => h.presetById(id);
+		assert.deepStrictEqual(P('roblox').remote, [ '49152-65535' ]);                  // Roblox support
+		assert.deepStrictEqual(P('roblox_m').remote, [ '49152-65535' ]);
+		assert(P('roblox').official && P('roblox').wide && P('roblox_m').group === 'mobile');
+		assert.deepStrictEqual(P('gta').either, [ '6672', '61455-61458' ]);             // Rockstar, GTA Online & Red Dead Online
+		assert.strictEqual(P('gta').burst, 0, 'peer-to-peer: a session is many players at once - never open for them');
+		assert(/0 \(off\)/.test(h.burstAdvice(P('gta'))) && /GTA Online/.test(h.burstAdvice(P('gta'))));
+		assert(/either side/.test(h.presetSummary(P('gta'))) && /Peer-to-peer/.test(h.presetSummary(P('gta'))));
+		assert.deepStrictEqual(P('r6').remote, [ '3074', '6015', '10000-10099' ]);
+		assert(/reported by players/.test(h.presetSummary(P('r6'))));
+		[ 'marvelrivals', 'battlefield', 'eafc', 'pubg', 'arcraiders', 'dbd' ].forEach((id) => {
+			const p = P(id);
+			assert(p && p.group === 'pc' && h.needsPlatform(p), id);
+			assert.deepStrictEqual(p.remote, [ '1024-65535' ], id + ': every UDP port until measured');
+			assert(/match ports not known yet/.test(h.presetSummary(p)) && /Ports…/.test(h.presetSummary(p)), id + ' says so');
+			assert(p.burst == null, id + ': general advice');
+		});
 	});
 	await check('preset ports match the published numbers', () => {
 		const P = (id) => h.presetById(id);

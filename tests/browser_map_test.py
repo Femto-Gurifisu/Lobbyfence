@@ -318,6 +318,20 @@ def main():
               groups == ["Choose the device type…", "PC", "Consoles: PlayStation, Xbox, Nintendo Switch"], groups)
         platform.select_option("switch")
         check("Apex Legends on Nintendo Switch (not measured): every port", ports.input_value() == "1024-65535", ports.input_value())
+        names = page.evaluate("[...[...document.querySelectorAll('#modal optgroup')].find(g => g.label === 'PC & console').children].map(o => o.textContent)")
+        check("PC & console games A to Z - Marvel Rivals, Roblox, GTA Online, Battlefield and more",
+              names == sorted(names, key=str.lower) and all(n in names for n in ["Marvel Rivals", "Roblox", "GTA Online (GTA V) / Red Dead Online",
+                                                                              "Battlefield 6", "Rainbow Six Siege X", "EA SPORTS FC 26"]), names)
+        game.select_option("gta")
+        check("GTA Online: Rockstar's ports on either side, open for server tests off, short name",
+              ports.input_value() == "6672 61455-61458" and modal.get_by_text("Game ports (either side)").is_visible()
+              and burst_in.input_value() == "0" and modal.locator("input").nth(1).input_value() == "GTA Online", ports.input_value())
+        game.select_option("marvelrivals")
+        check("Marvel Rivals: every UDP port until its ports are known - and says so",
+              ports.input_value() == "1024-65535" and modal.get_by_text("match ports not known yet", exact=False).is_visible())
+        game.select_option("roblox")
+        check("Roblox: UDP 49152-65535, published by Roblox",
+              ports.input_value() == "49152-65535" and modal.get_by_text("published by Roblox", exact=False).is_visible())
         platform.select_option("xbox")
         game.select_option("codm")
         check("CoD Mobile preset: UDP 7500-8000, official",

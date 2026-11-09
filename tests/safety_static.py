@@ -153,7 +153,7 @@ HOSTING = """
   107.191.32.0/19 108.61.0.0/16 136.244.64.0/18 137.220.32.0/19 139.84.128.0/17 139.180.128.0/18 140.82.0.0/18
   144.202.0.0/17 149.28.0.0/16 149.248.0.0/18 155.138.128.0/17 158.247.192.0/18 167.179.64.0/18 173.199.64.0/18
   192.248.144.0/20 198.13.32.0/19 199.247.0.0/19 202.182.96.0/19 207.148.0.0/17 207.246.64.0/18 208.167.224.0/19
-  208.85.16.0/21 209.222.0.0/19 216.128.128.0/19 216.238.64.0/18 217.69.0.0/20
+  208.85.16.0/21 209.222.0.0/19 216.128.128.0/19 216.238.64.0/18 217.69.0.0/20 96.30.192.0/20
 
   34.0.0.0/15 34.18.0.0/16 34.48.0.0/16 34.51.0.0/16 34.64.0.0/10 34.128.0.0/10 35.184.0.0/13 35.192.0.0/11
   35.224.0.0/12 35.240.0.0/13
@@ -171,8 +171,7 @@ HOSTING = """
 """   # Vultr / Choopa; Google Cloud; Amazon; Valve's relays; then data-centre blocks seen only in the
       # games' data-centre ping rounds, next to the ones above (never a home connection). Kept narrow on
       # purpose: Google Fiber, AT&T and the like share first numbers with some of these.
-      # games' data-centre ping rounds, next to the ones above (never a home connection)
-nets = [ipaddress.ip_network(c) for c in HOSTING.split()]
+nets =[ipaddress.ip_network(c) for c in HOSTING.split()]
 n_srv = 0
 for n, line in enumerate((REPO / "files/usr/share/lobbyfence/servers.txt").read_text().splitlines(), 1):
     t = line.split()
