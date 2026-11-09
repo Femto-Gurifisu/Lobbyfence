@@ -840,13 +840,13 @@ var PRESETS = [
 	{ id: 'apex', group: 'pc', label: 'Apex Legends', proto: 'udp', remote: [ '1024-65535' ], source: _('players\' routers'), wide: true, burst: 2,
 	  platforms: {
 		pc: [ '7700-7799', '8100-8199', '9000-9099', '10000-10599', '10700-10899', '15000-15099', '22200-22299', '27000-27199', '49000-49099' ],
-		ps: [ '1000-1099', '1900-1999', '3000-3199', '7700-7799', '8100-8199', '10000-10499', '10600-10999', '27100-27199', '27500-27599', '34100-34199' ]
+		ps: [ '1000-1099', '1900-1999', '3000-3199', '7700-7799', '8100-8199', '10000-10999', '27000-27199', '27500-27599', '34100-34199' ]
 	  },
 	  note: _('PC and PlayStation: the ports players\' routers saw in matches. Xbox (not measured yet): every UDP port - narrow it with Ports… after a few matches.') },
 	{ id: 'fortnite', group: 'pc', label: 'Fortnite', proto: 'udp', remote: EPIC_PORTS, source: 'Epic Games', official: true, wide: true, burst: 2,
 	  platforms: {
 		pc: [ '9000-9199', '10500-10599', '15000-15199', '22200-22299', '30300-30399', '32900-32999', '35000-35099', '36800-36899', '39200-39299', '45100-45199' ],
-		ps: [ '9000-9199', '15000-15199', '22200-22299', '36300-36399', '41700-41799', '53700-53799' ]
+		ps: [ '9000-9199', '10100-10199', '15000-15199', '22200-22299', '36300-36399', '37500-37599', '39900-39999', '41700-41799', '42100-42199', '48200-48299', '51100-51199', '53700-53799', '56100-56199' ]
 	  } },
 	{ id: 'overwatch', group: 'pc', label: 'Overwatch 2', proto: 'udp', remote: [ '3478-3479', '5060', '5062', '6250', '12000-64000' ], source: 'Blizzard', official: true, wide: true },
 	{ id: 'rocketleague', group: 'pc', label: 'Rocket League', proto: 'udp', remote: [ '7000-9000' ], source: 'Psyonix', official: true },
@@ -4837,9 +4837,15 @@ return view.extend({
 		var round = E('input', { 'type': 'checkbox', 'class': 'lf-ports-round', 'checked': true, 'change': function() { preview(); } });
 		var previewNode = E('p', { 'class': 'lf-ports-preview', 'style': 'font-size:90%;margin:.4em 0' });
 		var liveNode = E('p', { 'class': 'lf-ports-live', 'style': 'font-size:85%;opacity:.7;margin:.3em 0' });
-		var useBtn, clearBtn, busy = false, timer = null;
+		var useBtn, clearBtn, busy = false, timer = null, allBox = null;
 		/* the ticks the user changed by hand stay as they are when the list refreshes */
 		var userSet = {};
+		/* the "All" box at the top of the ticks: ticks every port seen, or none */
+		function setAll(on) {
+			rows.forEach(function(r) { userSet[r.proto + '/' + r.port] = on; });
+			picks.forEach(function(c) { c.checked = on; });
+			preview();
+		}
 		/* the zone's own server ports, when they are a narrow set (a game's ports, or ones
 		   chosen here before): the ports seen inside them start ticked, so the list shows
 		   what the zone filters now. A wide range (Any game, Apex Legends on Xbox) covers
@@ -4896,7 +4902,11 @@ return view.extend({
 			return out.map(function(r) { return r[0] === r[1] ? String(r[0]) : r[0] + '-' + r[1]; });
 		}
 		function preview() {
-			var r = ranges();
+			var r = ranges(), n = picks.filter(function(c) { return c.checked; }).length;
+			if (allBox) {
+				allBox.checked = n > 0 && n === picks.length;
+				allBox.indeterminate = n > 0 && n < picks.length;
+			}
 			useBtn.disabled = !r.length;
 			previewNode.textContent = r.length ? _('The zone\'s server ports become: %s').format(r.join(', ')) : _('Tick the ports the game uses.');
 		}
@@ -4904,14 +4914,18 @@ return view.extend({
 			var top = listNode.scrollTop;
 			listNode.innerHTML = '';
 			picks = [];
+			allBox = null;
 			if (!rows.length) {
 				listNode.appendChild(E('p', { 'class': 'lf-ports-empty' }, _('Nothing seen yet. Play a few matches with this zone switched on - its ports must include the game\'s, so start from Any game or a wide preset like Apex Legends - then open this again.')));
 				preview();
 				return;
 			}
 			var now = self.routerNow();   /* "last seen" is the router's time: measure it by the router's clock */
+			allBox = E('input', { 'type': 'checkbox', 'class': 'lf-ports-all', 'change': function() { setAll(allBox.checked); } });
 			listNode.appendChild(E('table', { 'class': 'lf-servers-table' }, [
-				E('tr', {}, [ head(''), head(_('Server port'), 'port'), head(_('Packets'), 'total'), head(_('Servers'), 'servers'),
+				E('tr', {}, [
+					E('th', {}, E('label', { 'style': 'cursor:pointer;white-space:nowrap', 'title': _('Tick every port - or none') }, [ allBox, ' ', _('All') ])),
+					head(_('Server port'), 'port'), head(_('Packets'), 'total'), head(_('Servers'), 'servers'),
 					head(_('Seen in'), 'passes'), head(_('Last seen'), 'last') ])
 			].concat(rows.slice().sort(SORTS[sortBy]).map(function(r) {
 				var key = r.proto + '/' + r.port;

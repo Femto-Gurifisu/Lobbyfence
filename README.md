@@ -574,8 +574,8 @@ switches it.
 | Call of Duty (BO7/BO6, Warzone, MW III) | UDP 3074-3079, either side | official - [Activision](https://support.activision.com/content/atvi/support/web/en/articles/ports-used-for-call-of-duty-games.html) |
 | VALORANT | UDP 7000-8000, 8180-8181 | official - [Riot](https://support.riotgames.com/en-us/valorant/support-tools/how-to-set-up-port-forwarding) |
 | League of Legends | UDP 5000-5500 | official - Riot, via [British Esports](https://britishesports.org/wp-content/uploads/2023/02/PORT-IP-24-25.pdf) |
-| Apex Legends | PC: UDP 7700-7799, 8100-8199, 9000-9099, 10000-10599, 10700-10899, 15000-15099, 22200-22299, 27000-27199, 49000-49099 · PlayStation: UDP 1000-1099, 1900-1999, 3000-3199, 7700-7799, 8100-8199, 10000-10499, 10600-10999, 27100-27199, 27500-27599, 34100-34199 · Xbox: UDP 1024-65535 (not measured yet) | players' routers (EA's own list - 1024-1124, 37000-40000 - misses the match ports) |
-| Fortnite | PC: UDP 9000-9199, 10500-10599, 15000-15199, 22200-22299, 30300-30399, 32900-32999, 35000-35099, 36800-36899, 39200-39299, 45100-45199 · PlayStation: UDP 9000-9199, 15000-15199, 22200-22299, 36300-36399, 41700-41799, 53700-53799 · Xbox and mobile: UDP 3478-3479, 5060, 5062, 6250, 12000-65000 ([Epic Games](https://fortnitehelp.epicgames.com/help/en-US/c5719335176219/c5719372265755/a000084266), wide range) | players' routers (PC, PlayStation); Epic Games (Xbox, mobile) |
+| Apex Legends | PC: UDP 7700-7799, 8100-8199, 9000-9099, 10000-10599, 10700-10899, 15000-15099, 22200-22299, 27000-27199, 49000-49099 · PlayStation: UDP 1000-1099, 1900-1999, 3000-3199, 7700-7799, 8100-8199, 10000-10999, 27000-27199, 27500-27599, 34100-34199 · Xbox: UDP 1024-65535 (not measured yet) | players' routers (EA's own list - 1024-1124, 37000-40000 - misses the match ports) |
+| Fortnite | PC: UDP 9000-9199, 10500-10599, 15000-15199, 22200-22299, 30300-30399, 32900-32999, 35000-35099, 36800-36899, 39200-39299, 45100-45199 · PlayStation: UDP 9000-9199, 10100-10199, 15000-15199, 22200-22299, 36300-36399, 37500-37599, 39900-39999, 41700-41799, 42100-42199, 48200-48299, 51100-51199, 53700-53799, 56100-56199 · Xbox and mobile: UDP 3478-3479, 5060, 5062, 6250, 12000-65000 ([Epic Games](https://fortnitehelp.epicgames.com/help/en-US/c5719335176219/c5719372265755/a000084266), wide range) | players' routers (PC, PlayStation); Epic Games (Xbox, mobile) |
 | Overwatch 2 | UDP 3478-3479, 5060, 5062, 6250, 12000-64000 | official - Blizzard, via [NASEF](https://www.nasef.org/overwatch-it-help-page) (wide range) |
 | Rocket League | UDP 7000-9000 | official - Psyonix, via [British Esports](https://britishesports.org/wp-content/uploads/2023/02/PORT-IP-24-25.pdf) |
 | Counter-Strike 2 / Dota 2 | UDP 27000-27100 | community |
@@ -721,8 +721,8 @@ games.
   lookup - and the log says *located N server address(es) from known
   locations (no lookup)*.
 
-LobbyFence also comes with a list of known **Apex Legends** and **Call of
-Duty** servers and where they are (`/usr/share/lobbyfence/servers.txt`, the
+LobbyFence also comes with a list of known **Apex Legends**, **Call of
+Duty** and **Fortnite** servers and where they are (`/usr/share/lobbyfence/servers.txt`, the
 same format as a servers file). The Servers file window lists them under
 **Comes with LobbyFence**, by game (read-only: they are part of LobbyFence);
 from the command line, `lobbyfence builtin-servers`. A router that sees one
