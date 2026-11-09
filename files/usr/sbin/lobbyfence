@@ -593,7 +593,7 @@ geo_lookup() { # file with addresses -> appends to cache, returns 1 on failure
 }
 
 locate() {
-	local t="$1" b=0 budget backoff n last
+	local t="$1" b=0 budget backoff n last known
 	# only look for unlocated servers when there is something to find: new
 	# servers this pass, lookups still waiting, or hourly (for the weekly retries)
 	last="$(cat "$LF_RUN/pending.at" 2>/dev/null)"; is_uint "$last" || last=0
@@ -606,20 +606,32 @@ locate() {
 	rm -f "$LF_RUN/all.tmp"
 	n="$(lines "$LF_RUN/pending")"
 	[ "$n" -gt 0 ] || return 0
-	# locations imported from another router (import-servers) first: no lookup for those
-	if [ -s "$G_DATA/shared.cache" ]; then
-		lfawk shared_hit "$LF_RUN/pending" "$G_DATA/shared.cache" > "$LF_RUN/shared.hit"
+	# known locations first, no lookup for those: the ones this router kept or
+	# imported from another router (import-servers), then the game servers
+	# LobbyFence comes with ($LF_SHARE/servers.txt, checked line by line like an import)
+	known=""
+	[ -s "$G_DATA/shared.cache" ] && known="$G_DATA/shared.cache"
+	rm -f "$LF_RUN/builtin.loc"
+	if [ -s "$LF_SHARE/servers.txt" ] && \
+		lfawk shared_in -v now="$t" -v maxn="$SHARED_MAX" -v statf= "$LF_SHARE/servers.txt" > "$LF_RUN/builtin.loc" && \
+		[ -s "$LF_RUN/builtin.loc" ]; then
+		known="$known $LF_RUN/builtin.loc"
+	fi
+	if [ -n "$known" ]; then
+		# (data_dir and LF_RUN are plain paths without spaces)
+		lfawk shared_hit "$LF_RUN/pending" $known > "$LF_RUN/shared.hit"
 		if [ -s "$LF_RUN/shared.hit" ]; then
 			cat "$LF_RUN/shared.hit" >> "$LF_STATE/geo.cache"
 			awk 'NR == FNR { h[$1] = 1; next } !($1 in h)' "$LF_RUN/shared.hit" "$LF_RUN/pending" > "$LF_RUN/pending.tmp" && \
 				mv "$LF_RUN/pending.tmp" "$LF_RUN/pending"
-			log info "located $(lines "$LF_RUN/shared.hit") server address(es) from imported locations (no lookup)"
+			log info "located $(lines "$LF_RUN/shared.hit") server address(es) from known locations (no lookup)"
 			mark_dirty new
 			n="$(lines "$LF_RUN/pending")"
 		fi
 		rm -f "$LF_RUN/shared.hit"
-		[ "$n" -gt 0 ] || return 0
 	fi
+	rm -f "$LF_RUN/builtin.loc"
+	[ "$n" -gt 0 ] || return 0
 	budget="$(geo_budget)"
 	while [ "$b" -lt "$G_MAX_BATCHES" ] && [ "$budget" -gt 0 ]; do
 		sed -n "$((b * 100 + 1)),$((b * 100 + 100))p" "$LF_RUN/pending" > "$LF_RUN/batch"

@@ -568,7 +568,7 @@ switches it.
 | Call of Duty (BO7/BO6, Warzone, MW III) | UDP 3074-3079, either side | official - [Activision](https://support.activision.com/content/atvi/support/web/en/articles/ports-used-for-call-of-duty-games.html) |
 | VALORANT | UDP 7000-8000, 8180-8181 | official - [Riot](https://support.riotgames.com/en-us/valorant/support-tools/how-to-set-up-port-forwarding) |
 | League of Legends | UDP 5000-5500 | official - Riot, via [British Esports](https://britishesports.org/wp-content/uploads/2023/02/PORT-IP-24-25.pdf) |
-| Apex Legends | PC: UDP 7700-7799, 9000-9099, 10000-10099, 10200-10499, 10800-10899, 15000-15099, 22200-22299, 27000-27199, 49000-49099 · PlayStation: UDP 7700-7799, 10000-10199, 10300-10499, 10900-10999 · Xbox: UDP 1024-65535 (not measured yet) | players' routers (EA's own list - 1024-1124, 37000-40000 - misses the match ports) |
+| Apex Legends | PC: UDP 7700-7799, 9000-9099, 10000-10099, 10200-10499, 10800-10899, 15000-15099, 22200-22299, 27000-27199, 49000-49099 · PlayStation: UDP 1000-1099, 1900-1999, 3000-3199, 7700-7799, 8100-8199, 10000-10499, 10600-10999, 27100-27199, 27500-27599, 34100-34199 · Xbox: UDP 1024-65535 (not measured yet) | players' routers (EA's own list - 1024-1124, 37000-40000 - misses the match ports) |
 | Fortnite | PC: UDP 9000-9199, 10500-10599, 15000-15199, 22200-22299, 30300-30399, 32900-32999, 35000-35099, 36800-36899, 39200-39299, 45100-45199 · PlayStation: UDP 9000-9199, 15000-15199, 22200-22299, 36300-36399, 41700-41799, 53700-53799 · Xbox and mobile: UDP 3478-3479, 5060, 5062, 6250, 12000-65000 ([Epic Games](https://fortnitehelp.epicgames.com/help/en-US/c5719335176219/c5719372265755/a000084266), wide range) | players' routers (PC, PlayStation); Epic Games (Xbox, mobile) |
 | Overwatch 2 | UDP 3478-3479, 5060, 5062, 6250, 12000-64000 | official - Blizzard, via [NASEF](https://www.nasef.org/overwatch-it-help-page) (wide range) |
 | Rocket League | UDP 7000-9000 | official - Psyonix, via [British Esports](https://britishesports.org/wp-content/uploads/2023/02/PORT-IP-24-25.pdf) |
@@ -672,9 +672,13 @@ same device. **Ports…** (next to *Change…* under the zone's game) fixes that
 
 1. Play a few matches with the zone on (the router notes the server ports the
    device used on every learning pass with game traffic, for 30 days).
-2. Open **Ports…**: the ports seen, busiest first. Ports with real game
-   traffic are ticked for you; the many short ones are usually the game
-   pinging its data centres - tick those too to keep far data centres blocked.
+2. Open **Ports…**: the ports seen, busiest first (**Sort by**, or click a
+   column, to order them by passes, servers, last seen or port number). With
+   a wide range such as Any game, ports with real game traffic are ticked for
+   you; the many short ones are usually the game pinging its data centres -
+   tick those too to keep far data centres blocked. When the zone already has
+   a narrow set of ports (a game's own, or ones chosen here before), the ports
+   seen inside them start ticked, so the list shows what the zone filters now.
 3. **Use these ports**. With *Round to blocks of 100* (on by default) 10200
    becomes 10200-10299, so the game's next servers on a nearby port are still
    caught. The zone keeps its game; the panel then says *own ports*.
@@ -706,8 +710,17 @@ games.
   first. Whitelists, blacklists and regions are not touched.
 * **Import a servers file…** adds those locations to the router. When one of
   those servers shows up later, its location is taken from the file - no
-  lookup - and the log says *located N server address(es) from imported
+  lookup - and the log says *located N server address(es) from known
   locations (no lookup)*.
+
+LobbyFence also comes with a list of known **Apex Legends** and **Call of
+Duty** servers and where they are (`/usr/share/lobbyfence/servers.txt`, the
+same format as a servers file). A router that sees one of them places it
+straight away, with no lookup - even before anything has been imported - and
+it shows up on the map as soon as the device plays on it. The router's own
+and imported locations come first. The list holds game servers in data
+centres only: players' own addresses, which peer-to-peer traffic (party
+chat, some lobbies) also shows, are never added to it.
 
 Servers are filed under the game the zone was set to when it found them.
 Switch a zone to another game (**Change game**) and its learned servers stay

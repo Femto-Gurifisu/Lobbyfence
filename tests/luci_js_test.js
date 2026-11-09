@@ -46,7 +46,7 @@ const stubs = {
 	network: { getHostHints: () => Promise.resolve(null) }
 };
 const HELPERS = [ 'distanceKm', 'destination', 'circleRing', 'wrapLon', 'parseCircles', 'formatCircle', 'parseServers',
-	'validAddress', 'parsePorts', 'sectionName', 'createZone', 'loadMaplibre', 'importModule', 'MAPLIBRE_BASES',
+	'validAddress', 'parsePorts', 'portRanges', 'inRanges', 'rangesSize', 'sectionName', 'createZone', 'loadMaplibre', 'importModule', 'MAPLIBRE_BASES',
 	'themedStyle', 'rasterStyle', 'THEMES', 'THEME_ORDER', 'DEFAULT_THEME', 'flag', 'ago', 'ringBounds',
 	'PRESETS', 'PRESET_GROUPS', 'DEFAULT_PRESET', 'presetById', 'presetSummary', 'burstAdvice', 'presetOn', 'needsPlatform', 'PLATFORMS', 'isMac', 'validDevice',
 	'mercY', 'normalizePolygon', 'inPolygon', 'parsePolygons', 'formatPolygon', 'v4num', 'v6groups', 'cidrMatch', 'inList',
@@ -176,7 +176,7 @@ const inDrawn = (ring, lon, lat) => [ -360, 0, 360 ].some((k) => inRing(ring, lo
 		assert.deepStrictEqual(h.presetOn(P('fortnite'), 'ps').remote, [ '9000-9199', '15000-15199', '22200-22299', '36300-36399', '41700-41799', '53700-53799' ]);
 		assert.deepStrictEqual(h.presetOn(P('fortnite'), 'pc').remote, [ '9000-9199', '10500-10599', '15000-15199', '22200-22299', '30300-30399', '32900-32999', '35000-35099', '36800-36899', '39200-39299', '45100-45199' ]);
 		assert.deepStrictEqual(h.presetOn(P('apex'), 'pc').remote, [ '7700-7799', '9000-9099', '10000-10099', '10200-10499', '10800-10899', '15000-15099', '22200-22299', '27000-27199', '49000-49099' ]);
-		assert.deepStrictEqual(h.presetOn(P('apex'), 'ps').remote, [ '7700-7799', '10000-10199', '10300-10499', '10900-10999' ]);
+		assert.deepStrictEqual(h.presetOn(P('apex'), 'ps').remote, [ '1000-1099', '1900-1999', '3000-3199', '7700-7799', '8100-8199', '10000-10499', '10600-10999', '27100-27199', '27500-27599', '34100-34199' ]);
 		assert.deepStrictEqual(h.presetOn(P('apex'), 'xbox').remote, [ '1024-65535' ], 'Xbox not measured: every port');
 		assert.deepStrictEqual(h.presetOn(P('cod'), 'ps').either, [ '3074-3079' ], 'same ports on every device type');
 		assert(!h.presetOn(P('fortnite'), 'ps').wide && P('fortnite').wide, 'presetOn does not change the preset itself');
@@ -218,6 +218,21 @@ const inDrawn = (ring, lon, lat) => [ -360, 0, 360 ].some((k) => inRing(ring, lo
 		assert.strictEqual(h.parsePorts('70000'), null);
 		assert.strictEqual(h.parsePorts('500-100'), null);
 		assert.strictEqual(h.parsePorts('abc'), null);
+	});
+	await check('a zone\'s ports as ranges: in them or not, and how many ports they cover', () => {
+		assert.deepStrictEqual(h.portRanges([ '10000-10499', '3074' ]), [ [ 10000, 10499 ], [ 3074, 3074 ] ]);
+		assert.deepStrictEqual(h.portRanges('7700-7799 10000-10199,27000'), [ [ 7700, 7799 ], [ 10000, 10199 ], [ 27000, 27000 ] ], 'one string too');
+		assert.deepStrictEqual(h.portRanges([ '0', '500-100', 'abc', '70000', '' ]), [], 'bad entries left out');
+		assert.deepStrictEqual(h.portRanges(undefined), []);
+		const r = h.portRanges([ '10200-10299', '27000-27099' ]);
+		assert(h.inRanges(10200, r) && h.inRanges(10299, r) && h.inRanges(27054, r));
+		assert(!h.inRanges(10199, r) && !h.inRanges(10300, r) && !h.inRanges(30000, r));
+		assert.strictEqual(h.rangesSize(h.portRanges([ '1024-65535' ])), 64512);
+		assert.strictEqual(h.rangesSize(h.portRanges([ '100-199', '150-249', '300' ])), 151, 'overlaps counted once');
+		const ps = h.presetOn(h.presetById('apex'), 'ps').remote;
+		assert(h.rangesSize(h.portRanges(ps)) <= 20000, 'Apex Legends on PlayStation: a narrow set of ports');
+		assert(h.rangesSize(h.portRanges(h.presetById('any_udp').remote)) > 20000 && h.rangesSize(h.portRanges(h.presetById('fortnite').remote)) > 20000,
+			'Any game and Fortnite (Xbox, mobile): wide ranges');
 	});
 	await check('zone section names are safe and unique', () => {
 		assert.strictEqual(h.sectionName('Call of Duty: MW', []), 'call_of_duty_mw');

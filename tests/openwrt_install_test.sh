@@ -66,7 +66,7 @@ snap > /tmp/before.txt
 
 out="$(sh "$W/pkg/lobbyfence-install/install.sh" 2>&1)"; rc=$?
 [ "$rc" -eq 0 ] && pass "installs from the release package" || fail "install: rc=$rc $out"
-for f in /usr/sbin/lobbyfence:755 /etc/init.d/lobbyfence:755 /usr/share/lobbyfence/lobbyfence.awk:644 /usr/share/lobbyfence/fw-nft.sh:644 \
+for f in /usr/sbin/lobbyfence:755 /etc/init.d/lobbyfence:755 /usr/share/lobbyfence/lobbyfence.awk:644 /usr/share/lobbyfence/fw-nft.sh:644 /usr/share/lobbyfence/servers.txt:644 \
 	/www/luci-static/resources/view/lobbyfence/map.js:644 /www/luci-static/resources/view/lobbyfence/zones.js:644 \
 	/usr/share/luci/menu.d/luci-app-lobbyfence.json:644 /usr/share/rpcd/acl.d/luci-app-lobbyfence.json:644 \
 	/www/luci-static/lobbyfence/manifest.json:644 /www/luci-static/lobbyfence/lf-app.js:644 /lib/upgrade/keep.d/lobbyfence:644 \

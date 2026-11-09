@@ -216,6 +216,20 @@ rm -f /tmp/lf_pt.$$ /tmp/lf_pn.$$
 t "shared_hit: the waiting addresses found among the imported locations, as cache lines" "8.8.8.8 2 2 US 20|" \
 	"$(printf '8.8.8.8\n7.7.7.7\n' > /tmp/lf_w.$$; printf '8.8.8.8 2 2 US 20 fortnite\n8.8.8.8 3 3 US 5 apex\n1.1.1.1 1 1 AU 1 cod\n' | ra shared_hit /tmp/lf_w.$$ - | tr '\n' '|')"
 
+# ---- the game servers LobbyFence comes with (servers.txt): read like an import
+SRV="$(dirname "$AWKF")/servers.txt"
+n_srv="$(grep -c '^[0-9]' "$SRV")"
+ra shared_in -v now=9999999999 -v maxn=20000 -v statf=/tmp/lf_st.$$ "$SRV" > /tmp/lf_bi.$$
+t "servers.txt: a servers file, every server line taken (none damaged or over the limit)" "$n_srv 0 0" "$(cat /tmp/lf_st.$$)"
+t "servers.txt: filed under the Apex Legends and Call of Duty presets" "apex cod" \
+	"$(awk '{ print $6 }' /tmp/lf_bi.$$ | sort -u | tr '\n' ' ' | sed 's/ $//')"
+t "servers.txt: each address once per game" "" "$(awk '{ print $6, $1 }' /tmp/lf_bi.$$ | sort | uniq -d)"
+printf '13.113.128.68\n45.32.7.134\n7.7.7.7\n' > /tmp/lf_w.$$
+printf '13.113.128.68 1 1 JP 5 apex own\n' > /tmp/lf_sc.$$
+t "shared_hit: the router's own / imported locations first, then the ones LobbyFence comes with" \
+	"13.113.128.68 1 1 JP 5|45.32.7.134 40.4993 -74.399 US 1794182174|" \
+	"$(ra shared_hit /tmp/lf_w.$$ /tmp/lf_sc.$$ /tmp/lf_bi.$$ | tr '\n' '|')"
+
 rm -f /tmp/lf_*.$$
 [ "$FAIL" = 0 ] && echo "ALL UNIT TESTS PASSED"
 exit $FAIL

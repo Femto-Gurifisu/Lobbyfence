@@ -68,7 +68,7 @@ waitfor() { n=0; while [ "$n" -lt "${2:-60}" ]; do eval "$1" && return 0; sleep 
 
 # --- 0. installed like on the router
 for f in lobbyfence bin/lobbyfence-main bin/lf-lagd share/fw-ipt.sh share/fw-merlin.sh share/functions.sh share/conf.awk \
-	share/lobbyfence.awk www/lobbyfence.asp www/lobbyfence/app.asp www/lobbyfence/map.js www/lobbyfence/lf-merlin.js www/lobbyfence/lf-shim.js; do
+	share/lobbyfence.awk share/servers.txt www/lobbyfence.asp www/lobbyfence/app.asp www/lobbyfence/map.js www/lobbyfence/lf-merlin.js www/lobbyfence/lf-shim.js; do
 	[ -f "$LF_HOME/$f" ] || fail "installer did not copy $f"
 done
 grep -q "other.sh start # OtherAddon" "$W/jffs/scripts/services-start" && grep -q "lobbyfence start .*# LobbyFence$" "$W/jffs/scripts/services-start" \

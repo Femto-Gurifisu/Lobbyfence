@@ -533,8 +533,16 @@ printf "45.10.0.1\n80.20.0.1\n" | lf import game - >/dev/null
 lf cycle
 expect "imported locations: the servers are sorted in or out straight away, with the service down" \
 	"45.10.0.1 ok 80.20.0.1 blocked" "$(probe 45.10.0.1 80.20.0.1)"
-grep -q "from imported locations (no lookup)" "$W/run/log" 2>/dev/null || grep -rq "from imported locations" "$W"/*.log 2>/dev/null \
-	&& pass "the log says they came from imported locations" || fail "no log line about imported locations"
+grep -q "from known locations (no lookup)" "$W/run/log" 2>/dev/null || grep -rq "from known locations" "$W"/*.log 2>/dev/null \
+	&& pass "the log says they came from known locations" || fail "no log line about known locations"
+# the game servers LobbyFence comes with (servers.txt): placed straight away too, the service still down
+inw $IP addr add 45.32.7.134/32 dev veth1; inr $IP route add 45.32.7.134/32 via 10.99.0.2
+printf "45.32.7.134\n" | lf import game - >/dev/null
+lf cycle
+grep -q '^45\.32\.7\.134 40\.4993 -74\.399 US ' "$W/run/state/geo.cache" \
+	&& pass "a Call of Duty server from the list LobbyFence comes with: located with no lookup" \
+	|| fail "built-in list: $(grep -c . "$W/run/state/geo.cache") located, log: $(tail -2 "$W/run/log")"
+expect "...and sorted out straight away (New Jersey: outside the region)" "45.32.7.134 blocked" "$(probe 45.32.7.134)"
 cp "$W/data/shared.cache" "$W/shared.before"
 printf '<html>a web page</html>\n' > "$W/notservers.txt"
 lf import-servers "$W/notservers.txt" >/dev/null; rc=$?
@@ -571,6 +579,7 @@ echo "$out" | grep -q "^    \* udp/41215: 2 server(s), 1600 packets$" && echo "$
 [ "$(inr cat /proc/sys/net/netfilter/nf_conntrack_acct 2>/dev/null)" = 1 ] && pass "connection packet counts switched on" \
 	|| fail "nf_conntrack_acct: $(inr cat /proc/sys/net/netfilter/nf_conntrack_acct 2>&1)"
 lf ports game clear > /dev/null
+rm -f "$W/run/game.ports.at"   # (a pass in 13b may have tallied moments ago: once a pass at most)
 probe 45.10.0.1 > /dev/null
 inr env LF_CONNTRACK="$W/ct.txt" $LF cycle 2>>"$W/stderr.log"
 out="$(lf ports game)"

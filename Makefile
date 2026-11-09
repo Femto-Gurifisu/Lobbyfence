@@ -42,6 +42,7 @@ define Package/lobbyfence/install
 	$(INSTALL_BIN) ./files/usr/sbin/lobbyfence $(1)/usr/sbin/lobbyfence
 	$(INSTALL_DATA) ./files/usr/share/lobbyfence/lobbyfence.awk $(1)/usr/share/lobbyfence/lobbyfence.awk
 	$(INSTALL_DATA) ./files/usr/share/lobbyfence/fw-nft.sh $(1)/usr/share/lobbyfence/fw-nft.sh
+	$(INSTALL_DATA) ./files/usr/share/lobbyfence/servers.txt $(1)/usr/share/lobbyfence/servers.txt
 	$(INSTALL_DIR) $(1)/lib/upgrade/keep.d
 	$(INSTALL_DATA) ./files/lib/upgrade/keep.d/lobbyfence $(1)/lib/upgrade/keep.d/lobbyfence
 endef

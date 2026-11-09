@@ -832,7 +832,7 @@ var PRESETS = [
 	{ id: 'apex', group: 'pc', label: 'Apex Legends', proto: 'udp', remote: [ '1024-65535' ], source: _('players\' routers'), wide: true, burst: 2,
 	  platforms: {
 		pc: [ '7700-7799', '9000-9099', '10000-10099', '10200-10499', '10800-10899', '15000-15099', '22200-22299', '27000-27199', '49000-49099' ],
-		ps: [ '7700-7799', '10000-10199', '10300-10499', '10900-10999' ]
+		ps: [ '1000-1099', '1900-1999', '3000-3199', '7700-7799', '8100-8199', '10000-10499', '10600-10999', '27100-27199', '27500-27599', '34100-34199' ]
 	  },
 	  note: _('PC and PlayStation: the ports players\' routers saw in matches. Xbox (not measured yet): every UDP port - narrow it with Ports… after a few matches.') },
 	{ id: 'fortnite', group: 'pc', label: 'Fortnite', proto: 'udp', remote: EPIC_PORTS, source: 'Epic Games', official: true, wide: true, burst: 2,
@@ -973,6 +973,31 @@ function parsePorts(s) {
 			out.push(t);
 	});
 	return bad ? null : out;
+}
+
+/* a zone's port list (a list option, or one string) -> [ [low, high], ... ]; bad entries left out */
+function portRanges(v) {
+	return [].concat(v || []).join(' ').split(/[\s,;]+/).map(function(t) {
+		var m = t.match(/^(\d{1,5})(?:-(\d{1,5}))?$/), a = m ? +m[1] : 0, b = m ? (m[2] != null ? +m[2] : a) : 0;
+		return (m && a >= 1 && b <= 65535 && a <= b) ? [ a, b ] : null;
+	}).filter(Boolean);
+}
+
+function inRanges(port, ranges) {
+	return ranges.some(function(r) { return port >= r[0] && port <= r[1]; });
+}
+
+/* how many ports the ranges cover (overlaps counted once) */
+function rangesSize(ranges) {
+	var n = 0, end = 0;
+	ranges.slice().sort(function(a, b) { return a[0] - b[0]; }).forEach(function(r) {
+		var lo = Math.max(r[0], end + 1);
+		if (r[1] >= lo) {
+			n += r[1] - lo + 1;
+			end = r[1];
+		}
+	});
+	return n;
 }
 
 function sectionName(label, existing) {
@@ -3749,7 +3774,7 @@ return view.extend({
 		ui.showModal(_('Servers file'), [
 			E('p', {}, _('Every server LobbyFence has located, by game, with where it is. Share them with another router - or keep them for after a reset - and those servers are known straight away, without asking the geolocation service again.')),
 			listNode,
-			E('p', { 'style': 'font-size:90%;opacity:.8' }, _('Holds the game servers\' addresses and locations only - nothing about your devices, your address or your regions. Importing adds locations; it does not change your zones or what they block.')),
+			E('p', { 'style': 'font-size:90%;opacity:.8' }, _('Holds the game servers\' addresses and locations only - nothing about your devices, your address or your regions. Importing adds locations; it does not change your zones or what they block. LobbyFence also comes with the locations of known Apex Legends and Call of Duty servers - those are placed without a lookup too.')),
 			pasteBox,
 			stateNode,
 			input,
@@ -4655,6 +4680,13 @@ return view.extend({
 		var useBtn, clearBtn, busy = false, timer = null;
 		/* the ticks the user changed by hand stay as they are when the list refreshes */
 		var userSet = {};
+		/* the zone's own server ports, when they are a narrow set (a game's ports, or ones
+		   chosen here before): the ports seen inside them start ticked, so the list shows
+		   what the zone filters now. A wide range (Any game, Apex Legends on Xbox) covers
+		   nearly every port - then the busy ports are ticked for you instead */
+		var zonePorts = portRanges(sec.remote_port);
+		var narrow = zonePorts.length > 0 && !portRanges(sec.port).length && !portRanges(sec.local_port).length &&
+			rangesSize(zonePorts) <= 20000;
 		/* the order: a column, highest first (the port number: lowest first) - remembered */
 		var SORTS = {
 			total: function(a, b) { return b.total - a.total || b.passes - a.passes || a.port - b.port; },
@@ -4724,9 +4756,10 @@ return view.extend({
 			].concat(rows.slice().sort(SORTS[sortBy]).map(function(r) {
 				var key = r.proto + '/' + r.port;
 				var c = E('input', { 'type': 'checkbox', 'class': 'lf-ports-pick', 'value': r.port, 'change': function() { userSet[key] = c.checked; preview(); } });
-				/* real game traffic is busy; short bursts on many ports are the game's data-centre pings
-				   (by the most in one pass: a ping port seen often adds up to a big total too) */
-				c.checked = key in userSet ? userSet[key] : r.peak >= 50;
+				/* in the zone's ports now - or, for a wide range: busy, real game traffic (short bursts on
+				   many ports are the game's data-centre pings; by the most in one pass, as a ping port
+				   seen often adds up to a big total too) */
+				c.checked = key in userSet ? userSet[key] : narrow ? inRanges(r.port, zonePorts) : r.peak >= 50;
 				picks.push(c);
 				return E('tr', {}, [
 					E('td', {}, c),
@@ -4750,7 +4783,7 @@ return view.extend({
 				rows = String(r.stdout || '').split(/\n/).map(function(l) {
 					var m = l.match(/^(udp|tcp)\/([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([01])(?: ([0-9]+))?$/);
 					return m && { proto: m[1], port: +m[2], servers: +m[3], peak: +m[4], first: +m[5], last: +m[6], passes: +m[7],
-						covered: m[8] === '1', total: m[9] != null ? +m[9] : +m[4] };
+						total: m[9] != null ? +m[9] : +m[4] };
 				}).filter(Boolean);
 				render();
 				liveNode.textContent = _('Updates by itself while this is open - last checked %s.').format(new Date().toLocaleTimeString());
@@ -4791,7 +4824,9 @@ return view.extend({
 			E('label', { 'style': 'display:block;font-size:90%;margin:.4em 0' }, [ round, ' ', _('Round to blocks of 100 ports (the game\'s next servers often use a nearby port)') ]),
 			previewNode,
 			liveNode,
-			E('p', { 'style': 'font-size:90%;opacity:.8' }, _('Packets: what the device sent on the port while LobbyFence watched - it grows while you play. Ticked for you: ports with real game traffic (50+ packets in one pass). The many short ones are usually the game measuring the ping to its data centres - tick those too to keep far data centres blocked there as well.')),
+			E('p', { 'class': 'lf-ports-help', 'style': 'font-size:90%;opacity:.8' }, narrow
+				? _('Packets: what the device sent on the port while LobbyFence watched - it grows while you play. Ticked: the ports inside the zone\'s server ports now - untick one to leave it out, tick others to add them. The many short ones are usually the game measuring the ping to its data centres - keep those ticked to keep far data centres blocked there as well.')
+				: _('Packets: what the device sent on the port while LobbyFence watched - it grows while you play. Ticked for you: ports with real game traffic (50+ packets in one pass). The many short ones are usually the game measuring the ping to its data centres - tick those too to keep far data centres blocked there as well.')),
 			stateNode,
 			E('div', { 'class': 'right' }, [
 				E('button', { 'class': 'cbi-button', 'click': ui.hideModal }, _('Cancel')), ' ',

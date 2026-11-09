@@ -64,7 +64,7 @@ cgi() { printf '%s\n' "$@" | inr env PATH="$TPATH" LF_HOME="$LF_HOME" LF_RUN="$L
 TOKEN="$(cat "$W/nvram/http_id")"
 
 # --- 0. installed like on the router
-for f in lobbyfence bin/lobbyfence-main share/fw-ipt.sh share/functions.sh share/conf.awk share/lobbyfence.awk www/lobbyfence.cgi www/lobbyfence/map.js; do
+for f in lobbyfence bin/lobbyfence-main share/fw-ipt.sh share/functions.sh share/conf.awk share/lobbyfence.awk share/servers.txt www/lobbyfence.cgi www/lobbyfence/map.js; do
 	[ -f "$LF_HOME/$f" ] || fail "installer did not copy $f"
 done
 [ -x "$W/jffs/etc/config/lobbyfence.fire" ] && [ -x "$W/jffs/etc/config/lobbyfence.init" ] && [ -x "$W/jffs/etc/config/lobbyfence.shut" ] \

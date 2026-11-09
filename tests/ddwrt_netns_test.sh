@@ -68,7 +68,7 @@ TOKEN=""
 
 
 # --- 0. installed like on the router
-for f in lobbyfence mypage.sh bin/lobbyfence-main share/fw-ipt.sh share/fw-ddwrt.sh share/functions.sh share/conf.awk share/lobbyfence.awk share/lobbyfence-cgi.sh www/index.html www/cgi-bin/lobbyfence.cgi www/lobbyfence/map.js www/lobbyfence/manifest.json; do
+for f in lobbyfence mypage.sh bin/lobbyfence-main share/fw-ipt.sh share/fw-ddwrt.sh share/functions.sh share/conf.awk share/lobbyfence.awk share/servers.txt share/lobbyfence-cgi.sh www/index.html www/cgi-bin/lobbyfence.cgi www/lobbyfence/map.js www/lobbyfence/manifest.json; do
 	[ -f "$LF_HOME/$f" ] || fail "installer did not copy $f"
 done
 [ -x "$W/jffs/etc/config/lobbyfence.firewall" ] && [ -x "$W/jffs/etc/config/lobbyfence.startup" ] && [ -x "$W/jffs/etc/config/K90lobbyfence" ] \

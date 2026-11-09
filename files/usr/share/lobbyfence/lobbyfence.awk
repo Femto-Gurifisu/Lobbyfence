@@ -21,7 +21,7 @@
 #   export    <geo cache> <names> <"game addr lastseen"> <imported locations> -> shared server file
 #   shared_in      a shared server file -> imported-location lines (-v now, maxn, statf)
 #   shared_merge   <imported locations> <new lines> -> merged, one per game and address (-v statf)
-#   shared_hit     <addresses> <imported locations> -> geo cache lines for those found
+#   shared_hit     <addresses> <known locations...> -> geo cache lines for those found (the first file with one wins)
 #   ct_ports       /proc/net/nf_conntrack -> "<proto>/<server port> <servers> <packets> <in the zone's ports 1|0>"
 #   ports_merge    tally + ct_ports of this pass -> tally "<proto>/<port> <servers> <packets> <first> <last> <passes>" (-v now)
 #   ports_show     tally -> tally lines + " <in the zone's ports 1|0>" (-v lp rp pp)

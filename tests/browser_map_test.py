@@ -279,7 +279,7 @@ def main():
         game.select_option("apex")
         check("Apex Legends on PC: its own ports", ports.input_value() == "7700-7799 9000-9099 10000-10099 10200-10499 10800-10899 15000-15099 22200-22299 27000-27199 49000-49099", ports.input_value())
         platform.select_option("ps")
-        check("Apex Legends on PlayStation: its own ports", ports.input_value() == "7700-7799 10000-10199 10300-10499 10900-10999", ports.input_value())
+        check("Apex Legends on PlayStation: its own ports", ports.input_value() == "1000-1099 1900-1999 3000-3199 7700-7799 8100-8199 10000-10499 10600-10999 27100-27199 27500-27599 34100-34199", ports.input_value())
         platform.select_option("xbox")
         check("Apex Legends on Xbox (not measured): every port", ports.input_value() == "1024-65535", ports.input_value())
         game.select_option("codm")
@@ -854,6 +854,7 @@ def main():
 
         # ---- 6a. Ports seen: narrow the zone to the ports its game really used
         zid = page.evaluate("document.querySelector('.lf-zonesel') ? document.querySelector('.lf-zonesel').value : null") or "game"
+        page.evaluate("z => { uciState[z].remote_port = [ '1024-65535' ]; }", zid)   # (a wide range, like Any game)
         ports_out = "udp/10200 1 7922 100 200 5 1 25000\nudp/10600 1 4371 100 200 3 1\nudp/27019 2 8 100 200 2 1 400\nudp/27054 1 8 100 200 1 1\n"
         page.evaluate("t => { window.__execResult = { code: 0, stdout: t }; }", ports_out)
         page.locator(".lf-portsseen").click()
@@ -887,6 +888,18 @@ def main():
         rp = page.evaluate("z => uciState[z].remote_port", zid)
         check("Use these ports sets the zone's server ports", rp == ["10200-10299", "10600-10699", "27000-27099"], rp)
         check("the zone's game stays", page.evaluate("z => (uciState[z] || {}).game || null", zid) == game_before or game_before is None)
+        # opened again: the ports already in the zone's server ports show ticked - the short ping ones too
+        page.evaluate("t => { window.__execResult = { code: 0, stdout: t }; }", ports_out + "udp/30500 1 900 100 200 3 1 900\n")
+        page.locator(".lf-portsseen").click()
+        page.wait_for_function("document.querySelectorAll('.lf-ports-pick').length === 5")
+        ticked = page.evaluate("Object.fromEntries([...document.querySelectorAll('.lf-ports-pick')].map(c => [c.value, c.checked]))")
+        check("ports already in the zone's own ports show ticked (a busy one outside them is not)",
+              ticked == {"10200": True, "10600": True, "27019": True, "27054": True, "30500": False}, ticked)
+        check("...the window says what the ticks mean", "inside the zone's server ports now" in pm.locator(".lf-ports-help").inner_text(),
+              pm.locator(".lf-ports-help").inner_text())
+        check("...and using them as they are keeps the zone's ports", "become: 10200-10299, 10600-10699, 27000-27099" in pm.locator(".lf-ports-preview").inner_text(),
+              pm.locator(".lf-ports-preview").inner_text())
+        page.locator("#modal").get_by_role("button", name="Cancel").click()
         page.evaluate("window.__execResult = { code: 0, stdout: '' }")
         page.locator(".lf-portsseen").click()
         page.wait_for_function("document.querySelector('.lf-ports-empty')")
@@ -909,11 +922,12 @@ def main():
         check("Ports seen: busiest first by default", order() == [20000, 10000, 30000], order())
         seen = page.evaluate("[...document.querySelectorAll('.lf-ports-pick')].map(c => c.closest('tr').lastChild.innerText)")
         check("Last seen is measured by the router's clock, not the PC's", seen == ["11 min ago", "12 min ago", "13 min ago"], seen)
+        # (none of these is in the zone's own ports - 10200-10299, 10600-10699, 27000-27099 - so none starts ticked)
         page.locator(".lf-ports-pick[value='30000']").check()
         page.locator(".lf-ports-sort").select_option("passes")
         check("Sort by Seen in: most passes first", order() == [30000, 10000, 20000], order())
-        check("...the ticks stay with their ports", page.evaluate("Object.fromEntries([...document.querySelectorAll('.lf-ports-pick')].map(c => [c.value, c.checked]))")
-              == {"30000": True, "10000": True, "20000": True})
+        ticks = page.evaluate("Object.fromEntries([...document.querySelectorAll('.lf-ports-pick')].map(c => [c.value, c.checked]))")
+        check("...the ticks stay with their ports", ticks == {"30000": True, "10000": False, "20000": False}, ticks)
         page.locator("th.lf-ports-head", has_text="Servers").click()
         check("a click on a column sorts by it (and the Sort by box follows)", order() == [20000, 10000, 30000]
               and page.locator(".lf-ports-sort").input_value() == "servers", order())
