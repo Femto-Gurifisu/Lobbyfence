@@ -7,6 +7,7 @@ style request is answered with a tiny style to check theme recolouring.
 """
 import json
 import pathlib
+import re
 import sys
 
 from playwright.sync_api import sync_playwright
@@ -332,6 +333,61 @@ def main():
         game.select_option("roblox")
         check("Roblox: UDP 49152-65535, published by Roblox",
               ports.input_value() == "49152-65535" and modal.get_by_text("published by Roblox", exact=False).is_visible())
+
+        # the game list opens in the page, inside the window - the browser's own list is as tall as all
+        # 31 entries and, on a Mac, runs over the side panel and the browser's tabs
+        pl = page.locator(".lf-pagelist")
+        def pl_box():
+            return page.evaluate("""() => { const b = document.querySelector('.lf-pagelist'); if (!b) return null;
+                const r = b.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right,
+                vh: innerHeight, vw: innerWidth, scrolls: b.scrollHeight > b.clientHeight }; }""")
+        game.select_option("any_udp")
+        page.evaluate("""window.__pd = null; document.querySelectorAll('#modal select')[0]
+            .addEventListener('mousedown', ev => { window.__pd = ev.defaultPrevented; }, { once: true })""")
+        game.click()
+        b = pl_box()
+        check("game list: a click opens the page's list, not the browser's", pl.count() == 1 and page.evaluate("window.__pd") is True, b)
+        check("game list: inside the window", b and b["top"] >= 0 and b["bottom"] <= b["vh"] and b["left"] >= 0 and b["right"] <= b["vw"], b)
+        heads = pl.locator(".lf-pl-head").all_inner_texts()
+        opts = pl.locator(".lf-pl-opt").all_inner_texts()
+        check("game list: the groups and every game", heads == ["Any game", "PC & console", "Mobile"] and len(opts) == page.evaluate("document.querySelectorAll('#modal select')[0].options.length"), (heads, len(opts)))
+        check("game list: the current game is marked", pl.locator(".lf-pl-opt[aria-selected=true]").all_inner_texts() == ["Any game (all UDP traffic)"])
+        if SHOTS:
+            pl.locator(".lf-pl-opt").filter(has_text=re.compile(r"^Marvel Rivals$")).hover()
+            page.screenshot(path=str(SHOTS / "game-list.png"))
+        pl.locator(".lf-pl-opt").filter(has_text=re.compile(r"^Roblox$")).click()
+        check("game list: a pick sets the game and fills in its ports - and the list closes",
+              game.input_value() == "roblox" and ports.input_value() == "49152-65535" and pl.count() == 0
+              and page.evaluate("document.activeElement === document.querySelectorAll('#modal select')[0]"))
+        page.keyboard.press("ArrowDown")
+        check("game list: the arrow keys open it too, on the current game", pl.count() == 1
+              and pl.locator(".lf-pl-on").inner_text() == "Roblox")
+        page.keyboard.press("End")
+        end = pl.locator(".lf-pl-on").inner_text()
+        page.keyboard.press("Home")
+        home = pl.locator(".lf-pl-on").inner_text()
+        page.keyboard.type("val")
+        check("game list: Home / End and type-to-find", end == "Roblox (mobile)" and home == "Any game (all UDP traffic)"
+              and pl.locator(".lf-pl-on").inner_text() == "VALORANT", (end, home))
+        page.keyboard.press("Enter")
+        check("game list: Enter picks", game.input_value() == "valorant" and pl.count() == 0 and ports.input_value() == "7000-8000 8180-8181")
+        page.keyboard.press("ArrowDown")
+        page.keyboard.press("Escape")
+        check("game list: Escape closes the list, not the dialog", pl.count() == 0 and page.locator("#modal").count() == 1 and game.input_value() == "valorant")
+        game.click()
+        page.mouse.click(5, 5)
+        check("game list: a click elsewhere closes it", pl.count() == 0 and game.input_value() == "valorant")
+        proto.click()
+        check("short lists keep the browser's own", pl.count() == 0)
+        page.keyboard.press("Escape")
+        vp = page.viewport_size
+        page.set_viewport_size({"width": vp["width"], "height": 460})
+        game.click()
+        b = pl_box()
+        check("game list: a short window - still inside it, and it scrolls", b and b["top"] >= 0 and b["bottom"] <= 460 and b["scrolls"], b)
+        page.keyboard.press("Escape")
+        page.set_viewport_size(vp)
+        game.select_option("roblox")
         platform.select_option("xbox")
         game.select_option("codm")
         check("CoD Mobile preset: UDP 7500-8000, official",

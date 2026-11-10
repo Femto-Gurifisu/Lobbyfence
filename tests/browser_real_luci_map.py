@@ -365,6 +365,19 @@ def main():
         opts = modal.locator("select").nth(2).locator("option").all_inner_texts()
         check("real LuCI: a hostile device name is shown as text, never run", page.evaluate("window.__xss2") is None
               and any("<img src=x" in o for o in opts), opts)
+        # the game list in LuCI's dialog: in the dialog's layer, on top, inside the window - and Escape
+        # closes only the list (LuCI closes the whole dialog on Escape)
+        modal.locator("select").first.click()
+        info = page.evaluate("""() => { const b = document.querySelector('.lf-pagelist'); if (!b) return null;
+            const r = b.getBoundingClientRect(), e = document.elementFromPoint(r.left + 30, r.top + 30);
+            return { layer: !!b.closest('#modal_overlay'), onTop: !!(e && e.closest('.lf-pagelist')), top: r.top, bottom: r.bottom, vh: innerHeight }; }""")
+        check("real LuCI: the game list opens in the dialog's layer, on top and inside the window",
+              info and info["layer"] and info["onTop"] and info["top"] >= 0 and info["bottom"] <= info["vh"], info)
+        if SHOTS:
+            page.screenshot(path=str(SHOTS / "real-luci-game-list.png"))
+        page.keyboard.press("Escape")
+        check("real LuCI: Escape closes the game list, not the dialog",
+              page.locator(".lf-pagelist").count() == 0 and page.evaluate("document.body.classList.contains('modal-overlay-active')"))
         modal.locator("select").first.select_option("apex")
         modal.locator(".lf-nz-platform").select_option("pc")
         page.wait_for_timeout(300)

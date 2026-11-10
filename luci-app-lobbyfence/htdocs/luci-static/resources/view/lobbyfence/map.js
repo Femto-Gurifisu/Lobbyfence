@@ -488,6 +488,13 @@ var STYLE_CSS = [
 	'.lf-savebar{display:none;gap:6px;align-items:center}',
 	'.lf-app.lf-full .lf-savebar{display:inline-flex;flex-wrap:wrap}',
 	'body.lf-fullpage #modal_overlay{z-index:3000!important}',
+	'.lf-pagelist{position:fixed;z-index:2147483000;overflow-y:auto;overscroll-behavior:contain;box-sizing:border-box;margin:0;padding:4px 0;border:1px solid rgba(127,127,127,.45);border-radius:6px;box-shadow:0 8px 28px rgba(0,0,0,.35);line-height:1.35;text-align:left;cursor:default;-webkit-user-select:none;user-select:none}',
+	'.lf-pl-head{padding:7px 12px 3px;font-size:.8em;font-weight:700;letter-spacing:.03em;opacity:.6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+	'.lf-pl-opt{position:relative;padding:5px 12px 5px 26px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+	'.lf-pl-opt.lf-pl-on{background:rgba(127,127,127,.25)}',
+	'.lf-pl-opt[aria-selected="true"]{font-weight:600}',
+	'.lf-pl-opt[aria-selected="true"]::before{content:"\\2713";position:absolute;left:9px}',
+	'.lf-pl-off{opacity:.45;cursor:default}',
 	'body.lf-fullpage #maincontent>.alert-message,body.lf-fullpage #lf-notices{position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:3500;width:min(560px,calc(100% - 24px));margin:0}',
 	'.lf-homepop .lf-homedel{margin-top:6px}',
 	'.lf-app .lf-btn{background:var(--lf-btn);color:var(--lf-text);border:1px solid var(--lf-border);border-radius:6px;padding:6px 12px;font:inherit;line-height:1.2;cursor:pointer;margin:0;height:auto;min-width:0;text-shadow:none;box-shadow:none}',
@@ -929,6 +936,267 @@ function platformSelect(cls) {
 		[ E('option', { 'value': '' }, _('Choose the device type…')) ]
 			.concat(PLATFORMS.filter(function(x) { return !x[2]; }).map(opt))
 			.concat([ E('optgroup', { 'label': _('Consoles') }, PLATFORMS.filter(function(x) { return x[2]; }).map(opt)) ]));
+}
+
+/* the games, grouped: Any game, PC & console, Mobile */
+function gameSelect(cls) {
+	return pageList(E('select', { 'class': 'cbi-input-select' + (cls ? ' ' + cls : ''), 'style': 'width:100%' },
+		PRESET_GROUPS.map(function(g) {
+			return E('optgroup', { 'label': g[1] }, PRESETS.filter(function(p) { return p.group === g[0]; }).map(function(p) {
+				return E('option', { 'value': p.id }, p.label);
+			}));
+		})));
+}
+
+/* ------------------------------------------------ long drop-down lists */
+
+/*
+ * A long drop-down list (the games, the network's devices, the countries)
+ * opens in the page instead of as the browser's own list. That one is as tall
+ * as all its entries: on a Mac it runs over the side panel and even the
+ * browser's tabs, with scroll arrows at the top of the screen. This one opens
+ * under the field (over it when there is more room there), stays inside the
+ * window and scrolls. The <select> stays the real field - its value, "change"
+ * and type-to-find work as before. Short lists, phones and tablets keep the
+ * browser's own.
+ */
+var PAGE_LIST_MIN = 13;   /* entries (options and group names) from which a list opens in the page */
+var pageListSeq = 0;
+
+function pageList(sel) {
+	var box = null, rows = [], active = -1, typed = '', typedAt = 0, watch = null;
+
+	function entries() {
+		var out = [];
+		Array.prototype.forEach.call(sel.children, function(c) {
+			if (c.tagName === 'OPTGROUP') {
+				out.push({ head: c.label });
+				Array.prototype.forEach.call(c.children, function(o) {
+					if (o.tagName === 'OPTION' && !o.hidden)
+						out.push({ opt: o });
+				});
+			}
+			else if (c.tagName === 'OPTION' && !c.hidden)
+				out.push({ opt: c });
+		});
+		return out;
+	}
+
+	/* a mouse or touchpad, and a long list */
+	function wanted() {
+		var fine = false;
+		try { fine = window.matchMedia('(pointer: fine)').matches; } catch (e) {}
+		return fine && !sel.disabled && !sel.multiple && !(sel.size > 1) && entries().length >= PAGE_LIST_MIN;
+	}
+
+	function opaque(c) {
+		var m = /^rgba?\(([^)]+)\)$/.exec(c || '');
+		return !!m && (m[1].split(',').length < 4 || +m[1].split(',')[3] >= 0.99);
+	}
+
+	/* the list's colour: the first solid one behind the field - or, with
+	   nothing solid, dark under light text and light under dark text */
+	function backdrop(text) {
+		for (var n = sel; n && n.nodeType === 1; n = n.parentNode)
+			if (opaque(window.getComputedStyle(n).backgroundColor))
+				return window.getComputedStyle(n).backgroundColor;
+		var m = /(\d+)\D+(\d+)\D+(\d+)/.exec(text || '');
+		return m && +m[1] + +m[2] + +m[3] > 384 ? '#202124' : '#ffffff';
+	}
+
+	function usable(i) { return !!rows[i] && !rows[i].opt.disabled; }
+
+	function mark(i, centre) {
+		if (!usable(i))
+			return;
+		if (rows[active])
+			rows[active].el.classList.remove('lf-pl-on');
+		active = i;
+		var el = rows[i].el, top = el.offsetTop, h = el.offsetHeight;
+		el.classList.add('lf-pl-on');
+		sel.setAttribute('aria-activedescendant', el.id);
+		if (centre)
+			box.scrollTop = top - (box.clientHeight - h) / 2;
+		else if (top < box.scrollTop)
+			box.scrollTop = top;
+		else if (top + h > box.scrollTop + box.clientHeight)
+			box.scrollTop = top + h - box.clientHeight;
+	}
+
+	/* n entries down (up when negative) from `from`, past disabled ones, stopping at the ends */
+	function step(n, from) {
+		var i = from != null ? from : active, dir = n > 0 ? 1 : -1, left = Math.abs(n), last = -1;
+		while (left > 0) {
+			i += dir;
+			if (i < 0 || i >= rows.length)
+				break;
+			if (usable(i)) {
+				last = i;
+				left--;
+			}
+		}
+		if (last >= 0)
+			mark(last, false);
+	}
+
+	/* type-to-find: the next entry starting with what was typed (one letter again and again: the next one with it) */
+	function find(ch) {
+		var now = Date.now();
+		typed = (now - typedAt < 800 ? typed : '') + ch.toLowerCase();
+		typedAt = now;
+		var same = typed.split('').every(function(c) { return c === typed[0]; });
+		var q = same ? typed[0] : typed, start = same ? active + 1 : Math.max(active, 0);
+		for (var n = 0; n < rows.length; n++) {
+			var i = (start + n) % rows.length;
+			if (usable(i) && rows[i].el.textContent.toLowerCase().indexOf(q) === 0)
+				return mark(i, false);
+		}
+	}
+
+	function pick(i) {
+		var o = usable(i) ? rows[i].opt : null;
+		close(true);
+		if (o && sel.value !== o.value) {
+			sel.value = o.value;
+			[ 'input', 'change' ].forEach(function(t) { sel.dispatchEvent(new Event(t, { 'bubbles': true })); });
+		}
+	}
+
+	/* under the field, or over it when there is more room there - always inside the window */
+	function place() {
+		var r = sel.getBoundingClientRect(), m = 8, gap = 3;
+		var vw = window.innerWidth || document.documentElement.clientWidth, vh = window.innerHeight || document.documentElement.clientHeight;
+		var w = Math.min(Math.max(r.width, 180), vw - 2 * m);
+		box.style.width = w + 'px';
+		box.style.maxHeight = 'none';
+		box.style.left = box.style.top = '0px';
+		/* where 0,0 ends up: the list's frame of reference (the page, or a dialog layer) */
+		var o = box.getBoundingClientRect(), natural = box.offsetHeight;
+		var below = vh - r.bottom - gap - m, above = r.top - gap - m;
+		var down = below >= Math.min(natural, 240) || below >= above;
+		var h = Math.min(natural, Math.max(Math.min(480, Math.round(vh * 0.6)), 160), Math.max(down ? below : above, Math.min(120, vh - 2 * m)));
+		var x = Math.min(Math.max(m, r.left), vw - w - m);
+		var y = Math.max(m, Math.min(down ? r.bottom + gap : r.top - gap - h, vh - m - h));
+		box.style.maxHeight = h + 'px';
+		box.style.left = Math.round(x - o.left) + 'px';
+		box.style.top = Math.round(y - o.top) + 'px';
+	}
+
+	function closeIt() { close(false); }
+	function outside(ev) { if (box && !box.contains(ev.target) && ev.target !== sel) close(false); }
+	/* the page, or something holding the field, scrolled: the field moved away from the list */
+	function scrolled(ev) {
+		var t = ev.target;
+		if (box && t !== box && (t === document || t === document.documentElement || (t.contains && t.contains(sel))))
+			close(false);
+	}
+
+	function close(refocus) {
+		if (!box)
+			return;
+		var b = box;
+		box = null;
+		rows = [];
+		active = -1;
+		window.clearInterval(watch);
+		if (b.parentNode)
+			b.parentNode.removeChild(b);
+		sel.removeAttribute('aria-activedescendant');
+		sel.setAttribute('aria-expanded', 'false');
+		document.removeEventListener('mousedown', outside, true);
+		document.removeEventListener('scroll', scrolled, true);
+		window.removeEventListener('resize', closeIt);
+		window.removeEventListener('blur', closeIt);
+		if (refocus && document.body.contains(sel))
+			sel.focus();
+	}
+
+	function open() {
+		Array.prototype.forEach.call(document.querySelectorAll('.lf-pagelist'), function(b) { b.parentNode.removeChild(b); });
+		var cs = window.getComputedStyle(sel), id = 'lf-pl-' + (++pageListSeq), current = -1;
+		/* a press in the list keeps the focus on the field */
+		box = E('div', { 'class': 'lf-pagelist', 'id': id, 'role': 'listbox', 'mousedown': function(ev) { ev.preventDefault(); } });
+		rows = [];
+		entries().forEach(function(e) {
+			if (!e.opt) {
+				box.appendChild(E('div', { 'class': 'lf-pl-head', 'role': 'presentation' }, e.head));
+				return;
+			}
+			var i = rows.length, o = e.opt;
+			var el = E('div', {
+				'class': 'lf-pl-opt' + (o.disabled ? ' lf-pl-off' : ''), 'id': id + '-' + i, 'role': 'option',
+				'aria-selected': o.selected ? 'true' : 'false',
+				'click': function() { pick(i); },
+				'mousemove': function() { if (active !== i) mark(i, false); }
+			}, o.textContent);
+			if (o.selected)
+				current = i;
+			rows.push({ el: el, opt: o });
+			box.appendChild(el);
+		});
+		box.style.color = cs.color;
+		box.style.background = backdrop(cs.color);
+		box.style.fontFamily = cs.fontFamily;
+		box.style.fontSize = cs.fontSize;
+		if (opaque(cs.borderTopColor) && cs.borderTopStyle !== 'none' && parseFloat(cs.borderTopWidth) > 0)
+			box.style.borderColor = cs.borderTopColor;
+		/* in the dialog's layer when the field is in a dialog, in the full-screen map when it is there */
+		var fs = document.fullscreenElement || document.webkitFullscreenElement;
+		(sel.closest('#modal_overlay') || (fs && fs.contains(sel) ? fs : null) || document.body).appendChild(box);
+		place();
+		sel.setAttribute('aria-expanded', 'true');
+		sel.setAttribute('aria-controls', id);
+		if (current >= 0)
+			mark(current, true);
+		else
+			step(1, -1);
+		document.addEventListener('mousedown', outside, true);
+		document.addEventListener('scroll', scrolled, true);
+		window.addEventListener('resize', closeIt);
+		window.addEventListener('blur', closeIt);
+		/* the field went away (its dialog closed) or was hidden: so does the list */
+		watch = window.setInterval(function() {
+			if (!document.body.contains(sel) || !sel.offsetParent)
+				close(false);
+		}, 400);
+	}
+
+	sel.setAttribute('aria-haspopup', 'listbox');
+	sel.setAttribute('aria-expanded', 'false');
+	sel.addEventListener('mousedown', function(ev) {
+		if (ev.button !== 0 || !(box || wanted()))
+			return;
+		ev.preventDefault();      /* no browser list */
+		if (box)
+			return close(true);
+		sel.focus();
+		open();
+	});
+	sel.addEventListener('keydown', function(ev) {
+		var k = ev.key;
+		if (!box) {
+			if (!ev.ctrlKey && !ev.metaKey && (k === ' ' || k === 'Enter' || k === 'F4' || k === 'ArrowDown' || k === 'ArrowUp') && wanted()) {
+				ev.preventDefault();
+				open();
+			}
+			return;
+		}
+		if (k === 'ArrowDown') step(1);
+		else if (k === 'ArrowUp') step(-1);
+		else if (k === 'PageDown') step(8);
+		else if (k === 'PageUp') step(-8);
+		else if (k === 'Home') step(1, -1);
+		else if (k === 'End') step(-1, rows.length);
+		else if (k === 'Enter' || (k === ' ' && !(typed && Date.now() - typedAt < 800))) pick(active);
+		else if (k === 'Escape') close(true);      /* the list only - not the dialog */
+		else if (k === 'Tab') return close(false);
+		else if (k.length === 1 && !ev.altKey && !ev.ctrlKey && !ev.metaKey) find(k);
+		else return;
+		ev.preventDefault();
+		ev.stopPropagation();
+	});
+	sel.addEventListener('blur', closeIt);
+	return sel;
 }
 
 function presetSummary(p) {
@@ -1487,11 +1755,11 @@ return view.extend({
 		});
 
 		/* toolbar */
-		this.zoneSelect = E('select', {
+		this.zoneSelect = pageList(E('select', {
 			'class': 'lf-select',
 			'title': _('Zone'),
 			'change': function() { self.showZone(this.value); }
-		});
+		}));
 		this.addButton = E('button', {
 			'class': 'lf-btn',
 			'click': function(ev) { ev.preventDefault(); self.setDrawMode(self.drawMode === 'circle' ? null : 'circle'); }
@@ -1604,10 +1872,10 @@ return view.extend({
 		]);
 		this.rangeSelect.value = this.range;
 		this.ccFilter = '';
-		this.countrySelect = E('select', {
+		this.countrySelect = pageList(E('select', {
 			'class': 'lf-select', 'title': _('Show servers of one country'),
 			'change': function() { self.ccFilter = this.value; self.drawServers(); self.renderServers(); }
-		}, E('option', { 'value': '' }, _('All countries')));
+		}, E('option', { 'value': '' }, _('All countries'))));
 		this.forgetButton = E('button', {
 			'class': 'lf-btn lf-sm', 'title': _('Forget every server this zone has learned'),
 			'click': function(ev) { ev.preventDefault(); self.confirmForgetAll(); }
@@ -5046,12 +5314,7 @@ return view.extend({
 		var old = this.zonePreset(zone), preset = old;
 		var arr = function(v) { return Array.isArray(v) ? v : (v ? [ v ] : []); };
 		var curPorts = arr(sec.port).length ? arr(sec.port) : arr(sec.remote_port);
-		var game = E('select', { 'class': 'cbi-input-select lf-cg-game', 'style': 'width:100%' },
-			PRESET_GROUPS.map(function(g) {
-				return E('optgroup', { 'label': g[1] }, PRESETS.filter(function(p) { return p.group === g[0]; }).map(function(p) {
-					return E('option', { 'value': p.id }, p.label);
-				}));
-			}));
+		var game = gameSelect('lf-cg-game');
 		var info = E('div', { 'style': 'font-size:90%;opacity:.8;margin-top:.3em' });
 		var platform = platformSelect('lf-cg-platform');
 		var platformRow = E('div', { 'style': 'margin:.6em 0' }, [ E('label', { 'style': 'display:block;font-weight:bold;margin-bottom:.2em' }, _('Device type')), platform,
@@ -5177,19 +5440,14 @@ return view.extend({
 	openNewZone: function() {
 		var self = this, preset = presetById(DEFAULT_PRESET), nameTouched = false, portsTouched = false;
 
-		var game = E('select', { 'class': 'cbi-input-select', 'style': 'width:100%' },
-			PRESET_GROUPS.map(function(g) {
-				return E('optgroup', { 'label': g[1] }, PRESETS.filter(function(p) { return p.group === g[0]; }).map(function(p) {
-					return E('option', { 'value': p.id }, p.label);
-				}));
-			}));
+		var game = gameSelect();
 		var gameInfo = E('div', { 'style': 'font-size:90%;opacity:.8;margin-top:.3em' });
 		var platform = platformSelect('lf-nz-platform');
 		var platformInfo = E('div', { 'style': 'font-size:90%;opacity:.8;margin-top:.3em' });
 		var platformRow = E('div', { 'style': 'margin:.6em 0' }, [ E('label', { 'style': 'display:block;font-weight:bold;margin-bottom:.2em' }, _('Device type')), platform, platformInfo ]);
 		var name = E('input', { 'class': 'cbi-input-text', 'placeholder': _('e.g. My shooter'), 'style': 'width:100%',
 			'input': function() { nameTouched = !!this.value; } });
-		var devicePick = E('select', { 'class': 'cbi-input-select', 'style': 'width:100%;display:none' });
+		var devicePick = pageList(E('select', { 'class': 'cbi-input-select', 'style': 'width:100%;display:none' }));
 		var device = E('input', { 'class': 'cbi-input-text', 'placeholder': _('192.168.1.50 or aa:bb:cc:dd:ee:ff'), 'style': 'width:100%' });
 		var deviceInfo = E('div', { 'style': 'font-size:90%;opacity:.8;margin-top:.3em' });
 		var proto = E('select', { 'class': 'cbi-input-select' }, [
