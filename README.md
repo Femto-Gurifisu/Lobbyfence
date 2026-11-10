@@ -102,20 +102,21 @@ Download the package for your router's firmware from the
 | Asuswrt-Merlin (HND, 384.15+) | `lobbyfence-asuswrt-merlin.tar.gz` | your router login (e.g. `admin`) | [JFFS and SSH on](#asuswrt-merlin) |
 | DD-WRT (Broadcom ARM, e.g. R7000) | `lobbyfence-ddwrt.tar.gz` | `root` | [JFFS and SSH on](#dd-wrt) |
 
-Then, on a computer on the same network, open a terminal and run the three
+Then, on a computer on the same network, open a terminal and run the two
 lines for your firmware. The first goes to your **Downloads** folder, where
-your browser saved the package; the second copies the package to the router;
-the third unpacks and installs it. You are asked for the router's password
-each time.
+your browser saved the package; the second copies the package to the router
+and installs it. You are asked for the router's password once.
 
 * **Windows:** use **Command Prompt** (not PowerShell - it can't send a file
   with `<`). The lines below are for Command Prompt.
 * **Mac / Linux:** Terminal - use `cd ~/Downloads` as the first line instead.
+* Run them on your computer, **not** in a window already logged in to the
+  router (a prompt like `root@DD-WRT`): the `ssh` line logs in by itself.
 * **"The system cannot find the file specified"** (or *No such file*): the
   package isn't in that folder, or the browser renamed it because it was
   downloaded more than once. `dir lobbyfence*` (Mac / Linux: `ls lobbyfence*`)
   shows its name - e.g. `lobbyfence-ddwrt (1).tar.gz`; put that name in quotes
-  in the second line.
+  at the end of the second line.
 
 Use your router's address if it isn't the one below (ASUS routers usually use
 192.168.50.1, most others 192.168.1.1).
@@ -124,8 +125,7 @@ Use your router's address if it isn't the one below (ASUS routers usually use
 
 ```bat
 cd %USERPROFILE%\Downloads
-ssh root@192.168.1.1 "cat > /tmp/lf.tgz" < lobbyfence-openwrt.tar.gz
-ssh root@192.168.1.1 "cd /tmp && rm -rf lobbyfence-install && tar -xzf lf.tgz && sh lobbyfence-install/install.sh"
+ssh root@192.168.1.1 "cat > /tmp/lf.tgz && cd /tmp && rm -rf lobbyfence-install && tar -xzf lf.tgz && sh lobbyfence-install/install.sh" < lobbyfence-openwrt.tar.gz
 ```
 
 Then open LuCI: **Services > LobbyFence**.
@@ -134,8 +134,7 @@ Then open LuCI: **Services > LobbyFence**.
 
 ```bat
 cd %USERPROFILE%\Downloads
-ssh root@192.168.1.1 "cat > /tmp/lf.tgz" < lobbyfence-freshtomato.tar.gz
-ssh root@192.168.1.1 "cd /tmp && rm -rf lobbyfence-install && tar -xzf lf.tgz && sh lobbyfence-install/freshtomato/install.sh"
+ssh root@192.168.1.1 "cat > /tmp/lf.tgz && cd /tmp && rm -rf lobbyfence-install && tar -xzf lf.tgz && sh lobbyfence-install/freshtomato/install.sh" < lobbyfence-freshtomato.tar.gz
 ```
 
 Then open **http://192.168.1.1/ext/lobbyfence.asp**, or click **LobbyFence** in
@@ -145,8 +144,7 @@ FreshTomato's menu.
 
 ```bat
 cd %USERPROFILE%\Downloads
-ssh admin@192.168.50.1 "cat > /tmp/lf.tgz" < lobbyfence-asuswrt-merlin.tar.gz
-ssh admin@192.168.50.1 "cd /tmp && rm -rf lobbyfence-install && tar -xzf lf.tgz && sh lobbyfence-install/asuswrt-merlin/install.sh"
+ssh admin@192.168.50.1 "cat > /tmp/lf.tgz && cd /tmp && rm -rf lobbyfence-install && tar -xzf lf.tgz && sh lobbyfence-install/asuswrt-merlin/install.sh" < lobbyfence-asuswrt-merlin.tar.gz
 ```
 
 Then open **Administration > LobbyFence** in the router's menu (the installer
@@ -156,13 +154,12 @@ also prints the page's address).
 
 ```bat
 cd %USERPROFILE%\Downloads
-ssh root@192.168.1.1 "cat > /tmp/lf.tgz" < lobbyfence-ddwrt.tar.gz
-ssh root@192.168.1.1 "cd /tmp && rm -rf lobbyfence-install && tar -xzf lf.tgz && sh lobbyfence-install/ddwrt/install.sh"
+ssh root@192.168.1.1 "cat > /tmp/lf.tgz && cd /tmp && rm -rf lobbyfence-install && tar -xzf lf.tgz && sh lobbyfence-install/ddwrt/install.sh" < lobbyfence-ddwrt.tar.gz
 ```
 
 Then open the router's page, **Status > My Page** - it takes you to LobbyFence.
 
-**Updating:** the same three lines with the new package. Settings and learned
+**Updating:** the same two lines with the new package. Settings and learned
 servers are kept.
 
 The package unpacks into `/tmp/lobbyfence-install`. Don't unpack it into
