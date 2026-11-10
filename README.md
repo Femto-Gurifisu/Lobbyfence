@@ -108,10 +108,13 @@ your browser saved the package; the second copies the package to the router
 and installs it. You are asked for the router's password once.
 
 * **Windows:** use **Command Prompt** (not PowerShell - it can't send a file
-  with `<`). The lines below are for Command Prompt.
-* **Mac / Linux:** Terminal - use `cd ~/Downloads` as the first line instead.
+  with `<`). **Mac / Linux:** Terminal. The same two lines work in both.
+* `cd Downloads` works when the window opens in your home folder (it
+  normally does). If it says there is no such folder, use
+  `cd %USERPROFILE%\Downloads` (Windows) or `cd ~/Downloads` (Mac / Linux).
 * Run them on your computer, **not** in a window already logged in to the
-  router (a prompt like `root@DD-WRT`): the `ssh` line logs in by itself.
+  router (a prompt like `root@DD-WRT` or `root@unknown`): the `ssh` line logs
+  in by itself.
 * **"The system cannot find the file specified"** (or *No such file*): the
   package isn't in that folder, or the browser renamed it because it was
   downloaded more than once. `dir lobbyfence*` (Mac / Linux: `ls lobbyfence*`)
@@ -123,8 +126,8 @@ Use your router's address if it isn't the one below (ASUS routers usually use
 
 **OpenWrt**
 
-```bat
-cd %USERPROFILE%\Downloads
+```sh
+cd Downloads
 ssh root@192.168.1.1 "cat > /tmp/lf.tgz && cd /tmp && rm -rf lobbyfence-install && tar -xzf lf.tgz && sh lobbyfence-install/install.sh" < lobbyfence-openwrt.tar.gz
 ```
 
@@ -132,8 +135,8 @@ Then open LuCI: **Services > LobbyFence**.
 
 **FreshTomato**
 
-```bat
-cd %USERPROFILE%\Downloads
+```sh
+cd Downloads
 ssh root@192.168.1.1 "cat > /tmp/lf.tgz && cd /tmp && rm -rf lobbyfence-install && tar -xzf lf.tgz && sh lobbyfence-install/freshtomato/install.sh" < lobbyfence-freshtomato.tar.gz
 ```
 
@@ -142,8 +145,8 @@ FreshTomato's menu.
 
 **Asuswrt-Merlin**
 
-```bat
-cd %USERPROFILE%\Downloads
+```sh
+cd Downloads
 ssh admin@192.168.50.1 "cat > /tmp/lf.tgz && cd /tmp && rm -rf lobbyfence-install && tar -xzf lf.tgz && sh lobbyfence-install/asuswrt-merlin/install.sh" < lobbyfence-asuswrt-merlin.tar.gz
 ```
 
@@ -152,8 +155,8 @@ also prints the page's address).
 
 **DD-WRT**
 
-```bat
-cd %USERPROFILE%\Downloads
+```sh
+cd Downloads
 ssh root@192.168.1.1 "cat > /tmp/lf.tgz && cd /tmp && rm -rf lobbyfence-install && tar -xzf lf.tgz && sh lobbyfence-install/ddwrt/install.sh" < lobbyfence-ddwrt.tar.gz
 ```
 
