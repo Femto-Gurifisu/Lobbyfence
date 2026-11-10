@@ -102,21 +102,28 @@ Download the package for your router's firmware from the
 | Asuswrt-Merlin (HND, 384.15+) | `lobbyfence-asuswrt-merlin.tar.gz` | your router login (e.g. `admin`) | [JFFS and SSH on](#asuswrt-merlin) |
 | DD-WRT (Broadcom ARM, e.g. R7000) | `lobbyfence-ddwrt.tar.gz` | `root` | [JFFS and SSH on](#dd-wrt) |
 
-Then, on a computer on the same network, open a terminal **in the folder the
-package is in** and run the two lines for your firmware. The first copies the
-package to the router, the second unpacks and installs it. You are asked for
-the router's password each time.
+Then, on a computer on the same network, open a terminal and run the three
+lines for your firmware. The first goes to your **Downloads** folder, where
+your browser saved the package; the second copies the package to the router;
+the third unpacks and installs it. You are asked for the router's password
+each time.
 
 * **Windows:** use **Command Prompt** (not PowerShell - it can't send a file
-  with `<`). Go to your Downloads first: `cd %USERPROFILE%\Downloads`
-* **Mac / Linux:** Terminal - `cd ~/Downloads`
+  with `<`). The lines below are for Command Prompt.
+* **Mac / Linux:** Terminal - use `cd ~/Downloads` as the first line instead.
+* **"The system cannot find the file specified"** (or *No such file*): the
+  package isn't in that folder, or the browser renamed it because it was
+  downloaded more than once. `dir lobbyfence*` (Mac / Linux: `ls lobbyfence*`)
+  shows its name - e.g. `lobbyfence-ddwrt (1).tar.gz`; put that name in quotes
+  in the second line.
 
 Use your router's address if it isn't the one below (ASUS routers usually use
 192.168.50.1, most others 192.168.1.1).
 
 **OpenWrt**
 
-```sh
+```bat
+cd %USERPROFILE%\Downloads
 ssh root@192.168.1.1 "cat > /tmp/lf.tgz" < lobbyfence-openwrt.tar.gz
 ssh root@192.168.1.1 "cd /tmp && rm -rf lobbyfence-install && tar -xzf lf.tgz && sh lobbyfence-install/install.sh"
 ```
@@ -125,7 +132,8 @@ Then open LuCI: **Services > LobbyFence**.
 
 **FreshTomato**
 
-```sh
+```bat
+cd %USERPROFILE%\Downloads
 ssh root@192.168.1.1 "cat > /tmp/lf.tgz" < lobbyfence-freshtomato.tar.gz
 ssh root@192.168.1.1 "cd /tmp && rm -rf lobbyfence-install && tar -xzf lf.tgz && sh lobbyfence-install/freshtomato/install.sh"
 ```
@@ -135,7 +143,8 @@ FreshTomato's menu.
 
 **Asuswrt-Merlin**
 
-```sh
+```bat
+cd %USERPROFILE%\Downloads
 ssh admin@192.168.50.1 "cat > /tmp/lf.tgz" < lobbyfence-asuswrt-merlin.tar.gz
 ssh admin@192.168.50.1 "cd /tmp && rm -rf lobbyfence-install && tar -xzf lf.tgz && sh lobbyfence-install/asuswrt-merlin/install.sh"
 ```
@@ -145,14 +154,15 @@ also prints the page's address).
 
 **DD-WRT**
 
-```sh
+```bat
+cd %USERPROFILE%\Downloads
 ssh root@192.168.1.1 "cat > /tmp/lf.tgz" < lobbyfence-ddwrt.tar.gz
 ssh root@192.168.1.1 "cd /tmp && rm -rf lobbyfence-install && tar -xzf lf.tgz && sh lobbyfence-install/ddwrt/install.sh"
 ```
 
 Then open the router's page, **Status > My Page** - it takes you to LobbyFence.
 
-**Updating:** the same two lines with the new package. Settings and learned
+**Updating:** the same three lines with the new package. Settings and learned
 servers are kept.
 
 The package unpacks into `/tmp/lobbyfence-install`. Don't unpack it into
