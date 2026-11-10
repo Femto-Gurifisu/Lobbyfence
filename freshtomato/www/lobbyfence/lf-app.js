@@ -2,9 +2,9 @@
  * LobbyFence as a home-screen app (Asuswrt-Merlin, FreshTomato, DD-WRT and
  * OpenWrt): the map page is the app (manifest + icons next to this file). On a phone opened in
  * the browser, a one-line tip says how to add it to the home screen (with an
- * Install button where the browser offers one); opened from the home screen -
- * and always on DD-WRT, whose page is outside the router's own - a "Router"
- * link leads to the router's own pages.
+ * Install button where the browser offers one); opened from the home screen,
+ * or anywhere outside the router's own page (a full window, the phone layout,
+ * DD-WRT's page on its own port) a "Router" link leads to the router's pages.
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 (function() {
@@ -273,10 +273,11 @@
 		var app = standalone(), top = document.getElementById('lf-top');
 		if (app)
 			document.documentElement.classList.add('lf-standalone');
-		/* a way to the router's own pages: in the app (no address bar), and on DD-WRT,
-		   whose LobbyFence page is on a port of its own, outside the router's pages
-		   (FreshTomato and Merlin show it inside theirs; LuCI: luciPage) */
-		if ((app || window.LF_PLATFORM === 'ddwrt') && top && !document.getElementById('lf-router')) {
+		/* a way to the router's own pages whenever the page is not inside them: the
+		   app (no address bar), FreshTomato's / Merlin's "open full window" and phone
+		   layout, and DD-WRT's page on a port of its own - not in the frame of the
+		   router's page, under its menu (LuCI: luciPage) */
+		if ((app || (window.LF_PLATFORM && !embedded())) && top && !document.getElementById('lf-router')) {
 			var a = document.createElement('a');
 			a.id = 'lf-router'; a.href = window.LF_ROUTER_URL || '/'; a.textContent = 'Router ↗';
 			a.title = 'The router\'s own pages';

@@ -128,6 +128,11 @@ def main():
               not man.get("errors") and mj.get("start_url") == "/ext/lobbyfence/app.asp?app=1" and mj.get("display") == "standalone" and icon == 512,
               [man.get("errors"), (man.get("data") or "")[:160], icon])
         check("on a computer: no 'add to home screen' tip", ap.locator("#lf-install").count() == 0)
+        # opened on its own ("open full window", the phone layout): a way back to FreshTomato's pages;
+        # in the frame under FreshTomato's menu: none needed
+        check("full window: a 'Router' link at the top back to FreshTomato's pages; none in the frame",
+              ap.locator("#lf-top #lf-router").is_visible() and ap.locator("#lf-router").get_attribute("href") == "/"
+              and frame.locator("#lf-router").count() == 0, ap.locator("#lf-router").count())
         ap.close()
         check("on a computer: no 'phone layout' link above the map", page.locator("#lf-phone").count() == 1 and not page.locator("#lf-phone").is_visible())
         check("the map frame is clean (tomato.js's Array changes not in it)", frame.evaluate("typeof Array.prototype.remove") == "undefined"

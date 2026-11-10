@@ -171,6 +171,17 @@ def main():
             return
         frame = page.frame(url=re.compile(r".*/user/lobbyfence/app\.asp.*"))
         frame.wait_for_function("document.querySelector('.lf-panel') && document.querySelector('.lf-panel').innerText.includes('Running')", timeout=20000)
+        # in the frame under Merlin's menu: no Router link needed; "open full window": a way back to the router's pages
+        full = page.context.new_page()
+        full.goto("http://router.test/user/lobbyfence/app.asp")
+        try:
+            full.wait_for_selector("#lf-top #lf-router", timeout=15000)
+            href = full.locator("#lf-router").get_attribute("href")
+        except Exception:
+            href = None
+        check("full window: a 'Router' link at the top back to the router's pages; none in the frame",
+              href == "/" and frame.locator("#lf-router").count() == 0, href)
+        full.close()
         panel = fr.locator(".lf-panel").inner_text()
         check("router status from the page's data files: running, game packets counted", "Running" in panel and re.search(r"Game packets: [1-9]", panel), panel[:300])
         check("lag panel offered (lf-lagd on this router)", fr.locator(".lf-lag").count() > 0 and fr.locator(".lf-lag").first.is_visible())
