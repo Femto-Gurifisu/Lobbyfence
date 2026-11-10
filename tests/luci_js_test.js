@@ -155,7 +155,7 @@ const inDrawn = (ring, lon, lat) => [ -360, 0, 360 ].some((k) => inRing(ring, lo
 		});
 		assert(h.presetById(h.DEFAULT_PRESET).group === 'any');
 		assert(h.PRESET_GROUPS.every((g) => h.PRESETS.some((p) => p.group === g[0])), 'no empty group');
-		[ 'pc', 'mobile' ].forEach((g) => {
+		[ 'pc', 'fighting', 'mobile' ].forEach((g) => {
 			const labels = h.PRESETS.filter((p) => p.group === g).map((p) => p.label.toLowerCase());
 			assert.deepStrictEqual(labels, labels.slice().sort(), g + ' games A to Z');
 		});
@@ -171,6 +171,17 @@ const inDrawn = (ring, lon, lat) => [ -360, 0, 360 ].some((k) => inRing(ring, lo
 		assert(/either side/.test(h.presetSummary(P('gta'))) && /Peer-to-peer/.test(h.presetSummary(P('gta'))));
 		assert.deepStrictEqual(P('r6').remote, [ '3074', '6015', '10000-10099' ]);
 		assert(/reported by players/.test(h.presetSummary(P('r6'))));
+		// fighting games: peer-to-peer, picked with the device type, never open for a burst of players
+		assert.deepStrictEqual(h.PRESET_GROUPS.map((g) => g[0]), [ 'any', 'pc', 'fighting', 'mobile' ]);
+		const fighting = h.PRESETS.filter((p) => p.group === 'fighting').map((p) => p.id);
+		assert.deepStrictEqual(fighting, [ 'dbx2', 'dbsz', 'ggst', 'mk1', 'sf6', 'smash', 'tekken8' ]);
+		fighting.forEach((id) => {
+			const p = P(id);
+			assert(h.needsPlatform(p) && p.burst === 0 && /Peer-to-peer/.test(h.presetSummary(p)), id);
+			assert(id === 'sf6' || (p.unmeasured && p.remote.join() === '1024-65535' && /match ports not known yet/.test(h.presetSummary(p))), id);
+		});
+		assert.deepStrictEqual(P('sf6').either, [ '30840-30859', '30870-30879' ]);             // Capcom's ports, as players report them
+		assert(/reported by players/.test(h.presetSummary(P('sf6'))) && /either side/.test(h.presetSummary(P('sf6'))));
 		[ 'marvelrivals', 'battlefield', 'eafc', 'pubg', 'arcraiders', 'dbd' ].forEach((id) => {
 			const p = P(id);
 			assert(p && p.group === 'pc' && h.needsPlatform(p), id);

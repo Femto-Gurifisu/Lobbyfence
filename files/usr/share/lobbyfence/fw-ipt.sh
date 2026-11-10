@@ -364,7 +364,7 @@ ipt_zone() { # zone family
 
 # the zone's sets (static ones filled, the others kept) -> stdout
 ipset_zone() { # zone family
-	local z="$1" f="$2" s="lf_$1" fa
+	local f="$2" s="lf_$1" fa
 	fa="$(ipset_fam "$f")"
 	eval "one_per_line \"\$Z_DEV$f\"" | ipset_fill "${s}_dev$f" hash:net "$fa"
 	one_per_line "$(addr_list "$f" $Z_ALLOW)" | ipset_fill "${s}_fa$f" hash:net "$fa"
@@ -388,7 +388,7 @@ ipset_zone() { # zone family
 
 # CTF bypass for the zone's devices (mangle table)
 ipt_ctf_zone() { # zone family
-	local z="$1" f="$2" s="lf_$1" d mac
+	local f="$2" s="lf_$1" d mac
 	eval "d=\"\$Z_DEV$f\""
 	[ -n "$d" ] && { echo "-A LF_CTF_IN -m set --match-set ${s}_dev$f src -j MARK --set-mark $CTF_MARK"; echo "-A LF_CTF_OUT -m set --match-set ${s}_dev$f dst -j MARK --set-mark $CTF_MARK"; }
 	if [ -n "$Z_MACS" ]; then
@@ -443,7 +443,7 @@ ipt_rules() {
 			for old in $(ipt_chains "$f" filter); do grep -qx "$old" "$want" || echo "-X $old"; done
 			echo "COMMIT"
 			# (some firmware has no mangle table for IPv6)
-			$cmd -t mangle -n -L FORWARD >/dev/null 2>&1 && ipt_mangle "$f" "$cmd" "$ctf"
+			$cmd -t mangle -n -L FORWARD >/dev/null 2>&1 && ipt_mangle "$f" "$ctf"
 		} > "$FW_RULES.$f"
 	done
 	rm -f "$LF_RUN/zone.rules" "$want"
@@ -452,8 +452,8 @@ ipt_rules() {
 # the mangle table: CTF bypass chains (FreshTomato) and what the platform adds
 # (fw_mangle_extra: chain lines and rules on stdout, its hooks in MANGLE_HOOKS
 # as "BUILTIN:CHAIN ..."); LobbyFence chains no longer wanted are taken out
-ipt_mangle() { # family command ctf
-	local f="$1" cmd="$2" ctf="$3" body="$LF_RUN/mangle.rules" want="$LF_RUN/mchains.want" z old h b
+ipt_mangle() { # family ctf
+	local f="$1" ctf="$2" body="$LF_RUN/mangle.rules" want="$LF_RUN/mchains.want" z old h b
 	MANGLE_HOOKS=""
 	{
 		if [ "$ctf" = 1 ]; then

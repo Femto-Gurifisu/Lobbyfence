@@ -1367,7 +1367,7 @@ uptime_ms() { awk '{ printf "%d", $1 * 1000 }' /proc/uptime 2>/dev/null || echo 
 
 # One live lookup to prove the geolocation service answers. Prints JSON.
 do_apitest() {
-	local ip="${1:-8.8.8.8}" t url resp row err="" t0 t1 ms
+	local ip="${1:-8.8.8.8}" t resp row err="" t0 t1 ms
 	echo "$ip" | lfawk public | grep -q . || die "$ip is not a public address"
 	load_config
 	ensure_dirs

@@ -560,10 +560,10 @@ them); "community" means players reported them, so they may be incomplete.
 If a game isn't listed - or nothing shows up on the map - use
 **Any game (all UDP traffic)**.
 
-PC & console games are picked together with the **device type** - PC, or a
-console: PlayStation, Xbox or Nintendo Switch - because some games use other
-ports on each (Fortnite and Apex Legends below); the others use the same ports
-everywhere. The zone panel shows it next to the game (*Fortnite ·
+PC & console games (fighting games too) are picked together with the
+**device type** - PC, or a console: PlayStation, Xbox or Nintendo Switch -
+because some games use other ports on each (Fortnite and Apex Legends below);
+the others use the same ports everywhere. The zone panel shows it next to the game (*Fortnite ·
 PlayStation*), and **Change…** switches it.
 
 | Preset | Ports | Source |
@@ -583,6 +583,8 @@ PlayStation*), and **Change…** switches it.
 | Rocket League | UDP 7000-9000 | official - Psyonix, via [British Esports](https://britishesports.org/wp-content/uploads/2023/02/PORT-IP-24-25.pdf) |
 | VALORANT | UDP 7000-8000, 8180-8181 | official - [Riot](https://support.riotgames.com/en-us/valorant/support-tools/how-to-set-up-port-forwarding) |
 | ARC Raiders, Battlefield 6, Dead by Daylight, EA SPORTS FC 26, Marvel Rivals, PUBG: BATTLEGROUNDS | UDP 1024-65535 (server side) - their match ports aren't published or measured yet: narrow the zone with [Ports…](#narrowing-a-zone-to-its-games-real-ports-ports) after a few matches | - |
+| **Fighting games:** Street Fighter 6 | UDP 30840-30859, 30870-30879, either side - peer-to-peer, see below | community - Capcom's ports, via [portforward.com](https://portforward.com/street-fighter-6/) |
+| **Fighting games:** Dragon Ball Xenoverse 2, Dragon Ball: Sparking! ZERO, Guilty Gear -Strive-, Mortal Kombat 1, Super Smash Bros. Ultimate, TEKKEN 8 | UDP 1024-65535 (server side) - peer-to-peer, see below; their match ports aren't published or measured yet: narrow the zone with [Ports…](#narrowing-a-zone-to-its-games-real-ports-ports) after a few matches | - |
 | Arena of Valor | UDP/TCP 10001-10094, 17000 | community - [Netduma forum list](https://forum.netduma.com/topic/55803-list-of-mobile-games-and-its-ports) |
 | Call of Duty: Mobile | UDP 7500-8000 | official - [Activision](https://support.activision.com/content/atvi/support/web/en/articles/ports-used-for-call-of-duty-games.html) |
 | Clash Royale / Clash of Clans | UDP/TCP 9330-9340 | community - [Netduma forum list](https://forum.netduma.com/topic/55803-list-of-mobile-games-and-its-ports) |
@@ -592,7 +594,7 @@ PlayStation*), and **Change…** switches it.
 
 *Open for server tests* is filled in per game: Apex Legends and Fortnite
 (PC/console and mobile) 2 (raise it if needed); Call of Duty, Call of Duty:
-Mobile and GTA Online 0 (off). Other games start at 0.
+Mobile, GTA Online and the fighting games 0 (off). Other games start at 0.
 
 **GTA Online and Red Dead Online are peer-to-peer:** the other players in your
 session connect to your console or PC directly (from UDP 6672 when they can),
@@ -600,6 +602,11 @@ so LobbyFence locates *them*, not servers - the smaller the region, the fewer
 players end up in your session. A session is many players at once, so *Open
 for server tests* stays off. Players' addresses are never added to the
 servers list LobbyFence comes with.
+
+**Fighting games are peer-to-peer too:** a match is your console or PC and
+the other player's, directly, so LobbyFence locates your opponents - only
+players inside your region get through. The game may check a few opponents at
+once before a match, so *Open for server tests* stays off for these as well.
 
 **Games whose match ports aren't known yet** (ARC Raiders, Battlefield 6,
 Dead by Daylight, EA SPORTS FC 26, Marvel Rivals, PUBG: BATTLEGROUNDS) start

@@ -817,6 +817,7 @@ function dot(colour) {
 var PRESET_GROUPS = [
 	[ 'any', _('Any game') ],
 	[ 'pc', _('PC & console') ],
+	[ 'fighting', _('Fighting games') ],
 	[ 'mobile', _('Mobile') ]
 ];
 var EPIC_PORTS = [ '3478-3479', '5060', '5062', '6250', '12000-65000' ];
@@ -836,6 +837,8 @@ var MOBILE_TCP_PORTS = [ '443', '3013', '5001', '5003', '9001', '9330-9340', '10
 var UNMEASURED_NOTE = _('Narrow it with Ports… after a few matches.');
 /* Roblox picks a server port from its range for each game (Roblox support) */
 var ROBLOX_NOTE = _('Voice and video calls on this device (Discord and the like) use these ports too.');
+/* fighting games: a match is the two players' consoles or PCs, directly */
+var FIGHTING_NOTE = _('Peer-to-peer: you play the other player\'s console or PC directly, so it is where they are that counts.');
 var PRESETS = [
 	{ id: 'any_udp', group: 'any', label: _('Any game (all UDP traffic)'), name: _('Any game'), proto: 'udp', remote: [ '1024-65535' ],
 	  note: _('Works for every game, including ones not listed. Voice and video calls from this device are checked as well, so start in Monitor mode.') },
@@ -878,6 +881,23 @@ var PRESETS = [
 	{ id: 'rocketleague', group: 'pc', label: 'Rocket League', proto: 'udp', remote: [ '7000-9000' ], source: 'Psyonix', official: true },
 	{ id: 'valorant', group: 'pc', label: 'VALORANT', proto: 'udp', remote: [ '7000-8000', '8180-8181' ], source: 'Riot Games', official: true },
 
+	/* fighting games, A to Z - peer-to-peer: never open for a burst of players (0) */
+	{ id: 'dbx2', group: 'fighting', label: 'Dragon Ball Xenoverse 2', proto: 'udp', remote: [ '1024-65535' ], unmeasured: true, wide: true, burst: 0,
+	  note: FIGHTING_NOTE + ' ' + UNMEASURED_NOTE },
+	{ id: 'dbsz', group: 'fighting', label: 'Dragon Ball: Sparking! ZERO', proto: 'udp', remote: [ '1024-65535' ], unmeasured: true, wide: true, burst: 0,
+	  note: FIGHTING_NOTE + ' ' + UNMEASURED_NOTE },
+	{ id: 'ggst', group: 'fighting', label: 'Guilty Gear -Strive-', proto: 'udp', remote: [ '1024-65535' ], unmeasured: true, wide: true, burst: 0,
+	  note: FIGHTING_NOTE + ' ' + UNMEASURED_NOTE },
+	{ id: 'mk1', group: 'fighting', label: 'Mortal Kombat 1', proto: 'udp', remote: [ '1024-65535' ], unmeasured: true, wide: true, burst: 0,
+	  note: FIGHTING_NOTE + ' ' + UNMEASURED_NOTE },
+	/* Capcom's match ports (as Street Fighter V's), the same on every device */
+	{ id: 'sf6', group: 'fighting', label: 'Street Fighter 6', proto: 'udp', either: [ '30840-30859', '30870-30879' ], source: _('players'), burst: 0,
+	  note: FIGHTING_NOTE },
+	{ id: 'smash', group: 'fighting', label: 'Super Smash Bros. Ultimate', proto: 'udp', remote: [ '1024-65535' ], unmeasured: true, wide: true, burst: 0,
+	  note: FIGHTING_NOTE + ' ' + UNMEASURED_NOTE },
+	{ id: 'tekken8', group: 'fighting', label: 'TEKKEN 8', proto: 'udp', remote: [ '1024-65535' ], unmeasured: true, wide: true, burst: 0,
+	  note: FIGHTING_NOTE + ' ' + UNMEASURED_NOTE },
+
 	/* mobile games, A to Z */
 	{ id: 'aov', group: 'mobile', label: 'Arena of Valor', proto: 'both', remote: [ '10001-10094', '17000' ], source: _('players') },
 	{ id: 'codm', group: 'mobile', label: 'Call of Duty: Mobile', proto: 'udp', remote: [ '7500-8000' ], source: 'Activision', official: true, burst: 0 },
@@ -904,9 +924,9 @@ function presetById(id) {
 	return PRESETS.filter(function(p) { return p.id === id; })[0] || null;
 }
 
-/* PC & console games are picked together with the device they run on */
+/* PC & console games (fighting games too) are picked together with the device they run on */
 function needsPlatform(p) {
-	return !!(p && p.group === 'pc');
+	return !!(p && (p.group === 'pc' || p.group === 'fighting'));
 }
 
 function platformName(id) {
@@ -932,10 +952,19 @@ function presetOn(p, platform) {
 /* PC, then the consoles in their own group */
 function platformSelect(cls) {
 	function opt(x) { return E('option', { 'value': x[0] }, x[1]); }
-	return E('select', { 'class': 'cbi-input-select ' + cls, 'style': 'width:100%' },
+	return pageList(E('select', { 'class': 'cbi-input-select ' + cls, 'style': 'width:100%' },
 		[ E('option', { 'value': '' }, _('Choose the device type…')) ]
 			.concat(PLATFORMS.filter(function(x) { return !x[2]; }).map(opt))
-			.concat([ E('optgroup', { 'label': _('Consoles') }, PLATFORMS.filter(function(x) { return x[2]; }).map(opt)) ]));
+			.concat([ E('optgroup', { 'label': _('Consoles') }, PLATFORMS.filter(function(x) { return x[2]; }).map(opt)) ])));
+}
+
+/* the protocol a zone filters */
+function protoSelect(cls) {
+	return pageList(E('select', { 'class': 'cbi-input-select' + (cls ? ' ' + cls : '') }, [
+		E('option', { 'value': 'udp' }, 'UDP'),
+		E('option', { 'value': 'tcp' }, 'TCP'),
+		E('option', { 'value': 'both' }, _('UDP and TCP'))
+	]));
 }
 
 /* the games, grouped: Any game, PC & console, Mobile */
@@ -951,16 +980,15 @@ function gameSelect(cls) {
 /* ------------------------------------------------ long drop-down lists */
 
 /*
- * A long drop-down list (the games, the network's devices, the countries)
- * opens in the page instead of as the browser's own list. That one is as tall
- * as all its entries: on a Mac it runs over the side panel and even the
- * browser's tabs, with scroll arrows at the top of the screen. This one opens
- * under the field (over it when there is more room there), stays inside the
- * window and scrolls. The <select> stays the real field - its value, "change"
- * and type-to-find work as before. Short lists, phones and tablets keep the
- * browser's own.
+ * Drop-down lists open in the page instead of as the browser's own list, so
+ * they all look alike - and a long one (the games) no longer runs over the
+ * side panel and the browser's tabs, as the browser's own list does on a Mac
+ * (as tall as all its entries, with scroll arrows at the top of the screen).
+ * This one opens under the field (over it when there is more room there),
+ * stays inside the window and scrolls. The <select> stays the real field -
+ * its value, "change" and type-to-find work as before. Phones and tablets
+ * keep their own picker, made for the screen.
  */
-var PAGE_LIST_MIN = 13;   /* entries (options and group names) from which a list opens in the page */
 var pageListSeq = 0;
 
 function pageList(sel) {
@@ -982,11 +1010,11 @@ function pageList(sel) {
 		return out;
 	}
 
-	/* a mouse or touchpad, and a long list */
+	/* a mouse or touchpad (not a phone's or tablet's touch screen) */
 	function wanted() {
 		var fine = false;
 		try { fine = window.matchMedia('(pointer: fine)').matches; } catch (e) {}
-		return fine && !sel.disabled && !sel.multiple && !(sel.size > 1) && entries().length >= PAGE_LIST_MIN;
+		return fine && !sel.disabled && !sel.multiple && !(sel.size > 1);
 	}
 
 	function opaque(c) {
@@ -1814,13 +1842,13 @@ return view.extend({
 			'class': 'lf-btn', 'title': _('Set your home location (ZIP code or place name) - shown as a pin on the map'),
 			'click': function(ev) { ev.preventDefault(); self.openHome(); }
 		}, [ this.homeIco = E('span', { 'class': 'lf-house-ico' }), _('Home') ]);
-		this.themeSelect = E('select', {
+		this.themeSelect = pageList(E('select', {
 			'class': 'lf-select',
 			'title': _('Colour theme'),
 			'change': function() { self.applyTheme(this.value); }
 		}, THEME_ORDER.map(function(k) {
 			return E('option', { 'value': k }, THEMES[k].label);
-		}));
+		})));
 
 		/* map area */
 		this.mapNode = E('div', { 'style': 'position:absolute;inset:0' });
@@ -1861,7 +1889,7 @@ return view.extend({
 		});
 		this.listNode = E('div', { 'class': 'lf-list' });
 		this.range = RANGES.some(function(r) { return r[0] === store('range'); }) ? store('range') : 'active';
-		this.rangeSelect = E('select', {
+		this.rangeSelect = pageList(E('select', {
 			'class': 'lf-select', 'title': _('Which learned servers to show'),
 			'change': function() { self.range = this.value; store('range', self.range); self.drawServers(); self.renderServers(); }
 		}, [
@@ -1869,7 +1897,7 @@ return view.extend({
 			E('option', { 'value': 'hour' }, _('Last hour')),
 			E('option', { 'value': 'day' }, _('Last 24 hours')),
 			E('option', { 'value': 'all' }, _('All learned'))
-		]);
+		]));
 		this.rangeSelect.value = this.range;
 		this.ccFilter = '';
 		this.countrySelect = pageList(E('select', {
@@ -3686,9 +3714,9 @@ return view.extend({
 			[ 'down', _('Download only'), _('Server → you: what you see and hear from the game arrives late.') ],
 			[ 'up', _('Upload only'), _('You → server: your moves and shots reach the server late.') ]
 		];
-		var dirSel = E('select', { 'class': 'lf-select lf-lag-lag_direction', 'style': 'font-size:12px;padding:2px 5px',
+		var dirSel = pageList(E('select', { 'class': 'lf-select lf-lag-lag_direction', 'style': 'font-size:12px;padding:2px 5px',
 			'change': function() { save('lag_direction', this.value); } },
-			DIRS.map(function(x) { return E('option', { 'value': x[0] }, x[1]); }));
+			DIRS.map(function(x) { return E('option', { 'value': x[0] }, x[1]); })));
 		dirSel.value = dir;
 		sec.appendChild(E('label', { 'class': 'lf-lagrow' }, [ E('span', {}, _('Direction')), dirSel ]));
 		sec.appendChild(E('div', { 'class': 'lf-muted', 'style': 'font-size:11.5px;margin:-1px 0 4px' },
@@ -5150,13 +5178,13 @@ return view.extend({
 		var sortBy = store('portsSort');
 		if (!SORTS.hasOwnProperty(sortBy))
 			sortBy = 'total';
-		var sortSel = E('select', { 'class': 'cbi-input-select lf-ports-sort', 'change': function() { setSort(sortSel.value); } }, [
+		var sortSel = pageList(E('select', { 'class': 'cbi-input-select lf-ports-sort', 'change': function() { setSort(sortSel.value); } }, [
 			E('option', { 'value': 'total' }, _('Packets - most first')),
 			E('option', { 'value': 'passes' }, _('Seen in - most passes first')),
 			E('option', { 'value': 'servers' }, _('Servers - most first')),
 			E('option', { 'value': 'last' }, _('Last seen - newest first')),
 			E('option', { 'value': 'port' }, _('Server port - lowest first'))
-		]);
+		]));
 		sortSel.value = sortBy;
 		function setSort(k) {
 			if (!SORTS.hasOwnProperty(k))
@@ -5321,9 +5349,7 @@ return view.extend({
 			E('div', { 'class': 'lf-cg-platinfo', 'style': 'font-size:90%;opacity:.8;margin-top:.3em' }) ]);
 		var ports = E('input', { 'class': 'cbi-input-text lf-cg-ports', 'style': 'width:100%' });
 		var portsLabel = E('label', { 'style': 'display:block;font-weight:bold;margin-bottom:.2em' });
-		var proto = E('select', { 'class': 'cbi-input-select lf-cg-proto' }, [
-			E('option', { 'value': 'udp' }, 'UDP'), E('option', { 'value': 'tcp' }, 'TCP'), E('option', { 'value': 'both' }, _('UDP and TCP'))
-		]);
+		var proto = protoSelect('lf-cg-proto');
 		var burst = E('input', { 'class': 'cbi-input-text lf-cg-burst', 'type': 'number', 'min': 0, 'max': 10000, 'style': 'width:6em' });
 		var hint = E('div', { 'style': 'font-size:90%;opacity:.8;margin-top:.3em' });
 		var rename = E('input', { 'type': 'checkbox', 'class': 'lf-cg-rename' });
@@ -5450,20 +5476,16 @@ return view.extend({
 		var devicePick = pageList(E('select', { 'class': 'cbi-input-select', 'style': 'width:100%;display:none' }));
 		var device = E('input', { 'class': 'cbi-input-text', 'placeholder': _('192.168.1.50 or aa:bb:cc:dd:ee:ff'), 'style': 'width:100%' });
 		var deviceInfo = E('div', { 'style': 'font-size:90%;opacity:.8;margin-top:.3em' });
-		var proto = E('select', { 'class': 'cbi-input-select' }, [
-			E('option', { 'value': 'udp' }, 'UDP'),
-			E('option', { 'value': 'tcp' }, 'TCP'),
-			E('option', { 'value': 'both' }, _('UDP and TCP'))
-		]);
+		var proto = protoSelect();
 		var ports = E('input', { 'class': 'cbi-input-text', 'style': 'width:100%',
 			'input': function() { portsTouched = true; } });
 		var portsLabel = E('label', { 'style': 'display:block;font-weight:bold;margin-bottom:.2em' }, _('Game ports'));
 		var modeTouched = false;
-		var modeSel = E('select', { 'class': 'cbi-input-select', 'style': 'width:100%', 'change': function() { modeTouched = true; } }, [
+		var modeSel = pageList(E('select', { 'class': 'cbi-input-select', 'style': 'width:100%', 'change': function() { modeTouched = true; } }, [
 			E('option', { 'value': 'strict' }, _('Strict - block everything outside the region and anything not located yet')),
 			E('option', { 'value': 'enforce' }, _('Enforce - block servers located outside the region')),
 			E('option', { 'value': 'monitor' }, _('Monitor - only learn and show, block nothing'))
-		]);
+		]));
 		var burst = E('input', { 'class': 'cbi-input-text', 'type': 'number', 'min': 0, 'max': 10000, 'style': 'width:6em',
 			'input': function() { burstTouched = true; } });
 		var burstOpen = E('input', { 'class': 'cbi-input-text', 'type': 'number', 'min': 1, 'max': 3600, 'value': 20, 'style': 'width:6em' });

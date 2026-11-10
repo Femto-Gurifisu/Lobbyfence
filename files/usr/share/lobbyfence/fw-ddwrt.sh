@@ -46,7 +46,7 @@ fw_sfe() {
 # the zone's devices -> LF_CTF_X (the double XOR); the chains are hooked in
 # by ipt_mangle (LF_CTF_IN in PREROUTING, LF_CTF_OUT in POSTROUTING)
 ipt_ctf_zone() { # zone family
-	local z="$1" f="$2" s="lf_$1" d mac
+	local f="$2" s="lf_$1" d mac
 	eval "d=\"\$Z_DEV$f\""
 	[ -n "$d" ] && { echo "-A LF_CTF_IN -m set --match-set ${s}_dev$f src -j LF_CTF_X"; echo "-A LF_CTF_OUT -m set --match-set ${s}_dev$f dst -j LF_CTF_X"; }
 	if [ -n "$Z_MACS" ]; then

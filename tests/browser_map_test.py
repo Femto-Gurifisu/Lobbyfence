@@ -278,7 +278,7 @@ def main():
         check("Any game: no device type to choose", not platform.is_visible())
         ports = modal.locator("input").nth(2)
         groups = page.evaluate("[...document.querySelectorAll('#modal optgroup')].filter(g => !g.closest('.lf-nz-platform')).map(g => g.label)")
-        check("presets grouped: any / PC & console / mobile", groups == ["Any game", "PC & console", "Mobile"], groups)
+        check("presets grouped: any / PC & console / fighting games / mobile", groups == ["Any game", "PC & console", "Fighting games", "Mobile"], groups)
         check("default preset is Any game", game.input_value() == "any_udp" and ports.input_value() == "1024-65535")
         check("Any game fills in its name like the others", modal.locator("input").nth(1).input_value() == "Any game")
         check("Custom can be picked", "custom" in page.evaluate("[...document.querySelectorAll('#modal select')[0].options].map(o => o.value)"))
@@ -330,6 +330,13 @@ def main():
         game.select_option("marvelrivals")
         check("Marvel Rivals: every UDP port until its ports are known - and says so",
               ports.input_value() == "1024-65535" and modal.get_by_text("match ports not known yet", exact=False).is_visible())
+        game.select_option("sf6")
+        check("Street Fighter 6: Capcom's match ports on either side, open for server tests off",
+              ports.input_value() == "30840-30859 30870-30879" and modal.get_by_text("Game ports (either side)").is_visible()
+              and burst_in.input_value() == "0" and platform.is_visible() and modal.get_by_text("Peer-to-peer", exact=False).is_visible(), ports.input_value())
+        game.select_option("dbx2")
+        check("Dragon Ball Xenoverse 2: every UDP port until measured, open for server tests off",
+              ports.input_value() == "1024-65535" and burst_in.input_value() == "0" and modal.get_by_text("match ports not known yet", exact=False).is_visible())
         game.select_option("roblox")
         check("Roblox: UDP 49152-65535, published by Roblox",
               ports.input_value() == "49152-65535" and modal.get_by_text("published by Roblox", exact=False).is_visible())
@@ -350,7 +357,7 @@ def main():
         check("game list: inside the window", b and b["top"] >= 0 and b["bottom"] <= b["vh"] and b["left"] >= 0 and b["right"] <= b["vw"], b)
         heads = pl.locator(".lf-pl-head").all_inner_texts()
         opts = pl.locator(".lf-pl-opt").all_inner_texts()
-        check("game list: the groups and every game", heads == ["Any game", "PC & console", "Mobile"] and len(opts) == page.evaluate("document.querySelectorAll('#modal select')[0].options.length"), (heads, len(opts)))
+        check("game list: the groups and every game", heads == ["Any game", "PC & console", "Fighting games", "Mobile"] and len(opts) == page.evaluate("document.querySelectorAll('#modal select')[0].options.length"), (heads, len(opts)))
         check("game list: the current game is marked", pl.locator(".lf-pl-opt[aria-selected=true]").all_inner_texts() == ["Any game (all UDP traffic)"])
         if SHOTS:
             pl.locator(".lf-pl-opt").filter(has_text=re.compile(r"^Marvel Rivals$")).hover()
@@ -377,8 +384,19 @@ def main():
         game.click()
         page.mouse.click(5, 5)
         check("game list: a click elsewhere closes it", pl.count() == 0 and game.input_value() == "valorant")
+        # every list looks the same: the short ones (protocol, filtering, device type) open in the page too
         proto.click()
-        check("short lists keep the browser's own", pl.count() == 0)
+        check("protocol list: in the page too", pl.count() == 1 and pl.locator(".lf-pl-opt").all_inner_texts() == ["UDP", "TCP", "UDP and TCP"],
+              pl.locator(".lf-pl-opt").all_inner_texts())
+        pl.locator(".lf-pl-opt").filter(has_text=re.compile(r"^TCP$")).click()
+        check("protocol list: a pick sets it", proto.input_value() == "tcp" and pl.count() == 0)
+        proto.select_option("udp")
+        platform.click()
+        check("device type list: in the page, with the consoles' group",
+              pl.locator(".lf-pl-head").all_inner_texts() == ["Consoles"] and "Nintendo Switch" in pl.locator(".lf-pl-opt").all_inner_texts())
+        page.keyboard.press("Escape")
+        modal.locator("select").last.click()
+        check("filtering list: in the page", pl.count() == 1 and pl.locator(".lf-pl-opt").count() == 3)
         page.keyboard.press("Escape")
         vp = page.viewport_size
         page.set_viewport_size({"width": vp["width"], "height": 460})
