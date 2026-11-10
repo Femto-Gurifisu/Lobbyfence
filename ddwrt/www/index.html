@@ -25,6 +25,7 @@
 /* the token comes once from DD-WRT's Status > My Page (after the "#") and is kept in this browser */
 (function() {
 	var m = /(?:^#|&)t=([0-9a-f]{16,64})/.exec(location.hash || ''), t = '';
+	var r = /(?:^#|&)r=([^&]+)/.exec(location.hash || '');      /* (read before the address is tidied up below) */
 	/* (kept under LobbyFence's old name, RegionGate, before) */
 	try {
 		var o = localStorage.getItem('rg-token');
@@ -36,10 +37,21 @@
 		/* the token out of the address (and out of bookmarks / the home-screen icon) */
 		try { history.replaceState(null, '', location.pathname + location.search + '#map'); } catch (e) { location.hash = 'map'; }
 	}
+	/* the router's own pages: where My Page was opened (http or https, their port) - on
+	   this router only; before that, plain http on the router's address */
+	var host = location.hostname.replace(/^\[|\]$/g, ''), home = '';
+	function routerPages(u) {
+		var x = /^(https?:)\/\/(\[[0-9a-fA-F:.]+\]|[^\/:?#@\[\]]+)(:[0-9]{1,5})?$/.exec(u || '');
+		return x && x[2].replace(/^\[|\]$/g, '') === host ? u : '';
+	}
+	try {
+		if (r && routerPages(decodeURIComponent(r[1]))) localStorage.setItem('lf-router', decodeURIComponent(r[1]));
+		home = routerPages(localStorage.getItem('lf-router'));
+	} catch (e) {}
 	window.LF_TOKEN = t;
 	window.LF_PLATFORM = 'ddwrt';
 	window.LF_CGI = '/cgi-bin/lobbyfence.cgi';
-	window.LF_ROUTER_URL = location.protocol + '//' + location.hostname.replace(/^([^\[].*:.*)$/, '[$1]') + '/';
+	window.LF_ROUTER_URL = (home || location.protocol + '//' + location.hostname.replace(/^([^\[].*:.*)$/, '[$1]')) + '/';
 })();
 </script>
 <style>

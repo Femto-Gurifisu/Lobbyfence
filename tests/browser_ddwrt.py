@@ -90,6 +90,24 @@ def main():
         check("Status > My Page sends the browser on to LobbyFence; the token leaves the address bar", ok, page.url)
         stored = page.evaluate("localStorage.getItem('lf-token')")
         check("the token is kept in this browser", stored == token, stored)
+        # LobbyFence's page is on a port of its own, outside DD-WRT's pages: a link back there, on a computer too
+        page.wait_for_selector("#lf-top #lf-router", timeout=10000)
+        check("a 'Router' link at the top leads back to DD-WRT's pages (where My Page was opened)",
+              page.locator("#lf-router").is_visible() and page.locator("#lf-router").get_attribute("href") == "http://192.168.1.1/"
+              and page.evaluate("localStorage.getItem('lf-router')") == "http://192.168.1.1", page.locator("#lf-router").get_attribute("href"))
+        # DD-WRT's pages on https and another port: the link follows; another site's address is never taken
+        rc = b.new_context(viewport={"width": 1300, "height": 950})
+        rc.route("https://**", lambda r: r.abort())
+        rp = rc.new_page()
+        rp.goto(LF + "/#t=" + token + "&r=" + "https%3A%2F%2F192.168.1.1%3A8443")
+        rp.wait_for_selector("#lf-router", timeout=10000)
+        https_link = rp.locator("#lf-router").get_attribute("href")
+        rp.goto(LF + "/?again=1#t=" + token + "&r=" + "http%3A%2F%2Fevil.example")
+        rp.wait_for_selector("#lf-router", timeout=10000)
+        check("the Router link: https and its port as My Page had them; another site's address is ignored",
+              https_link == "https://192.168.1.1:8443/" and rp.locator("#lf-router").get_attribute("href") == "https://192.168.1.1:8443/"
+              and "r=" not in rp.url, [https_link, rp.locator("#lf-router").get_attribute("href"), rp.url])
+        rc.close()
         try:
             page.wait_for_function("document.querySelector('.lf-app') && document.querySelector('.maplibregl-canvas')", timeout=40000)
             ok = True

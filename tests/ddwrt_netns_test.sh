@@ -470,7 +470,7 @@ sed -i '/QoS or the bandwidth limiter is on/d' "$W/run.log"
 
 # --- 10c. Status > My Page: what DD-WRT's web server shows the signed-in user
 out="$(inr env PATH="$TPATH" LF_RUN="$LF_RUN" "$LF_HOME/mypage.sh")"
-echo "$out" | grep -q ":8055/#t=$TOKEN'" && echo "$out" | grep -q "location.replace(url)" \
+echo "$out" | grep -q ":8055/#t=$TOKEN'" && echo "$out" | grep -q "location.replace(url)" && echo "$out" | grep -q "url += '&r=' + encodeURIComponent(location.protocol + '//' + location.host)" \
 	&& pass "My Page sends the browser on to LobbyFence with the token after the #" || fail "mypage: $out"
 # the web page's files, from LobbyFence's own server
 page="$(inr curl -s --noproxy '*' -m 10 http://192.168.1.1:8055/)"

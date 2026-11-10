@@ -457,7 +457,9 @@ What is different on DD-WRT:
   only shows where to get it, and the router refuses its commands - other
   people on your Wi-Fi can't change anything. `lobbyfence newtoken` makes a
   new key (every browser has to come through *My Page* again).
-  `lobbyfence url` prints the address with the key.
+  `lobbyfence url` prints the address with the key. **Router ↗** at the top
+  of the page leads back to DD-WRT's own pages (http or https, as you opened
+  *My Page*).
 * **Lag simulator:** netem is built into DD-WRT's kernel and DD-WRT has
   `tc`, so it simply works - no module, no trial run. It needs **QoS off**
   (QoS uses the same place in the router's traffic control - the map says so

@@ -51,6 +51,8 @@ cat <<EOF
 (function() {
 	var url = 'http://' + location.hostname.replace(/^\[?(.*?)\]?$/, function(m, h) { return h.indexOf(':') >= 0 ? '[' + h + ']' : h; }) +
 		':$PORT/#t=$TOKEN';
+	/* and where the router's own pages are (http or https, their port): LobbyFence's "Router" link leads back here */
+	url += '&r=' + encodeURIComponent(location.protocol + '//' + location.host);
 	var a = document.getElementById('lf-go');
 	a.href = url;
 	/* straight on, unless this page is shown inside another one */
