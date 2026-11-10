@@ -174,6 +174,14 @@ python3 -c "import json,sys; z=json.load(open(sys.argv[1]))['zones'][0]; assert 
 devs="$(lf devices)"
 python3 -c "import json,sys; d=json.loads(sys.argv[1]); m=sys.argv[2].lower(); e=[x for x in d if x['mac']==m]; assert e and '192.168.1.100' in e[0]['ipv4'], d" "$devs" "$LANMAC" \
 	&& pass "devices lists the console with its IP and MAC" || fail "devices: $devs"
+# the internet side's neighbours (the ISP's gateway) are not LAN devices
+inr $IP route add default via 10.99.0.2
+inr $BB ping -c1 -W1 10.99.0.2 >/dev/null 2>&1
+inr grep -q "^10.99.0.2 .* rw" /proc/net/arp || fail "test setup: no ARP entry for the WAN gateway"
+devs="$(lf devices)"
+inr $IP route del default via 10.99.0.2
+python3 -c "import sys; d=sys.argv[1]; assert '10.99.0.2' not in d and '192.168.1.100' in d, d" "$devs" \
+	&& pass "devices leaves out the WAN side's neighbours (the ISP's gateway)" || fail "devices lists the WAN gateway: $devs"
 inr nft list chain inet lobbyfence z_game_o4 | grep -q "update @z_game_seen4" && ! inr nft list chain inet lobbyfence z_game_o4 | grep -q "ct state new update @z_game_seen4" \
 	&& pass "outbound traffic keeps servers seen" || fail "seen rule"
 # back to the plain IP device for the remaining steps

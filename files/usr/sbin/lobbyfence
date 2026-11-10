@@ -334,11 +334,30 @@ mac_list() {
 	echo "$@" | tr ' ' '\n' | lfawk addrs | awk '$1 == "mac" { print $2 }' | sort -u | tr '\n' ',' | sed 's/,$//; s/,/, /g'
 }
 
-# "mac ip" for every LAN neighbour the router knows (ARP, DHCP leases, IPv6 neighbours)
+# the interfaces the default routes leave through (the internet side): their
+# neighbours - the ISP's gateway, a modem - are not devices on the LAN. A bridge
+# stays in (a router used as an access point has its default route on the LAN).
+wan_devs() {
+	{ ip -4 route show default; ip -6 route show default; } 2>/dev/null |
+		awk '{ for (i = 1; i < NF; i++) if ($i == "dev") print $(i + 1) }' | sort -u |
+		while read -r d; do [ -d "/sys/class/net/$d/bridge" ] || printf ' %s' "$d"; done
+}
+
+# "<kind> mac ip" for every LAN neighbour the router knows (ARP, DHCP leases, IPv6
+# neighbours): kind "ip" or "lease" (a lease adds the hostname)
+lan_neigh() {
+	local w
+	w="$(wan_devs) "
+	awk -v w="$w" 'NR > 1 && $3 != "0x0" && index(w, " " $6 " ") == 0 { print "ip", $4, $1 }' "$LF_ARP" 2>/dev/null
+	[ -f "$LF_LEASES" ] && awk '{ print "lease", $2, $3, $4 }' "$LF_LEASES"
+	ip -6 neigh show 2>/dev/null | awk -v w="$w" '{ d = ""; m = ""
+		for (i = 1; i < NF; i++) { if ($i == "dev") d = $(i + 1); if ($i == "lladdr") m = $(i + 1) }
+		if (m != "" && index(w, " " d " ") == 0) print "ip", m, $1 }'
+}
+
+# "mac ip" for every LAN neighbour
 neigh_table() {
-	awk 'NR > 1 && $3 != "0x0" { print $4, $1 }' "$LF_ARP" 2>/dev/null
-	[ -f "$LF_LEASES" ] && awk '{ print $2, $3 }' "$LF_LEASES"
-	ip -6 neigh show 2>/dev/null | awk '{ for (i = 1; i < NF; i++) if ($i == "lladdr") print $(i + 1), $1 }'
+	lan_neigh | awk '{ print $2, $3 }'
 }
 
 # current addresses of a zone's MAC devices: resolve_macs "<mac, mac>"
@@ -1412,11 +1431,7 @@ do_apitest() {
 
 # devices the router knows on the LAN: MAC, hostname, IPv4 and IPv6 addresses (JSON)
 do_devices() {
-	{
-		awk 'NR > 1 && $3 != "0x0" { print "ip", $4, $1 }' "$LF_ARP" 2>/dev/null
-		[ -f "$LF_LEASES" ] && awk '{ print "lease", $2, $3, $4 }' "$LF_LEASES"
-		ip -6 neigh show 2>/dev/null | awk '{ for (i = 1; i < NF; i++) if ($i == "lladdr") print "ip", $(i + 1), $1 }'
-	} | lfawk devices
+	lan_neigh | lfawk devices
 }
 
 # "<ip> <age> <packets/s>" for the servers a zone's devices sent to recently;
