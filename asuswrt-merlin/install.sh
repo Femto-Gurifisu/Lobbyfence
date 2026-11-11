@@ -298,14 +298,14 @@ echo "$FILES" | while IFS=: read -r src dst mode; do
 	cp "$SRC/$src" "$DEST/$dst.new" && chmod "$mode" "$DEST/$dst.new" && mv "$DEST/$dst.new" "$DEST/$dst" || exit 1
 done || die "copying the files failed (JFFS full?)"
 # the netem module for this router's model and kernel (if the package has
-# one), with the kernel configuration it was built for - LobbyFence compares
-# that with the running kernel's before it loads the module
+# one), with the list of its kernel's options - LobbyFence compares that
+# with the running kernel's configuration before it loads the module
 NETEM_FOR=""
 if have nvram; then
 	for m in "$(nvram get productid 2>/dev/null)" "$(nvram get odmpid 2>/dev/null)"; do
 		m="$(echo "$m" | tr 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' 'abcdefghijklmnopqrstuvwxyz')-$(uname -r)"
 		[ -f "$SRC/asuswrt-merlin/netem/$m/sch_netem.ko" ] || continue
-		mkdir -p "$DEST/netem/$m" && cp "$SRC/asuswrt-merlin/netem/$m/sch_netem.ko" "$SRC/asuswrt-merlin/netem/$m/kernel-config.gz" "$DEST/netem/$m/" \
+		mkdir -p "$DEST/netem/$m" && cp "$SRC/asuswrt-merlin/netem/$m/sch_netem.ko" "$SRC/asuswrt-merlin/netem/$m/kernel-options.gz" "$DEST/netem/$m/" \
 			|| die "copying the netem module failed (JFFS full?)"
 		NETEM_FOR="$m"
 	done

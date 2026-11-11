@@ -151,41 +151,58 @@ lag_chains_set() { # netem|nfqueue
 
 # ---- netem
 
-# the options C code sees in a kernel configuration (gzip file): NAME=value
-# (names and paths - the string options - and netem itself aside)
-kconfig_opts() {
-	gunzip -c "$1" 2>/dev/null | awk -F= '/^CONFIG_[A-Za-z0-9_]+=/ && $2 !~ /^"/ && $1 != "CONFIG_NET_SCH_NETEM"'
-}
-
-# a module LobbyFence carries is loaded only into the kernel configuration it
-# was built for: every option of the router's own (/proc/config.gz) must be
-# what kernel-config.gz next to the module says - a kernel configured
-# differently may lay out its structures differently from what the module
-# expects. (The firmware's own module, or one that is loaded already, isn't
-# LobbyFence's to check.) The differences are kept in netem.config for diag.
+# a module LobbyFence carries is loaded only into a kernel configured like the
+# one it was built for. kernel-options.gz next to the module lists that
+# kernel's options in two kinds:
+#   R NAME value  the option can reach the module's compilation - it is named
+#                 in netem's source, in a header netem includes or in the
+#                 makefiles that set the compiler's flags (the kernel's own
+#                 build system records this) - so the router's kernel
+#                 (/proc/config.gz) must have it at this value (n = off)
+#   K NAME        any other option that kernel has: free to differ
+# An option the router has on that the list doesn't have at all means a
+# kernel from other source: not loaded either. So the structures the module
+# works with are laid out as it expects, or it stays out. (The firmware's own
+# module, or one that is loaded already, isn't LobbyFence's to check.) What
+# differs is kept in netem.config for diag.
 netem_config_ok() {
 	local d r="$LF_RUN/netem.config" n
 	case "$LF_NETEM_KO" in "$LF_NETEM_DIR"/*) ;; *) return 0;; esac
 	grep -q '^sch_netem ' "${LF_PROC_MODULES:-/proc/modules}" 2>/dev/null && return 0
 	d="${LF_NETEM_KO%/*}"
-	if [ ! -f "$d/kernel-config.gz" ] || [ ! -f "$LF_PROC_CONFIG" ]; then
-		echo "unknown: $([ -f "$LF_PROC_CONFIG" ] && echo "$d/kernel-config.gz is missing" || echo "this kernel doesn't show its configuration ($LF_PROC_CONFIG)")" > "$r"
+	gunzip -c "$d/kernel-options.gz" > "$r.module" 2>/dev/null
+	gunzip -c "$LF_PROC_CONFIG" > "$r.router" 2>/dev/null
+	if ! grep -q '^R ' "$r.module" 2>/dev/null || ! grep -q '^CONFIG_' "$r.router" 2>/dev/null; then
+		echo "unknown: $(grep -q '^R ' "$r.module" 2>/dev/null && echo "this kernel doesn't show its configuration ($LF_PROC_CONFIG)" || echo "$d/kernel-options.gz is missing")" > "$r"
+		rm -f "$r.module" "$r.router"
 		log warning "lag simulator: the router's kernel configuration can't be compared with the netem module's - lf-lagd is used instead"
 		return 1
 	fi
-	kconfig_opts "$d/kernel-config.gz" > "$r.module"
-	kconfig_opts "$LF_PROC_CONFIG" > "$r.router"
-	awk -F= 'NR == FNR { m[$1] = $2; next } { r[$1] = $2 }
-		END {
-			for (k in m) { if (!(k in r)) print k ": module " m[k] ", router off"; else if (m[k] != r[k]) print k ": module " m[k] ", router " r[k] }
-			for (k in r) if (!(k in m)) print k ": module off, router " r[k]
-		}' "$r.module" "$r.router" | sort > "$r.diff"
-	n="$(grep -c . "$r.diff")"
-	if [ -s "$r.module" ] && [ -s "$r.router" ] && [ "$n" = 0 ]; then
-		rm -f "$r.module" "$r.router" "$r.diff"; echo ok > "$r"; return 0
-	fi
+	awk 'NR == FNR {
+			if ($1 == "R") { want[$2] = $3; if ($3 != "n") need[$2] = 1 }
+			if ($1 == "R" || $1 == "K") known[$2] = 1
+			next
+		}
+		/^CONFIG_[A-Za-z0-9_]+=/ {
+			i = index($0, "="); n = substr($0, 1, i - 1); v = substr($0, i + 1)
+			if (n == "CONFIG_NET_SCH_NETEM") next
+			if (!(n in known)) { print n ": router " v ", not in the kernel the module was built for"; next }
+			if (n in want) {
+				if (want[n] != v) print n ": module " (want[n] == "n" ? "off" : want[n]) ", router " v
+				delete need[n]
+			}
+		}
+		END { for (n in need) print n ": module " want[n] ", router off"; print "=compared" }' "$r.module" "$r.router" | sort > "$r.diff"
 	rm -f "$r.module" "$r.router"
-	{ echo "differs: $n options"; cat "$r.diff"; } > "$r"; rm -f "$r.diff"
+	# (no last line: the comparison didn't run to its end - no result, no module)
+	if ! grep -qx '=compared' "$r.diff"; then
+		echo "unknown: the comparison could not be made" > "$r"; rm -f "$r.diff"
+		log warning "lag simulator: the router's kernel configuration can't be compared with the netem module's - lf-lagd is used instead"
+		return 1
+	fi
+	n="$(grep -c '^CONFIG_' "$r.diff")"
+	if [ "$n" = 0 ]; then rm -f "$r.diff"; echo ok > "$r"; return 0; fi
+	{ echo "differs: $n options"; grep '^CONFIG_' "$r.diff"; } > "$r"; rm -f "$r.diff"
 	log warning "lag simulator: this firmware's kernel is configured differently from the one the netem module was built for ($n options, first: $(sed -n 2p "$r")) - lf-lagd is used instead"
 	return 1
 }

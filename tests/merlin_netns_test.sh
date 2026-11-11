@@ -178,10 +178,10 @@ inr pidof lf-lagd >/dev/null && pass "the next pass starts lf-lagd again" || fai
 # the way the kernel does, so the real kernel is never asked)
 echo GT-AXE16000 > "$W/nvram/productid"
 KD="$LF_HOME/netem/gt-axe16000-$(uname -r)"; mkdir -p "$KD"
-cp "$HERE/../asuswrt-merlin/netem/gt-axe16000-4.19.183/sch_netem.ko" "$HERE/../asuswrt-merlin/netem/gt-axe16000-4.19.183/kernel-config.gz" "$KD/"
+cp "$HERE/../asuswrt-merlin/netem/gt-axe16000-4.19.183/sch_netem.ko" "$HERE/../asuswrt-merlin/netem/gt-axe16000-4.19.183/kernel-options.gz" "$KD/"
 # (the router's /proc/config.gz: first one that isn't the module's - the
 # module must not even be offered to the kernel - then the module's own)
-gunzip -c "$KD/kernel-config.gz" | sed 's/^CONFIG_NET_SWITCHDEV=y$/# CONFIG_NET_SWITCHDEV is not set/' | gzip -c > "$W/proc-config.gz"
+gunzip -c "$HERE/../asuswrt-merlin/netem/gt-axe16000-4.19.183/kernel-config.gz" | sed 's/^CONFIG_NET_SWITCHDEV=y$/# CONFIG_NET_SWITCHDEV is not set/' | gzip -c > "$W/proc-config.gz"
 export LF_PROC_CONFIG="$W/proc-config.gz"
 printf '#!/bin/sh\necho "insmod $*" >> %s/insmod.log\necho "insmod: cannot insert %s: Exec format error" >&2\nexit 1\n' "$W" "$1" > "$W/bin/insmod"
 printf '#!/bin/sh\necho "tc $*" >> %s/tc.log\n' "$W" > "$W/bin/tc"      # (the test system has no tc; Merlin has)
@@ -190,11 +190,11 @@ out="$(page ops '[["set","game","lag_direction","both"]]')"
 js "assert d['code']==0, d" "$out" || fail "netem apply: $out"
 [ ! -f "$W/insmod.log" ] && [ "$(cat "$LF_RUN/lag.kind")" = nfqueue ] && [ "$(cat "$LF_RUN/lag.why")" = netemconfig ] && inr pidof lf-lagd >/dev/null \
 	&& grep -q "CONFIG_NET_SWITCHDEV: module y, router off" "$LF_RUN/netem.config" \
-	&& pass "a kernel configured differently from the module's: module never loaded, lf-lagd carries the lag" || fail "config check: $(cat "$LF_RUN/lag.kind" "$LF_RUN/lag.why" "$LF_RUN/netem.config" "$W/insmod.log" 2>&1)"
-gunzip -c "$KD/kernel-config.gz" | sed 's/^CONFIG_NET_SCH_NETEM=m$/# CONFIG_NET_SCH_NETEM is not set/' | gzip -c > "$W/proc-config.gz"
+	&& pass "a kernel configured differently where it matters to the module: module never loaded, lf-lagd carries the lag" || fail "config check: $(cat "$LF_RUN/lag.kind" "$LF_RUN/lag.why" "$LF_RUN/netem.config" "$W/insmod.log" 2>&1)"
+gunzip -c "$HERE/../asuswrt-merlin/netem/gt-axe16000-4.19.183/kernel-config.gz" | sed 's/^CONFIG_NET_SCH_NETEM=m$/# CONFIG_NET_SCH_NETEM is not set/; s/^CONFIG_CRYPTO_MD4=m$/CONFIG_CRYPTO_MD4=y/' | gzip -c > "$W/proc-config.gz"
 out="$(page ops '[["set","game","lag_direction","down"]]')"; out="$(page ops '[["set","game","lag_direction","both"]]')"
 js "assert d['code']==0, d" "$out" || fail "netem apply 2: $out"
-grep -q "sch_netem.ko" "$W/insmod.log" 2>/dev/null && pass "netem tried for the matching model with the matching kernel configuration" || fail "netem not tried: $(cat "$W/insmod.log" 2>&1)"
+grep -q "sch_netem.ko" "$W/insmod.log" 2>/dev/null && pass "netem tried for the matching model on a kernel that differs only where it can't matter" || fail "netem not tried: $(cat "$W/insmod.log" 2>&1)"
 [ "$(cat "$LF_RUN/lag.kind")" = nfqueue ] && [ "$(cat "$LF_RUN/lag.why")" = netemrefused ] && inr pidof lf-lagd >/dev/null \
 	&& pass "module refused: lf-lagd carries the lag instead" || fail "fallback: $(cat "$LF_RUN/lag.kind" "$LF_RUN/lag.why" 2>&1)"
 lag="$(rtt 3074 45.10.0.1)"

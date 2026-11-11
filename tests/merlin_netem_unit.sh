@@ -15,7 +15,7 @@ for t in tc ip ping insmod iptables ip6tables iptables-restore ip6tables-restore
 	ln -s "$HERE/fake_merlin_netem.sh" "$W/bin/$t"
 done
 for d in "$REPO"/asuswrt-merlin/netem/*-[0-9]*; do
-	mkdir -p "$W/home/netem/${d##*/}"; cp "$d/sch_netem.ko" "$d/kernel-config.gz" "$W/home/netem/${d##*/}/"
+	mkdir -p "$W/home/netem/${d##*/}"; cp "$d/sch_netem.ko" "$d/kernel-options.gz" "$W/home/netem/${d##*/}/"
 done
 # the router's own /proc/config.gz: the module's configuration without netem
 # (as the firmware has it), or changed by the sed expression given
@@ -65,17 +65,32 @@ for d in "$REPO"/asuswrt-merlin/netem/*-[0-9]*; do
 	# found for its model and kernel, its configuration is this kernel's, and
 	# it is the module the checksum file names
 	run M "echo $kv > kver; proc_config $d" 'echo "ko=$(merlin_netem_ko)"; netem_config_ok && echo config-ok' "$mdl"
+	D="$REPO/asuswrt-merlin/netem/$d"
 	grep -qx "ko=$W/home/netem/$d/sch_netem.ko" "$W/out.M" && grep -qx config-ok "$W/out.M" \
-		&& (cd "$REPO/asuswrt-merlin/netem/$d" && sha256sum -c SHA256SUMS >/dev/null 2>&1) \
-		&& gunzip -c "$REPO/asuswrt-merlin/netem/$d/kernel-config.gz" | grep -qx "CONFIG_NET_SCH_NETEM=m" \
-		&& gunzip -c "$REPO/asuswrt-merlin/netem/$d/kernel-config.gz" | grep -q "^# Linux/arm.* $kv Kernel Configuration" \
-		&& strings -a "$REPO/asuswrt-merlin/netem/$d/sch_netem.ko" | grep -q "^vermagic=$kv SMP preempt mod_unload " \
+		&& (cd "$D" && sha256sum -c SHA256SUMS >/dev/null 2>&1) \
+		&& gunzip -c "$D/kernel-config.gz" | grep -qx "CONFIG_NET_SCH_NETEM=m" \
+		&& gunzip -c "$D/kernel-config.gz" | grep -q "^# Linux/arm.* $kv Kernel Configuration" \
+		&& strings -a "$D/sch_netem.ko" | grep -q "^vermagic=$kv SMP preempt mod_unload " \
 		&& ok "$mdl (kernel $kv): its netem module is found and fits its kernel configuration" || no "$mdl: $(cat "$W/out.M")"
+	# the list of options is that configuration's: every option once, the
+	# compared ones with its value, and the ones any module depends on among them
+	gunzip -c "$D/kernel-options.gz" > "$W/opts"; gunzip -c "$D/kernel-config.gz" > "$W/cfg"
+	awk 'NR == FNR { if ($1 == "R") v[$2] = $3; else if ($1 != "K") bad++; if ($2 in k) bad++; k[$2] = 1; n1++; next }
+		{ n = "" }
+		/^CONFIG_[A-Za-z0-9_]+=/ { i = index($0, "="); n = substr($0, 1, i - 1); val = substr($0, i + 1) }
+		/^# CONFIG_[A-Za-z0-9_]+ is not set$/ { n = $2; val = "n" }
+		n != "" && n != "CONFIG_NET_SCH_NETEM" { n2++; if (!(n in k)) bad++; else if ((n in v) && v[n] != val) bad++; if ((n in v) && val ~ /^"/) bad++ }
+		END { exit !(n1 == n2 && bad == 0 && n1 > 2000) }' "$W/opts" "$W/cfg" \
+		&& [ "$(grep -c '^R ' "$W/opts")" -ge 300 ] && grep -qx "R CONFIG_SMP y" "$W/opts" && grep -qx "R CONFIG_PREEMPT y" "$W/opts" \
+		&& grep -qx "R CONFIG_MODVERSIONS n" "$W/opts" && grep -q "^R CONFIG_NR_CPUS [0-9]" "$W/opts" && grep -qx "R CONFIG_BLOG y" "$W/opts" \
+		&& grep -qx "R CONFIG_NET_SCHED y" "$W/opts" && grep -qx "R CONFIG_BCM_KF_NBUFF y" "$W/opts" && grep -qx "R CONFIG_DEBUG_SPINLOCK n" "$W/opts" \
+		&& ! grep -q "NET_SCH_NETEM" "$W/opts" \
+		|| no "$mdl: kernel-options.gz doesn't fit kernel-config.gz"
 	# the same model on another kernel version: no module
 	run M 'echo 4.19.999 > kver' 'echo "ko=$(merlin_netem_ko)"' "$mdl"
 	grep -qx "ko=" "$W/out.M" || no "$mdl on another kernel: $(cat "$W/out.M")"
 done
-[ "$n" = 18 ] && ok "18 models carry a module, none is used on another kernel version" || no "module folders: $n"
+[ "$n" = 18 ] && ok "18 models carry a module with its kernel's options, none is used on another kernel version" || no "module folders: $n"
 run M ':' 'echo "ko=$(merlin_netem_ko)"' 'ZENWIFI_PRO_XT12' 'XT12'
 grep -qx "ko=$W/home/netem/xt12-4.19.183/sch_netem.ko" "$W/out.M" && ok "found by odmpid when productid is another name" || no "odmpid: $(cat "$W/out.M")"
 run M ':' 'echo "ko=$(merlin_netem_ko)"' 'RT-AX56U'
@@ -135,21 +150,32 @@ run D2 'echo "other-boot 50" > "'"$W"'/home/.netem-loading"' 'netem_id > "$LF_HO
 run E 'touch insmod-fail' 'ipt_lag_apply'
 [ "$(cat "$r/lag.why")" = netemrefused ] && [ "$(cat "$r/lag.kind")" = nfqueue ] && [ ! -f "$W/home/.netem-loading" ] && ok "module refused: lf-lagd, no trial left behind" || no "refused: $(cat "$r/log")"
 
-# --- E2. the firmware's kernel is configured differently from the module's: never loaded
+# --- E2. the firmware's kernel differs in options that reach the module: never loaded
 run E2 'proc_config gt-axe16000-4.19.183 "s/^CONFIG_NET_SWITCHDEV=y$/# CONFIG_NET_SWITCHDEV is not set/; s/^CONFIG_NR_CPUS=.*/CONFIG_NR_CPUS=8/"' 'ipt_lag_apply; echo "state=$(netem_state)"; fw_diag'
 ! grep -q "^insmod\|lfnetem0" "$f/calls.log" && [ "$(cat "$r/lag.why")" = netemconfig ] && [ "$(cat "$r/lag.kind")" = nfqueue ] && [ ! -f "$W/home/.netem-loading" ] \
-	&& grep -q "state=other-kernel-config" "$W/out.E2" && ok "another kernel configuration: module never loaded, lf-lagd, no trial" || no "E2: $(cat "$W/out.E2" "$f/calls.log" "$r/log" 2>&1)"
+	&& grep -q "state=other-kernel-config" "$W/out.E2" && ok "a kernel configured differently where it matters: module never loaded, lf-lagd, no trial" || no "E2: $(cat "$W/out.E2" "$f/calls.log" "$r/log" 2>&1)"
 grep -q "netem kernel configuration: differs: 2 options" "$W/out.E2" && grep -q "CONFIG_NET_SWITCHDEV: module y, router off" "$W/out.E2" && grep -q "CONFIG_NR_CPUS: module [0-9]*, router 8" "$W/out.E2" \
 	&& grep -q "configured differently .*2 options" "$r/log" && ok "...diag and the log name the options that differ" || no "E2 diag: $(cat "$W/out.E2" "$r/log")"
-run E3 'proc_config gt-axe16000-4.19.183 "s/^# CONFIG_NET_SCH_DRR is not set$/CONFIG_NET_SCH_DRR=m/"' 'ipt_lag_apply'
-[ "$(cat "$r/lag.why")" = netemconfig ] && grep -q "CONFIG_NET_SCH_DRR: module off, router m" "$r/netem.config" && ok "an option only the router has counts too" || no "E3: $(cat "$r/netem.config" "$r/log" 2>&1)"
-run E4 'proc_config gt-axe16000-4.19.183 "s/^CONFIG_DEFAULT_HOSTNAME=.*/CONFIG_DEFAULT_HOSTNAME=\"router\"/; s/^# CONFIG_NET_SCH_NETEM is not set/CONFIG_NET_SCH_NETEM=y/"; echo "# comment" | gzip -c >> config.gz' 'ipt_lag_apply'
-[ "$(cat "$r/lag.kind")" = netem ] && [ "$(cat "$r/netem.config")" = ok ] && ok "names (string options), comments and netem's own option don't count" || no "E4: $(cat "$r/netem.config" "$r/log" 2>&1)"
+run E3 'proc_config gt-axe16000-4.19.183 "s/^# CONFIG_DEBUG_SPINLOCK is not set$/CONFIG_DEBUG_SPINLOCK=y/"' 'ipt_lag_apply'
+[ "$(cat "$r/lag.why")" = netemconfig ] && grep -q "CONFIG_DEBUG_SPINLOCK: module off, router y" "$r/netem.config" && ok "an option that matters, on only on the router, counts too" || no "E3: $(cat "$r/netem.config" "$r/log" 2>&1)"
+run E3b 'proc_config gt-axe16000-4.19.183; { gunzip -c config.gz; echo "CONFIG_BCM_SOME_NEW_FEATURE=y"; } | gzip -c > c2.gz; mv c2.gz config.gz' 'ipt_lag_apply'
+! grep -q "^insmod" "$f/calls.log" && [ "$(cat "$r/lag.why")" = netemconfig ] && grep -q "CONFIG_BCM_SOME_NEW_FEATURE: router y, not in the kernel the module was built for" "$r/netem.config" \
+	&& ok "an option the module's kernel doesn't have at all (other kernel source): not loaded" || no "E3b: $(cat "$r/netem.config" "$r/log" 2>&1)"
+# (what Merlin 3004.388 has for this model: MD4 built into the kernel - in the
+# 3006.102 kernel the module was built for it is a module; nothing netem is
+# compiled from names it)
+run E4 'proc_config gt-axe16000-4.19.183 "s/^CONFIG_CRYPTO_MD4=m$/CONFIG_CRYPTO_MD4=y/; s/^CONFIG_DEFAULT_HOSTNAME=.*/CONFIG_DEFAULT_HOSTNAME=\"router\"/; s/^CONFIG_USB_STORAGE=.*/# CONFIG_USB_STORAGE is not set/; s/^# CONFIG_NET_SCH_NETEM is not set/CONFIG_NET_SCH_NETEM=y/"; echo "# comment" | gzip -c >> config.gz' 'ipt_lag_apply'
+gunzip -c "$f/config.gz" | grep -qx "CONFIG_CRYPTO_MD4=y" && ! gunzip -c "$f/config.gz" | grep -q "^CONFIG_USB_STORAGE=" \
+	&& [ "$(cat "$r/lag.kind")" = netem ] && [ "$(cat "$r/netem.config")" = ok ] && ok "options that can't reach the module (a driver, a cipher, a name) may differ: netem is used" || no "E4: $(cat "$r/netem.config" "$r/log" 2>&1)"
 run E5 'rm -f config.gz' 'ipt_lag_apply; echo "state=$(netem_state)"'
 ! grep -q "^insmod" "$f/calls.log" && [ "$(cat "$r/lag.why")" = netemconfig ] && grep -q "^unknown: " "$r/netem.config" && ok "a kernel that doesn't show its configuration: module not loaded" || no "E5: $(cat "$r/netem.config" "$f/calls.log" 2>&1)"
-run E6 'rm -f "'"$W"'/home/netem/gt-axe16000-4.19.183/kernel-config.gz"' 'ipt_lag_apply'
-! grep -q "^insmod" "$f/calls.log" && [ "$(cat "$r/lag.why")" = netemconfig ] && ok "a module without its configuration file: not loaded" || no "E6: $(cat "$f/calls.log")"
-cp "$REPO/asuswrt-merlin/netem/gt-axe16000-4.19.183/kernel-config.gz" "$W/home/netem/gt-axe16000-4.19.183/"
+run E6 'rm -f "'"$W"'/home/netem/gt-axe16000-4.19.183/kernel-options.gz"' 'ipt_lag_apply'
+! grep -q "^insmod" "$f/calls.log" && [ "$(cat "$r/lag.why")" = netemconfig ] && grep -q "kernel-options.gz is missing" "$r/netem.config" && ok "a module without its list of options: not loaded" || no "E6: $(cat "$f/calls.log")"
+cp "$REPO/asuswrt-merlin/netem/gt-axe16000-4.19.183/kernel-options.gz" "$W/home/netem/gt-axe16000-4.19.183/"
+# (awk stood in by one that fails: the comparison gives no result)
+run E6b 'printf "#!/bin/sh\nexit 1\n" > "'"$W"'/bin/awk"; chmod 755 "'"$W"'/bin/awk"' 'netem_config_ok && echo config-ok; cat "$LF_RUN/netem.config"'
+rm -f "$W/bin/awk"
+! grep -q config-ok "$W/out.E6b" && grep -q "^unknown: the comparison could not be made" "$W/out.E6b" && ok "the comparison itself failing is not a pass: module not loaded" || no "E6b: $(cat "$W/out.E6b")"
 run E7 'rm -f config.gz; echo "sch_netem 24576 0 - Live 0xffffffc000a00000" > proc.modules' 'ipt_lag_apply'
 [ "$(cat "$r/lag.kind")" = netem ] && ! grep -q "^insmod" "$f/calls.log" && ok "netem already in the kernel (the firmware's own): used without the check" || no "E7: $(cat "$r/log" 2>&1)"
 

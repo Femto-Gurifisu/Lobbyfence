@@ -54,11 +54,13 @@ list() { # platform -> the package's files, one per line
 			echo asuswrt-merlin/lagd/build.sh
 			echo asuswrt-merlin/netem/README.md
 			echo asuswrt-merlin/netem/dwarf_layouts.py
+			echo asuswrt-merlin/netem/kernel_options.py
 			for d in asuswrt-merlin/netem/*/; do
 				[ -f "$d/sch_netem.ko" ] || continue
 				echo "${d}sch_netem.ko"
 				echo "${d}SHA256SUMS"
 				echo "${d}kernel-config.gz"
+				echo "${d}kernel-options.gz"
 			done;;
 		ddwrt)
 			echo ddwrt/install.sh

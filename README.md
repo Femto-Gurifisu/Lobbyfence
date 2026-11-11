@@ -387,7 +387,8 @@ What is different on Asuswrt-Merlin:
   accelerated.
 * **Lag simulator** - two ways, picked automatically:
   * **netem** (the kernel's own network emulator, the same as on OpenWrt and
-    FreshTomato) on every model Merlin builds firmware for today:
+    FreshTomato) on the models Merlin builds firmware for today (all
+    except the GT-BE19000AI):
 
     | Models | Kernel |
     | --- | --- |
@@ -406,9 +407,15 @@ What is different on Asuswrt-Merlin:
     module is used only on a matching model and kernel (`nvram get
     productid` or `odmpid`, `uname -r`), and it has to pass four safety
     steps:
-    1. The router's own kernel configuration (`/proc/config.gz`) must be
-       exactly the one the module was built for. If one option differs -
-       another firmware build, say - the module is never loaded.
+    1. The router's kernel must be configured like the one the module was
+       built for. The kernel's own build system records which options can
+       reach netem's compilation (340 to 490 of about 3,000, depending on
+       the model); each of them must have the same value in the router's
+       `/proc/config.gz`, and the router must not have an option on that
+       the module's kernel doesn't have at all. Otherwise - another
+       firmware build, say - the module is never loaded. Options that
+       can't reach netem (a USB driver, a cipher) may differ, so the same
+       module serves the Merlin releases whose kernels differ only there.
     2. A self-test once per boot, on a private test interface, before it
        touches real traffic.
     3. A guard on every boot it is used: if the router restarts while
@@ -1123,8 +1130,9 @@ problems unlikely, not impossible.
   `ping` and `insmod`. It covers:
   - which module is picked: one per model and kernel version, each fitting
     its checksum and kernel configuration
-  - the kernel configuration check (an option that differs, one only the
-    router has, no `/proc/config.gz`) - the module is never loaded
+  - the kernel configuration check: an option that matters differs, the
+    router has one the module's kernel doesn't know, no `/proc/config.gz` -
+    the module is never loaded; options that can't reach netem may differ
   - the self-test on a private test interface (dummy, or ifb on kernel 4.1)
     before any real device gets a queue
   - the queues and CLASSIFY bands
