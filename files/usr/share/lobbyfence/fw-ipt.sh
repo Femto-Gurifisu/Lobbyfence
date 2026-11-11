@@ -170,31 +170,77 @@ ipt_restore() { # 4|6 file [quiet]
 	rm -f "$LF_RUN/ipt.err"
 }
 
-# load one family's rules file. Some FreshTomato builds' ip6tables can't use
-# the SET target (adding servers to an ipset): IPv6 then runs without it and
-# its servers are learned from the connection table (v6_from_conntrack).
-# Strict zones drop new IPv6 servers before they reach that table, so the game
-# uses IPv4 there. IPv6 problems never stop IPv4.
-ipt_load() { # 4|6 file
-	local f="$1" file="$2"
-	if [ "$f" = 6 ] && [ -f "$LF_RUN/v6.noset" ]; then
-		sed '/ -j SET /d' "$file" > "$file.noset"
-		file="$file.noset"
+# what a refused rules file was refused for, in one line: the tool's message
+# and - when it names a line - that line of the file
+ipt_err_text() { # file
+	local n
+	n="$(sed -n 's/.*line \([0-9][0-9]*\) failed.*/\1/p' "$LF_RUN/ipt.err" 2>/dev/null | head -n 1)"
+	printf '%s' "$(head -n 2 "$LF_RUN/ipt.err" 2>/dev/null | tr '\n' ' ')"
+	is_uint "$n" && printf '(line %s of the rules: %s)' "$n" "$(sed -n "${n}p" "$1" 2>/dev/null)"
+}
+
+# IPv6 rules for what this firmware's ip6tables can do -> the file to load
+#   v6.noset  no SET target (some FreshTomato builds): the lines that add
+#             servers to sets go, and what only works through them - the
+#             "open for server tests" burst (its jump on new connections, the
+#             checks of its set). IPv6 servers are then learned from the
+#             connection table (v6_from_conntrack).
+#   v6.noct   no connection-state match (IPv6 is switched off in the firmware,
+#             so its connection tracking isn't loaded): the lines with it go
+ipt_v6_file() { # file
+	if [ -f "$LF_RUN/v6.noset" ]; then
+		sed -e '/ -j SET /d' -e '/ -m conntrack /d' -e '/ --match-set lf_[A-Za-z0-9_]*_op6 /d' "$1" > "$1.noset"
+		echo "$1.noset"
+	elif [ -f "$LF_RUN/v6.noct" ]; then
+		sed '/ -m conntrack /d' "$1" > "$1.noct"
+		echo "$1.noct"
+	else
+		echo "$1"
 	fi
-	ipt_restore "$f" "$file" quiet && return 0
+}
+
+# load one family's rules file. When ip6tables refuses the IPv6 rules, they
+# are tried again without what it can't do (ipt_v6_file); what is left still
+# filters. Strict zones drop new IPv6 servers before they reach the connection
+# table, so without the SET target the game uses IPv4 there. IPv6 problems
+# never stop IPv4.
+ipt_load() { # 4|6 file
+	local f="$1" file="$2" try
 	if [ "$f" != 6 ]; then
-		log err "iptables-restore rejected $file: $(head -n 3 "$LF_RUN/ipt.err" | tr '\n' ' ')"
+		ipt_restore 4 "$file" quiet && return 0
+		log err "iptables-restore rejected $file: $(ipt_err_text "$file")"
 		return 1
 	fi
+	try="$(ipt_v6_file "$file")"
+	ipt_restore 6 "$try" quiet && { rm -f "$LF_RUN/v6.refused"; return 0; }
 	if [ ! -f "$LF_RUN/v6.noset" ] && grep -q "SET" "$LF_RUN/ipt.err" 2>/dev/null; then
-		sed '/ -j SET /d' "$file" > "$file.noset"
-		if ipt_restore 6 "$file.noset" quiet; then
-			: > "$LF_RUN/v6.noset"
+		: > "$LF_RUN/v6.noset"
+		try="$(ipt_v6_file "$file")"
+		if ipt_restore 6 "$try" quiet; then
 			log warning "IPv6: this firmware's ip6tables can't add servers to ipsets - IPv6 game servers are learned from the connection list instead (strict zones block new IPv6 servers before they can be learned, so the game uses IPv4 there)"
+			rm -f "$LF_RUN/v6.refused"
 			return 0
 		fi
+		rm -f "$LF_RUN/v6.noset"
+	elif [ ! -f "$LF_RUN/v6.noset" ] && [ ! -f "$LF_RUN/v6.noct" ]; then
+		: > "$LF_RUN/v6.noct"
+		try="$(ipt_v6_file "$file")"
+		if ipt_restore 6 "$try" quiet; then
+			log warning "IPv6: this firmware's ip6tables refuses rules that look at the state of a connection (IPv6 switched off in the firmware?) - IPv6 is filtered without them: servers that contact the device first are not learned, and \"open for server tests\" does not open IPv6"
+			rm -f "$LF_RUN/v6.refused"
+			return 0
+		fi
+		rm -f "$LF_RUN/v6.noct"
 	fi
-	log err "IPv6 rules rejected - IPv6 traffic is not filtered: $(head -n 2 "$LF_RUN/ipt.err" | tr '\n' ' ')"
+	log err "IPv6 rules rejected - IPv6 traffic is not filtered: $(ipt_err_text "$try")"
+	# for the debug report: what was refused, and what the kernel said
+	{
+		echo "refused $(date '+%F %T' 2>/dev/null): $(ipt_err_text "$try")"
+		echo "kernel messages (last 5):"
+		dmesg 2>/dev/null | tail -n 5 | sed 's/^/  /'
+		echo "the rules:"
+		awk '{ printf "%4d  %s\n", NR, $0 }' "$try" 2>/dev/null | head -n 120
+	} > "$LF_RUN/v6.refused" 2>/dev/null
 	: > "$LF_RUN/v6.off"
 	ipt_remove 6
 	return 0
@@ -507,6 +553,8 @@ fw_build() {
 	fw_modules
 	# servers stay in the "seen" sets for two learning passes (min. 2 minutes)
 	SEEN_TIMEOUT=$((G_INTERVAL * 2)); [ "$SEEN_TIMEOUT" -ge 120 ] || SEEN_TIMEOUT=120
+	# (IPv6 refused earlier: every apply tries again - the settings may have changed)
+	rm -f "$LF_RUN/v6.off"
 	FW_V6=""; fw_v6
 	$IPSET list -t 2>/dev/null | lfawk ipset_headers > "$LF_RUN/sets.have"
 	: > "$LF_RUN/sets.want"
@@ -848,6 +896,8 @@ fw_remove() {
 		case "$n" in lf_*) $IPSET destroy "$n" 2>/dev/null;; esac
 	done
 	rm -f "$LF_RUN/ctf.on" "$LF_RUN/sets.last"
+	# (what ip6tables could not do is found out again at the next start)
+	rm -f "$LF_RUN/v6.off" "$LF_RUN/v6.noset" "$LF_RUN/v6.noct"
 	ipt_lag_clear
 	netem_trial_stop
 	return 0
@@ -990,7 +1040,7 @@ counters_load() {
 
 fw_diag() {
 	fw_v6
-	echo "IPv6: $(if [ -f "$LF_RUN/v6.off" ]; then echo 'not filtered (ip6tables refused the rules)'; elif [ "$FW_V6" != 1 ]; then echo 'not in use'; elif [ -f "$LF_RUN/v6.noset" ]; then echo 'filtered, servers learned from the connection table'; else echo filtered; fi)"
+	echo "IPv6: $(if [ -f "$LF_RUN/v6.off" ]; then echo 'not filtered (ip6tables refused the rules)'; elif [ "$FW_V6" != 1 ]; then echo 'not in use'; elif [ -f "$LF_RUN/v6.noset" ]; then echo 'filtered, servers learned from the connection table'; elif [ -f "$LF_RUN/v6.noct" ]; then echo 'filtered, without the rules that look at connection states'; else echo filtered; fi)"
 	echo "hardware acceleration (CTF): $(fw_ctf && echo 'on - game devices are marked so their traffic is still checked' || echo off)"
 	echo "lag simulator: $([ "$LAG_SUPPORTED" = 1 ] && echo "netem module for $(uname -r) $(grep -q '^sch_netem ' "${LF_PROC_MODULES:-/proc/modules}" && echo loaded || echo 'not loaded')" || echo "no netem module for $(uname -r)")"
 }
@@ -1019,4 +1069,10 @@ fw_debug() {
 	echo "lag simulator: $([ "$LAG_SUPPORTED" = 1 ] && echo supported || echo 'not supported')$(grep -q '^sch_netem ' "${LF_PROC_MODULES:-/proc/modules}" 2>/dev/null && echo ', netem loaded')"
 	have "$TC" && $TC qdisc show 2>&1 | head -n 40
 	echo "IPv6 state: $(ls "$LF_RUN"/v6.* 2>/dev/null | sed 's#.*/##' | tr '\n' ' ')"
+	if [ -f "$LF_RUN/v6.refused" ]; then
+		echo
+		echo "IPv6 rules that ip6tables refused:"
+		head -n 140 "$LF_RUN/v6.refused"
+	fi
+	return 0
 }

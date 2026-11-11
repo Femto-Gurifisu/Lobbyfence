@@ -84,16 +84,68 @@ daemon_start() {
 	echo "$!" > "$LF_RUN/daemon.pid"
 }
 
+# is this pid the learning loop?
+loop_is() {
+	case "$(tr '\000' ' ' 2>/dev/null < "/proc/$1/cmdline")" in
+		*"$MAIN daemon "*) return 0;;
+	esac
+	return 1
+}
+
 daemon_stop() {
-	local p n=0
-	p="$(daemon_pid)"
-	[ -n "$p" ] || return 0
-	kill "$p" 2>/dev/null
-	# it saves the learned servers on the way out
-	while [ -n "$(daemon_pid)" ] && [ "$n" -lt 30 ]; do sleep 1; n=$((n + 1)); done
-	p="$(daemon_pid)"
-	[ -n "$p" ] && kill -9 "$p" 2>/dev/null
+	local p n i=0
+	# (waits for the loop it told to stop, not for whatever the pid file names
+	# by then; a loop that was started meanwhile is stopped as well)
+	while p="$(daemon_pid)" && [ -n "$p" ] && [ "$i" -lt 3 ]; do
+		kill "$p" 2>/dev/null
+		# it saves the learned servers on the way out
+		n=0
+		while loop_is "$p" && [ "$n" -lt 30 ]; do sleep 1; n=$((n + 1)); done
+		loop_is "$p" && kill -9 "$p" 2>/dev/null
+		i=$((i + 1))
+	done
 	rm -f "$LF_RUN/daemon.pid"
+}
+
+# start, stop, restart and reload run one at a time, and the watchdog stays
+# out of their way. (It used to start a second learning loop in the moment a
+# reload had stopped the first: the reload then waited 30 s, stopped the new
+# one by force - and that was put on record as a crash.)
+svc_lock() { # [seconds to wait for the one at work: 120; stop waits 5 - a router shutting down waits for it]
+	local n=0 p was="-" max="${1:-120}"
+	run_dir
+	while ! mkdir "$LF_RUN/svc.lock" 2>/dev/null; do
+		p="$(cat "$LF_RUN/svc.lock/pid" 2>/dev/null)"
+		[ "$p" = "$$" ] && return 0
+		[ "$p" = "$was" ] || { was="$p"; n=0; }
+		if { [ -n "$p" ] && ! kill -0 "$p" 2>/dev/null; } || [ "$n" -ge "$max" ]; then
+			# (only while it still is that one's lock: another command may have taken it over since)
+			if mkdir "$LF_RUN/svc.break" 2>/dev/null; then
+				[ "$(cat "$LF_RUN/svc.lock/pid" 2>/dev/null)" = "$p" ] && rm -rf "$LF_RUN/svc.lock"
+				rmdir "$LF_RUN/svc.break" 2>/dev/null
+				n=0
+				continue
+			fi
+			[ "$n" -lt $((max + 5)) ] || rmdir "$LF_RUN/svc.break" 2>/dev/null
+		fi
+		n=$((n + 1))
+		sleep 1
+	done
+	echo "$$" > "$LF_RUN/svc.lock/pid"
+}
+svc_unlock() {
+	[ "$(cat "$LF_RUN/svc.lock/pid" 2>/dev/null)" = "$$" ] && rm -rf "$LF_RUN/svc.lock"
+	return 0
+}
+# one of them is at work right now
+svc_busy() {
+	local p
+	[ -d "$LF_RUN/svc.lock" ] || return 1
+	p="$(cat "$LF_RUN/svc.lock/pid" 2>/dev/null)"
+	[ -n "$p" ] || { sleep 1; p="$(cat "$LF_RUN/svc.lock/pid" 2>/dev/null)"; }
+	[ -n "$p" ] && kill -0 "$p" 2>/dev/null && return 0
+	rm -rf "$LF_RUN/svc.lock"          # (left behind by one that was stopped half way)
+	return 1
 }
 
 cron_on() { have cru && cru a lobbyfence "* * * * * $SELF watchdog"; }
@@ -370,15 +422,17 @@ do_stop() {
 }
 
 case "$1" in
-	start) do_start;;
-	stop) do_stop;;
-	restart) do_stop; do_start;;
+	start) svc_lock; do_start; svc_unlock;;
+	stop) svc_lock 5; do_stop; svc_unlock;;
+	restart) svc_lock; do_stop; do_start; svc_unlock;;
 	reload)
+		svc_lock
 		# the result of applying is the answer (the web page shows a failure)
 		"$MAIN" apply; rc=$?
 		daemon_stop
 		enabled && daemon_start
 		cron_on
+		svc_unlock
 		web_data
 		[ "$rc" = 0 ] || echo "the new settings are saved, but the router could not put them into effect - filtering is off until it can (LobbyFence keeps trying, on every learning pass). See System Log (lines with \"lobbyfence\")" >&2
 		exit $rc;;
@@ -389,6 +443,8 @@ case "$1" in
 	watchdog)
 		[ -f "$LF_RUN/stopped" ] && exit 0
 		[ -L "$WEB/d" ] || web_install
+		# (a start, stop or reload is at work: the loop is theirs right now)
+		svc_busy && exit 0
 		if enabled && [ -z "$(daemon_pid)" ]; then
 			log warning "learning loop was not running - starting it again"
 			daemon_start

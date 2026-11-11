@@ -132,24 +132,48 @@ ensure_dirs() {
 }
 
 # lock_acquire [seconds]: waits for another LobbyFence command (90 s at most,
-# then takes the lock over - stop uses 20 s: a router shutting down waits for it)
+# then takes the lock over - stop uses 20 s: a router shutting down waits for
+# it). The wait counts per holder: when another command gets the lock first,
+# it starts again (with four times the limit as the end of all waiting).
 lock_acquire() {
-	local tries=0 pid max="${1:-90}"
+	local tries=0 total=0 pid was="-" max="${1:-90}"
 	ensure_dirs
 	while ! mkdir "$LF_RUN/lock" 2>/dev/null; do
 		pid="$(cat "$LF_RUN/lock/pid" 2>/dev/null)"
 		[ "$pid" = "$$" ] && return 0
+		[ "$pid" = "$was" ] || { was="$pid"; tries=0; }
 		if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
-			rm -rf "$LF_RUN/lock"; continue
+			lock_break "$pid" || sleep 1
+			continue
 		fi
-		tries=$((tries + 1))
-		if [ "$tries" -ge "$max" ]; then
-			log warning "lock held for too long, taking it over"
-			rm -rf "$LF_RUN/lock"; continue
+		tries=$((tries + 1)); total=$((total + 1))
+		if [ "$tries" -ge "$max" ] || [ "$total" -ge $((max * 4)) ]; then
+			lock_break "$pid" && log warning "lock held for too long, taking it over"
+			tries=0
+			[ "$total" -lt $((max * 4)) ] || total=0
 		fi
 		sleep 1
 	done
 	echo "$$" > "$LF_RUN/lock/pid"
+}
+
+# takes away the lock of <pid> - only while it still is that one's. Of several
+# commands that find the lock stale in the same moment, one removes it; the
+# others must not remove the lock that one has taken since (two commands at
+# work at once write each other's rules files). lock.break is held for an
+# instant; one left behind by a command that was stopped right then is
+# cleared away after a few tries.
+lock_break() { # pid
+	local n=0
+	while ! mkdir "$LF_RUN/lock.break" 2>/dev/null; do
+		n=$((n + 1))
+		[ "$n" -lt 4 ] || { rmdir "$LF_RUN/lock.break" 2>/dev/null; return 1; }
+		sleep 1
+	done
+	n=1
+	[ "$(cat "$LF_RUN/lock/pid" 2>/dev/null)" = "$1" ] && rm -rf "$LF_RUN/lock" && n=0
+	rmdir "$LF_RUN/lock.break" 2>/dev/null
+	return "$n"
 }
 
 lock_release() {
@@ -854,7 +878,8 @@ cleanup_zones() {
 		rm -f "$G_DATA/zones/$z.game"
 		rm -f "$LF_STATE/$z.ports" "$G_DATA/zones/$z.ports"
 		rm -f "$LF_STATE/$z.ips" "$G_DATA/zones/$z.ips" "$LF_RUN/$z.servers" "$LF_RUN/$z.rev" "$LF_RUN/$z.sig" "$LF_RUN/$z.cls" "$LF_RUN/$z.new" "$LF_RUN/$z.merged" "$LF_RUN/$z.counts" "$LF_RUN/$z.state.last" "$LF_RUN/$z.out.last" \
-			"$LF_RUN/$z.dev" "$LF_RUN/$z.mip" "$LF_RUN/$z.macs" "$LF_RUN/$z.ctlast" "$LF_RUN/$z.ctpat" "$LF_RUN/$z.ports.at"
+			"$LF_RUN/$z.dev" "$LF_RUN/$z.mip" "$LF_RUN/$z.macs" "$LF_RUN/$z.ctlast" "$LF_RUN/$z.ctpat" "$LF_RUN/$z.ports.at" \
+			"$LF_RUN/$z.ct6" "$LF_RUN/live.$z.prev"
 		log info "removed the learned servers of deleted zone $z"
 	done
 }
@@ -1026,9 +1051,9 @@ crash_check() {
 	local pid since ph
 	[ -f "$LF_RUN/daemon.alive" ] || return 0
 	read -r pid since < "$LF_RUN/daemon.alive"
-	rm -f "$LF_RUN/daemon.alive"
-	# (still running: a second start, not a crash)
+	# (still running: a second start, not a crash - see loop_claim)
 	[ "$pid" != "$$" ] && is_loop "$pid" && return 0
+	rm -f "$LF_RUN/daemon.alive"
 	ph="$(cat "$LF_RUN/phase" 2>/dev/null)"
 	crash_record "the learning loop (pid ${pid:-?}) stopped without a clean exit: killed by the system (out of memory?), a fatal error, or stopped by force after it did not end in time" "$since" "$ph"
 	log err "the learning loop had stopped unexpectedly and was started again - details in the debug report (LobbyFence page: Status > Debug)"
@@ -1080,6 +1105,26 @@ crash_summary() {
 	cat "$(crash_file)" "$LF_RUN/crash.log" 2>/dev/null | awk '/^=== crash / { n++; if ($3 > t) t = $3 } END { printf "%d %d\n", n, t }'
 }
 
+# One learning loop at a time. daemon.alive ("<pid> <since>") belongs to the
+# running loop; it is created in one step that fails when the file is there
+# (the shell's noclobber), so of two loops started in the same moment - the
+# watchdog and a reload - only one gets it. The other one leaves, and puts the
+# first one's number back into the pid file, so that it can be stopped.
+loop_claim() {
+	local pid since n=0
+	while ! ( set -C; echo "$$ $(now)" > "$LF_RUN/daemon.alive" ) 2>/dev/null; do
+		pid=""; read -r pid since < "$LF_RUN/daemon.alive" 2>/dev/null
+		if [ "$pid" != "$$" ] && is_loop "$pid"; then
+			echo "$pid" > "$LF_RUN/daemon.pid"
+			return 1
+		fi
+		crash_check                       # (the last loop's file: was it a crash?)
+		rm -f "$LF_RUN/daemon.alive"
+		n=$((n + 1)); [ "$n" -lt 5 ] || break
+	done
+	return 0
+}
+
 do_daemon() {
 	load_config
 	ensure_dirs
@@ -1087,8 +1132,7 @@ do_daemon() {
 	# report shows - they used to be thrown away on most routers
 	exec 2>> "$LF_RUN/daemon.err"
 	LF_IS_DAEMON=1
-	crash_check
-	echo "$$ $(now)" > "$LF_RUN/daemon.alive"
+	loop_claim || exit 0
 	trap 'lock_acquire 20; persist; lock_release; rm -f "$LF_RUN/daemon.alive"; exit 0' TERM INT
 	echo "$$" > "$LF_RUN/daemon.pid"
 	log notice "learning loop started (every ${G_INTERVAL}s)"

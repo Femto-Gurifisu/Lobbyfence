@@ -99,6 +99,19 @@ out="$(page ops '[["set","globals","enabled","1"],["set","globals","geo_url","ht
 	["add","game","zone"],["set","game","enabled","1"],["set","game","label","Test <%game%> \"1\""],["set","game","mode","monitor"],["set","game","strict","0"],
 	["set","game","device",["192.168.1.100"]],["set","game","remote_port",["3074"]],["set","game","circle",["50.1109,8.6821,800"]]]')"
 js "assert d.get('done') and d['code']==0, d" "$out" && pass "page: Save & Apply through Merlin's add-on settings + service-event" || fail "apply: $out"
+# Save & Apply while the watchdog runs alongside (seen on a real R7000 with FreshTomato:
+# the watchdog started a second loop in the moment the reload had stopped the first - the
+# reload waited 30 s, stopped it by force, and that went on record as a crash)
+loops() { pgrep -f "$LF_HOME/bin/lobbyfence-main daemon" | wc -l | tr -d ' '; }
+rm -f "$LF_HOME/data/crash.log" "$LF_RUN/crash.log"
+( i=0; while [ $i -lt 400 ] && [ ! -f "$W/wd.stop" ]; do lf watchdog; i=$((i + 1)); done ) & wdp=$!
+t0=$(date +%s); lf reload; rc=$?; took=$(( $(date +%s) - t0 ))
+: > "$W/wd.stop"; wait $wdp; rm -f "$W/wd.stop"
+sleep 1
+[ "$rc" = 0 ] && [ "$took" -lt 20 ] && [ "$(loops)" = 1 ] && inr kill -0 "$(cat "$LF_RUN/daemon.pid")" 2>/dev/null \
+	&& ! grep -q "=== crash" "$LF_HOME/data/crash.log" "$LF_RUN/crash.log" 2>/dev/null \
+	&& pass "reload with the watchdog running alongside: ${took}s, one learning loop, no crash on record" \
+	|| fail "reload + watchdog: ${took}s (rc $rc), $(loops) loops, $(cat "$LF_HOME/data/crash.log" "$LF_RUN/crash.log" 2>/dev/null | head -3)"
 grep -q "option label 'Test <%game%> \"1\"'" "$LF_HOME/lobbyfence.conf" && grep -q "list circle '50.1109,8.6821,800'" "$LF_HOME/lobbyfence.conf" \
 	&& pass "changes written to the settings" || fail "conf: $(cat "$LF_HOME/lobbyfence.conf")"
 grep -q "^other_title Other Addon 1.2$" "$LF_CUSTOM_SETTINGS" && grep -q "^other_mode fast$" "$LF_CUSTOM_SETTINGS" && ! grep -q lobbyfence_cmd "$LF_CUSTOM_SETTINGS" \

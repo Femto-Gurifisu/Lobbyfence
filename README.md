@@ -293,6 +293,12 @@ What is different on FreshTomato:
   In zones with *strict* on (the default) a new IPv6 server is dropped before
   it gets into that list, so it can't be learned: those zones block the
   game's IPv6 servers, and the game uses IPv4, where everything works.
+  *Open for server tests* needs to add to a set as well, so it doesn't open
+  IPv6 there. If `ip6tables` refuses the rules that look at a connection's
+  state (IPv6 switched off in the firmware), IPv6 is filtered without
+  those. Should it refuse the rest too, IPv6 is left unfiltered and IPv4
+  goes on: the log names the line it refused, the debug report shows the
+  rules, and every Save & Apply tries again.
 * **Servers missing from the map?** Run
   `/jffs/lobbyfence/lobbyfence diag` on the router. It explains, per zone,
   what was learned, what was seen in the last two minutes and what counts as
@@ -1078,7 +1084,10 @@ problems unlikely, not impossible.
   iptables, ipset 6.38 (FreshTomato's version), installed by its installer
   into a fake `/jffs`: filtering, learning, server tests, firewall rebuilds,
   CTF marks, the CGI, saving to JFFS, a simulated reboot, IPv6 learning
-  without the SET target, `diag`, and the lag simulator's tc setup (against
+  without the SET target, IPv6 rules an `ip6tables` refuses (what is left
+  out, what the log and the debug report say), Save & Apply while the
+  watchdog runs alongside (one learning loop, nothing on record as a
+  crash), `diag`, and the lag simulator's tc setup (against
   `fake_tomato_tc.sh`, which records the commands, since the test kernel is
   not FreshTomato's).
 * `tomato_browser_test.sh ... <maplibre-dist> <freshtomato www dir>` — the

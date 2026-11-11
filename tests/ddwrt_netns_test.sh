@@ -243,6 +243,19 @@ cfg set lobbyfence.game.strict=0; cfg set lobbyfence.globals.interval=60
 lf start
 sleep 3
 [ -n "$(cat "$LF_RUN/daemon.pid" 2>/dev/null)" ] && inr kill -0 "$(cat "$LF_RUN/daemon.pid")" && pass "start runs the learning loop" || fail "no daemon"
+# Save & Apply while the watchdog runs alongside (seen on a real R7000 with FreshTomato:
+# the watchdog started a second loop in the moment the reload had stopped the first - the
+# reload waited 30 s, stopped it by force, and that went on record as a crash)
+loops() { pgrep -f "$LF_HOME/bin/lobbyfence-main daemon" | wc -l | tr -d ' '; }
+rm -f "$LF_HOME/data/crash.log" "$LF_RUN/crash.log"
+( i=0; while [ $i -lt 400 ] && [ ! -f "$W/wd.stop" ]; do lf watchdog; i=$((i + 1)); done ) & wdp=$!
+t0=$(date +%s); lf reload; rc=$?; took=$(( $(date +%s) - t0 ))
+: > "$W/wd.stop"; wait $wdp; rm -f "$W/wd.stop"
+sleep 1
+[ "$rc" = 0 ] && [ "$took" -lt 20 ] && [ "$(loops)" = 1 ] && inr kill -0 "$(cat "$LF_RUN/daemon.pid")" 2>/dev/null \
+	&& ! grep -q "=== crash" "$LF_HOME/data/crash.log" "$LF_RUN/crash.log" 2>/dev/null \
+	&& pass "reload with the watchdog running alongside: ${took}s, one learning loop, no crash on record" \
+	|| fail "reload + watchdog: ${took}s (rc $rc), $(loops) loops, $(cat "$LF_HOME/data/crash.log" "$LF_RUN/crash.log" 2>/dev/null | head -3)"
 grep -qx "\* \* \* \* \* root $LF_HOME/lobbyfence watchdog" "$W/cron.d/lobbyfence" && pass "watchdog in /tmp/cron.d (with the user name)" || fail "cron: $(cat "$W/cron.d/lobbyfence" 2>/dev/null)"
 [ -n "$(cat "$LF_RUN/lighttpd.pid" 2>/dev/null)" ] && inr kill -0 "$(cat "$LF_RUN/lighttpd.pid")" && pass "start runs the web page's server" || fail "no lighttpd: $(cat "$LF_RUN/lighttpd.out" "$LF_RUN/lighttpd.log" 2>/dev/null)"
 grep -qi "warning\|error" "$LF_RUN/lighttpd.log" 2>/dev/null && fail "lighttpd complains about its settings: $(cat "$LF_RUN/lighttpd.log")" || pass "lighttpd takes the settings without a warning"

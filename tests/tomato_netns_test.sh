@@ -255,6 +255,36 @@ probe 62.0.0.2 >/dev/null
 lf cycle
 [ -z "$(ips list lf_game_nw4 | sed '1,/^Members:/d')" ] && pass "learning pass empties the quick-check set" || fail "nw after cycle: $(ips list lf_game_nw4 | tail -3)"
 
+# --- 7f2. Save & Apply (reload) while the watchdog runs (seen on a real R7000: the
+# watchdog started a second loop in the moment the reload had stopped the first -
+# the reload then waited 30 s, stopped the new one by force, and that was a "crash")
+loops() { pgrep -f "$LF_HOME/bin/lobbyfence-main daemon" | wc -l | tr -d ' '; }
+rm -f "$LF_HOME/data/crash.log" "$LF_RUN/crash.log"; sed -i '/stopped unexpectedly/d' "$W/run.log"
+( i=0; while [ $i -lt 400 ] && [ ! -f "$W/wd.stop" ]; do lf watchdog; i=$((i + 1)); done ) & wdp=$!
+t0=$(date +%s); lf reload; rc=$?; took=$(( $(date +%s) - t0 ))
+: > "$W/wd.stop"; wait $wdp; rm -f "$W/wd.stop"
+sleep 1
+[ "$rc" = 0 ] && [ "$took" -lt 20 ] && pass "reload with the watchdog running alongside: done in ${took}s" || fail "reload took ${took}s (rc $rc)"
+[ "$(loops)" = 1 ] && inr kill -0 "$(cat "$LF_RUN/daemon.pid")" 2>/dev/null \
+	&& pass "...one learning loop, the one the pid file names" || fail "loops: $(loops), pid file $(cat "$LF_RUN/daemon.pid" 2>&1)"
+! grep -q "=== crash" "$LF_HOME/data/crash.log" "$LF_RUN/crash.log" 2>/dev/null && ! grep -q "stopped unexpectedly" "$W/run.log" \
+	&& pass "...and nothing put on record as a crash" || fail "crash recorded: $(cat "$LF_HOME/data/crash.log" "$LF_RUN/crash.log" 2>/dev/null | head -5)"
+# the watchdog leaves a start / stop / reload alone while one is at work
+p0="$(cat "$LF_RUN/daemon.pid")"
+inr kill "$p0"; n=0; while inr kill -0 "$p0" 2>/dev/null && [ $n -lt 20 ]; do sleep 0.5; n=$((n + 1)); done
+mkdir "$LF_RUN/svc.lock"; sleep 300 & holder=$!; echo "$holder" > "$LF_RUN/svc.lock/pid"
+lf watchdog
+[ "$(loops)" = 0 ] && pass "watchdog during a reload: starts nothing" || fail "watchdog started a loop during a reload"
+kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null
+lf watchdog; sleep 1
+[ "$(loops)" = 1 ] && [ ! -d "$LF_RUN/svc.lock" ] && pass "...a lock left by a command that died doesn't stop it" || fail "stale lock: loops $(loops)"
+# a second loop started by hand leaves at once and the first one stays the one to stop
+p1="$(cat "$LF_RUN/daemon.pid")"
+inr timeout 15 env PATH="$TPATH" "$LF_HOME/lobbyfence" daemon </dev/null >/dev/null 2>&1; sleep 1
+[ "$(loops)" = 1 ] && [ "$(cat "$LF_RUN/daemon.pid")" = "$p1" ] && inr kill -0 "$p1" 2>/dev/null \
+	&& pass "a second learning loop leaves at once (the first stays, and stays the one that gets stopped)" || fail "second loop: $(loops) loops, pid file $(cat "$LF_RUN/daemon.pid") (first $p1)"
+sed -i '/learning loop was not running/d' "$W/run.log"
+
 # --- 7g. "Any mobile game" preset: TCP 443 + mobile game ports (a phone's game lobby on HTTPS)
 tprobe() { p="$1"; shift; inl python3 "$HERE/udp.py" tcpprobe "$p" "$@" | tr '\n' ' ' | sed 's/ $//'; }
 cfg set lobbyfence.mob=zone
@@ -554,12 +584,20 @@ cgi "$TOKEN" revert >/dev/null
 [ ! -f "$LF_RUN/staged.conf" ] && pass "CGI: Reset throws the waiting change away" || fail "revert"
 
 # --- 11b. ip6tables without the SET target (seen on a real R7000): IPv6 falls back, IPv4 unharmed
+# (switches, as files next to bin/: v6.setok - the SET target works; v6.noctk -
+# the kernel refuses the connection-state match, which shows at COMMIT;
+# v6.reject - refuses everything; v6.rejectline - the same, naming a line)
 cat > "$W/bin/fake-ip6tables-restore" <<'EOF'
 #!/bin/sh
+d="${0%/*}/.."
 t="$(cat)"
-case "$t" in *"-j SET"*) echo "Warning: Extension SET (target) is not supported, missing kernel module?" >&2; exit 1;; esac
-[ -f "${0%/*}/../v6.reject" ] && { echo "ip6tables-restore: unable to initialize table 'filter'" >&2; exit 1; }
-echo "$t" > "${0%/*}/../v6.loaded"; exit 0
+[ -f "$d/v6.setok" ] || case "$t" in *"-j SET"*) echo "Warning: Extension SET (target) is not supported, missing kernel module?" >&2; exit 1;; esac
+[ -f "$d/v6.reject" ] && { echo "ip6tables-restore: unable to initialize table 'filter'" >&2; exit 1; }
+[ -f "$d/v6.rejectline" ] && { echo "ip6tables-restore: line 3 failed" >&2; exit 1; }
+if [ -f "$d/v6.noctk" ]; then
+	case "$t" in *"-m conntrack"*) echo "ip6tables-restore: line $(echo "$t" | grep -n '^COMMIT' | head -n 1 | cut -d: -f1) failed" >&2; exit 1;; esac
+fi
+echo "$t" > "$d/v6.loaded"; exit 0
 EOF
 cat > "$W/bin/fake-ip6tables" <<'EOF'
 #!/bin/sh
@@ -583,10 +621,49 @@ st "assert d['ipv6']=='off', d['ipv6']" && pass "status.json: IPv6 off" || fail 
 expect "IPv4 still filtered" "45.10.0.1 ok 80.20.0.1 blocked" "$(probe 45.10.0.1 80.20.0.1)"
 rm -f "$W/v6.reject" "$LF_RUN/v6.off" "$LF_RUN/v6.noset"
 sed -i '/rejected - IPv6 traffic is not filtered/d; /ip6tables can.t add servers/d' "$W/run.log"
+
+# --- 11c. a zone that opens for server tests, on a router whose ip6tables has no SET target
+# and whose kernel refuses the connection-state match for IPv6 (the R7000 again: IPv6 rules
+# were refused at COMMIT as soon as the Apex Legends zone - it has a burst limit - was added)
+cfg set lobbyfence.game.burst_servers=2; cfg set lobbyfence.game.burst_open=20
+touch "$W/v6.noctk"; rm -f "$W/v6.loaded"
+lf6 apply && pass "burst zone, no SET target, no connection-state match: apply succeeds" || fail "apply failed"
+grep -q "lf_game_out6 dst -g LF_game_x" "$W/v6.loaded" 2>/dev/null && ! grep -q -- "-j SET\|-m conntrack\|_op6 " "$W/v6.loaded" \
+	&& pass "IPv6 rules loaded without the burst's rules (filtering kept)" || fail "v6 rules: $(grep -n -- 'conntrack\|_op6\|SET' "$W/v6.loaded" 2>&1 | head -5)"
+lf6 status >/dev/null
+st "assert d['ipv6']=='no-learning', d['ipv6']" && ! grep -q "IPv6 rules rejected" "$W/run.log" && [ ! -f "$LF_RUN/v6.off" ] \
+	&& pass "IPv6 stays filtered, nothing reported as an error" || fail "ipv6: $(grep -c 'IPv6 rules rejected' "$W/run.log") errors, status $(head -c 300 "$LF_RUN/status.json")"
+expect "IPv4 burst rules untouched" "1" "$(ipt -S LF_game_o4 | grep -c -- '-m conntrack --ctstate NEW -j LF_game_b4')"
+# the SET target works, the connection-state match doesn't: IPv6 without those rules only
+touch "$W/v6.setok"; rm -f "$LF_RUN"/v6.* "$W/v6.loaded"; sed -i '/ip6tables can.t add servers/d' "$W/run.log"
+lf6 apply
+grep -q -- "-j SET --add-set lf_game_now6 dst" "$W/v6.loaded" 2>/dev/null && ! grep -q -- "-m conntrack" "$W/v6.loaded" && [ -f "$LF_RUN/v6.noct" ] \
+	&& grep -q "refuses rules that look at the state of a connection" "$W/run.log" && ! grep -q "ip6tables can.t add servers" "$W/run.log" \
+	&& pass "connection-state match refused: IPv6 filtered without those rules, servers still learned, explained in the log" || fail "noct: $(ls "$LF_RUN"/v6.* 2>&1 | tr '\n' ' ') $(tail -n 3 "$W/run.log")"
+lf6 status >/dev/null; st "assert d['ipv6']=='on', d['ipv6']" && lf6 diag | grep -q "IPv6: filtered, without the rules that look at connection states" \
+	&& pass "status and diag say so" || fail "noct status: $(lf6 diag | grep IPv6)"
+# refused whatever is left out: the log names the line, the debug report shows the rules
+touch "$W/v6.rejectline"; rm -f "$LF_RUN"/v6.*
+lf6 apply
+grep -q "IPv6 rules rejected - IPv6 traffic is not filtered: ip6tables-restore: line 3 failed (line 3 of the rules: :LF_game_po6 - \[0:0\])" "$W/run.log" \
+	&& pass "IPv6 refused: the log says which line of the rules" || fail "refusal log: $(grep 'IPv6 rules rejected' "$W/run.log" | tail -n 1)"
+lf6 debug > "$W/debug6.txt" 2>/dev/null
+grep -q "IPv6 rules that ip6tables refused" "$W/debug6.txt" && grep -q "^   3  :LF_game_po6 - \[0:0\]" "$W/debug6.txt" && grep -q "kernel messages" "$W/debug6.txt" \
+	&& pass "...and the debug report shows the refused rules" || fail "debug: $(grep -n -A4 'refused' "$W/debug6.txt" | head -8)"
+# the next apply tries IPv6 again
+rm -f "$W/v6.rejectline" "$W/v6.loaded"
+lf6 apply; lf6 status >/dev/null
+[ ! -f "$LF_RUN/v6.off" ] && [ -s "$W/v6.loaded" ] && [ ! -f "$LF_RUN/v6.refused" ] && st "assert d['ipv6']!='off', d['ipv6']" \
+	&& pass "the next apply tries IPv6 again (and it works once ip6tables takes the rules)" || fail "retry: $(ls "$LF_RUN"/v6.* 2>&1 | tr '\n' ' ')"
+rm -f "$W/v6.noctk" "$W/v6.setok" "$LF_RUN"/v6.*
+cfg set lobbyfence.game.burst_servers=0
+sed -i '/rejected - IPv6 traffic is not filtered/d; /ip6tables can.t add servers/d; /refuses rules that look at/d' "$W/run.log"
 lf apply
 
 # --- 12. saved to JFFS, back after a reboot
+: > "$LF_RUN/v6.noset"; : > "$LF_RUN/v6.off"
 lf stop
+ls "$LF_RUN"/v6.* >/dev/null 2>&1 && fail "stop left what was found out about ip6tables: $(ls "$LF_RUN"/v6.*)" || pass "stop forgets what ip6tables couldn't do (found out again at the next start)"
 [ -s "$LF_HOME/data/zones/game.ips" ] && [ -s "$LF_HOME/data/geo.cache" ] && pass "learned servers saved to JFFS on stop" || fail "nothing saved: $(ls -R "$LF_HOME/data")"
 ipt -n -L LF_FWD >/dev/null 2>&1 && fail "stop left rules" || pass "stop removes the rules"
 ips list -n | grep -q '^lf_' && fail "stop left sets: $(ips list -n | tr '\n' ' ')" || pass "and the sets"
