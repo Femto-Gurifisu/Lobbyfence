@@ -231,6 +231,8 @@ def main():
         modal.locator("select").first.select_option("apex")
         modal.locator(".lf-nz-platform").select_option("pc")
         page.wait_for_timeout(300)
+        # (no device is picked for you: the first one on the router's list)
+        modal.locator("select").nth(2).select_option(index=1)
         modal.get_by_role("button", name="Create zone").click()
         page.wait_for_timeout(2500)
         frame.locator("#lf-apply").click()
@@ -262,6 +264,7 @@ def main():
         check("New zone: Any mobile game fills in TCP, port 443 and the game ports, Enforce mode, and says what it does to apps",
               "tcp" in vals and "enforce" in vals and "strict" not in vals[1:]
               and any(t.startswith("443 ") and "65010" in t for t in texts) and "won't load" in info, [vals, texts, info[:300]])
+        modal.locator("select").nth(2).select_option(index=1)
         modal.get_by_role("button", name="Create zone").click()
         page.wait_for_timeout(2500)
         frame.locator("#lf-apply").click()

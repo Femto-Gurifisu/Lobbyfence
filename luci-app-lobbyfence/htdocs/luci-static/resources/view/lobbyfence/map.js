@@ -1328,6 +1328,9 @@ function rangesSize(ranges) {
 	return n;
 }
 
+/* the New zone dialog's device list: the entry that opens the address field */
+var DEVICE_MANUAL = '#manual';
+
 function sectionName(label, existing) {
 	var base = String(label || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, ZONE_ID_MAX);
 	if (!/^[a-z]/.test(base))
@@ -5527,9 +5530,13 @@ return view.extend({
 
 		var devices = [];
 		function applyDevice() {
-			var manual = !devicePick.options.length || devicePick.value === '';
+			var manual = !devicePick.options.length || devicePick.value === DEVICE_MANUAL;
 			var d = manual ? null : devices.filter(function(x) { return x.mac === devicePick.value; })[0];
 			device.style.display = manual ? '' : 'none';
+			if (!manual && !d) {
+				deviceInfo.textContent = _('Pick the console, PC or phone the game runs on - only that device is filtered.');
+				return;
+			}
 			if (d) {
 				deviceInfo.innerHTML = '';
 				deviceInfo.appendChild(E('div', { 'style': 'font-family:monospace' }, [
@@ -5554,15 +5561,18 @@ return view.extend({
 		applyPreset();
 		applyDevice();
 
-		/* devices the router knows (DHCP / neighbours) */
+		/* devices the router knows (DHCP / neighbours) - none is picked until
+		   the person picks one: a zone for the wrong device filters nothing */
 		loadDevices().then(function(list) {
 			if (!list.length)
 				return;
 			devices = list;
+			devicePick.appendChild(E('option', { 'value': '', 'disabled': 'disabled', 'hidden': 'hidden' }, _('Choose a device…')));
 			list.forEach(function(d) {
 				devicePick.appendChild(E('option', { 'value': d.mac }, deviceLabel(d)));
 			});
-			devicePick.appendChild(E('option', { 'value': '' }, _('Enter an address manually…')));
+			devicePick.appendChild(E('option', { 'value': DEVICE_MANUAL }, _('Enter an address manually…')));
+			devicePick.selectedIndex = 0;
 			devicePick.style.display = '';
 			applyDevice();
 		});
@@ -5594,7 +5604,7 @@ return view.extend({
 				E('button', {
 					'class': 'cbi-button cbi-button-positive important',
 					'click': function() {
-						var dev = (devicePick.options.length && devicePick.value) ? devicePick.value : device.value.trim();
+						var dev = (devicePick.options.length && devicePick.value !== DEVICE_MANUAL) ? devicePick.value : device.value.trim();
 						var label = name.value.trim() || preset.label, list = parsePorts(ports.value);
 						if (needsPlatform(preset) && !platform.value)
 							return (error.textContent = _('Choose the device type - %s.').format(_('PC or a console')));

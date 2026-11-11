@@ -381,6 +381,8 @@ def main():
         modal.locator("select").first.select_option("apex")
         modal.locator(".lf-nz-platform").select_option("pc")
         page.wait_for_timeout(300)
+        check("real LuCI: New zone picks no device by itself", modal.locator("select").nth(2).input_value() == "")
+        modal.locator("select").nth(2).select_option("aa:bb:cc:dd:ee:01")
         modal.get_by_role("button", name="Create zone").click()
         page.wait_for_timeout(2500)
         adds = [x["add"] for x in state["sets"] if "add" in x and x["add"].get("type") == "zone"]
