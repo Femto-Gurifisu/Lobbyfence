@@ -1492,6 +1492,59 @@ def main():
         check("hostile text from the router is shown as text, nothing in it runs",
               not page.evaluate("window.__pwned || []") and shown.count("onerror") >= 3, [page.evaluate("window.__pwned || []"), shown.count("onerror")])
 
+        # ---- the panel with real scrollbars: this test's browser hides them,
+        # but a Mac with a mouse, Windows and Linux desktops show them, and
+        # one takes ~10 px off the panel. The server-test setting stays on one
+        # line and the status buttons in one row, framed and borderless,
+        # whether the panel scrolls or not.
+        sb_browser = p.chromium.launch(ignore_default_args=["--hide-scrollbars"])
+        sp = sb_browser.new_page(viewport={"width": 1400, "height": 640})
+        sp.on("pageerror", lambda e: errors.append(str(e)))
+        sp.route("http://router.test/", lambda r: r.fulfill(content_type="text/html", body=HARNESS))
+        sp.route("https://unpkg.com/maplibre-gl@*/dist/maplibre-gl.mjs",
+                 lambda r: r.fulfill(content_type="text/javascript", body=FAKE_MAPLIBRE, headers={"Access-Control-Allow-Origin": "*"}))
+        sp.route("https://unpkg.com/maplibre-gl@*/dist/maplibre-gl.css",
+                 lambda r: r.fulfill(content_type="text/css", body="", headers={"Access-Control-Allow-Origin": "*"}))
+        sp.route("https://unpkg.com/maplibre-gl@*/dist/maplibre-gl-worker.mjs",
+                 lambda r: r.fulfill(content_type="text/javascript", body="", headers={"Access-Control-Allow-Origin": "*"}))
+        sp.route("https://tiles.openfreemap.org/styles/positron",
+                 lambda r: r.fulfill(content_type="application/json", body=json.dumps(FAKE_STYLE), headers={"Access-Control-Allow-Origin": "*"}))
+        sp.route("https://api.github.com/repos/Femto-Gurifisu/Lobbyfence/releases/latest",
+                 lambda r: r.fulfill(content_type="application/json", body='{"tag_name": "v1.1.0"}', headers={"Access-Control-Allow-Origin": "*"}))
+        sb_cfg = {"globals": {".name": "globals", ".type": "globals", "enabled": "1"},
+                  "game": {".name": "game", ".type": "zone", "label": "Game", "enabled": "1", "mode": "enforce", "circle": ["50.1109,8.6821,800"]}}
+        sb_status = {"version": "1.0.0", "enabled": True, "active": True, "updated": 1, "interval": 60,
+                     "geo": {"last_ok": 0, "pending": 1, "error": "no answer - check the router's internet connection"},
+                     "zones": [{"id": "game", "label": "Game", "enabled": True, "mode": "enforce", "strict": False, "region": True,
+                                "servers": 4, "inside": 1, "outside": 2, "pending": 1, "unlocatable": 0, "packets": 12345, "blocked": 67,
+                                "devices": ["192.168.1.23", "fd00::23"], "macs": 1}]}
+        sb_servers = ("45.10.0.1 in 50.11 8.68 DE 1700000000\n80.20.0.1 out 40.71 -74.0 US 1700000100\n"
+                      "99.1.1.1 out 35.68 139.7 JP 1700000200\n9.9.9.9 pending - - -- 1700000300\n")
+        boot(sp, sb_cfg, {"/tmp/lobbyfence/game.servers": sb_servers, "/tmp/lobbyfence/status.json": json.dumps(sb_status)},
+             {"lobbyfence": {"instances": {"instance1": {"running": True}}}})
+        sp.wait_for_function("document.querySelector('.lf-burst-burst_open') && document.querySelector('.lf-panel').innerText.includes('Servers file')")
+        layout = """() => { const p = document.querySelector('.lf-panel'), r = e => e.getBoundingClientRect();
+            const bs = document.querySelector('.lf-burst-burst_servers'), bo = document.querySelector('.lf-burst-burst_open');
+            const btns = [...p.querySelectorAll('button')].filter(b => /^(Test API|Learn now|Debug…|Servers file…)$/.test(b.textContent.trim()));
+            const st = getComputedStyle(p);
+            return { scrolls: p.scrollHeight > p.clientHeight,
+                     bar: p.offsetWidth - p.clientWidth - parseFloat(st.borderLeftWidth) - parseFloat(st.borderRightWidth),
+                     oneLine: Math.abs(r(bs).top - r(bo).top) < 3, buttons: btns.length,
+                     buttonRows: new Set(btns.map(b => Math.round(r(b).top))).size }; }"""
+        seen_bar = False
+        for borderless in (False, True):
+            sp.evaluate("on => window.view.setBorderless(on)", borderless)
+            for height in (640, 1400):
+                sp.set_viewport_size({"width": 1400, "height": height})
+                sp.wait_for_timeout(300)
+                m = sp.evaluate(layout)
+                seen_bar = seen_bar or (m["scrolls"] and m["bar"] >= 8)
+                check("real scrollbars, %s, window %d px high: server-test setting on one line, status buttons in one row"
+                      % ("borderless" if borderless else "framed", height),
+                      m["oneLine"] and m["buttons"] == 4 and m["buttonRows"] == 1, m)
+        check("real scrollbars: the panel did scroll with a scrollbar taking room", seen_bar)
+        sb_browser.close()
+
         browser.close()
 
     real_errors = [e for e in errors if "no webgl2" not in e and "test: map failed" not in e]

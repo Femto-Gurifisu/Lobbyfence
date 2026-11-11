@@ -521,10 +521,13 @@ var STYLE_CSS = [
 	'.lf-mono{font-family:ui-monospace,Menlo,Consolas,monospace}',
 	'.lf-servers-list .lf-muted{opacity:.75}',
 	'.lf-bad{color:#ef4444}',
-	'.lf-body{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:12px}',
+	/* the panel: wide enough for its rows (the server-test setting on one line,
+	   the status buttons in one row) with a scrollbar too - the scrollbar's room
+	   is kept, so the rows don't move when the panel starts or stops scrolling */
+	'.lf-body{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:12px}',
 	'@media (max-width:960px){.lf-body{grid-template-columns:minmax(0,1fr)}.lf-panel{height:auto!important}}',
 	'.lf-mapwrap{position:relative;height:72vh;min-height:440px;border-radius:8px;overflow:hidden;border:1px solid var(--lf-border);background:var(--lf-panel)}',
-	'.lf-panel{display:flex;flex-direction:column;height:72vh;min-height:440px;background:var(--lf-panel);border:1px solid var(--lf-border);border-radius:8px;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--lf-border) transparent}',
+	'.lf-panel{display:flex;flex-direction:column;height:72vh;min-height:440px;scrollbar-gutter:stable;background:var(--lf-panel);border:1px solid var(--lf-border);border-radius:8px;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--lf-border) transparent}',
 	'@media (max-width:700px){.lf-mapwrap{height:60vh;min-height:300px}}',
 	/* stacked layout (map above, panel below): the panel is part of the page, not a box
 	   that scrolls on its own - one that is even a pixel taller than its content would
