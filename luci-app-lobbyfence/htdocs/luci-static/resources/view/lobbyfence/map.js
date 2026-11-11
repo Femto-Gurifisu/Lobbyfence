@@ -3604,6 +3604,15 @@ return view.extend({
 				E('a', { 'href': '#', 'class': 'lf-link', 'click': function(ev) { ev.preventDefault(); self.openDebug(); } }, _('Details…')) ], 'lf-sm lf-problem'));
 		if (pr && pr.error && nowS - pr.error_time < 86400)
 			sec.appendChild(line(t.blocked, [ _('Last error, %s: ').format(ago(pr.error_time, nowS)), E('span', { 'class': 'lf-muted' }, pr.error) ], 'lf-sm lf-problem'));
+		/* (FreshTomato) the router was reset to its defaults, so LobbyFence started
+		   fresh too - its earlier settings are kept on the router for a while */
+		if (pr && pr.fresh_time > 0 && nowS - pr.fresh_time < 7 * 86400)
+			sec.appendChild(line(t.unknown, [
+				(pr.fresh_why === 'reset'
+					? _('The router was reset to its default settings, so LobbyFence started fresh too (%s). Your earlier zones and learned servers are kept.')
+					: _('LobbyFence was started fresh %s. Your earlier zones and learned servers are kept.')).format(ago(pr.fresh_time, nowS)), ' ',
+				E('a', { 'href': '#', 'class': 'lf-link lf-restore', 'click': function(ev) { ev.preventDefault(); self.restoreEarlier(); } }, _('Bring them back…'))
+			], 'lf-sm lf-fresh'));
 
 		if (res)
 			sec.appendChild(res.ok
@@ -3834,6 +3843,37 @@ return view.extend({
 		else if (n > 0 && z.opened > 0)
 			sec.appendChild(E('div', { 'class': 'lf-muted lf-sm', 'style': 'margin:0 0 4px 15px' },
 				_('%s packets let through during server tests').format(fmtNum(z.opened))));
+	},
+
+	/* the zones, settings and learned servers from before LobbyFence started
+	   fresh (FreshTomato: after a reset to factory defaults) - back in place */
+	restoreEarlier: function() {
+		var self = this, msg = E('p', { 'style': 'min-height:1.2em' });
+		var go = E('button', { 'class': 'cbi-button cbi-button-positive important', 'click': function() {
+			go.disabled = true;
+			msg.textContent = _('Bringing them back…');
+			fs.exec('/usr/sbin/lobbyfence', [ 'restore' ]).then(function(res) {
+				if (!res || res.code !== 0)
+					throw new Error((res && (res.stderr || res.stdout) || '').trim() || _('unknown error'));
+				msg.textContent = _('Done - loading them…');
+				window.setTimeout(function() { self.reloadPage(); }, 600);
+			}).catch(function(err) {
+				msg.textContent = _('Could not bring them back: %s').format(err && err.message || err);
+				go.disabled = false;
+			});
+		} }, _('Bring them back'));
+		ui.showModal(_('Bring back the earlier settings'), [
+			E('p', {}, _('LobbyFence keeps the zones, settings and learned servers it had before it started fresh. Bring them back in place of the ones it uses now? (The ones it uses now are kept on the router as well.)')),
+			msg,
+			E('div', { 'class': 'right' }, [
+				E('button', { 'class': 'cbi-button', 'click': ui.hideModal }, _('Cancel')), ' ', go
+			])
+		]);
+	},
+
+	/* the page again from the router (other settings than the ones loaded) */
+	reloadPage: function() {
+		window.location.reload();
 	},
 
 	openLeft: function() {

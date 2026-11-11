@@ -34,8 +34,10 @@ FORBIDDEN = ["mtd", "flash_erase", "flash_eraseall", "flashcp", "nandwrite", "sy
              "jffs2reset", "jffs2_mark_erase", "mkfs", "mkfs.jffs2", "mkfs.ubifs", "ubiformat", "fdisk",
              "parted", "reboot", "halt", "poweroff", "fw_setenv", "nvram_erase"]
 
-# nvram keys LobbyFence may write: DD-WRT's Status > My Page list, Merlin's custom-scripts switch
-NVRAM_KEYS = {"mypage_scripts", "jffs2_scripts"}
+# nvram keys LobbyFence may write: DD-WRT's Status > My Page list, Merlin's custom-scripts switch,
+# FreshTomato's Init script (one comment line added, to notice a reset to factory defaults - the
+# rest of the script is kept, and uninstalling takes the line out again)
+NVRAM_KEYS = {"mypage_scripts", "jffs2_scripts", "script_init"}
 
 # rm -rf: the variables that hold LobbyFence's own folders (each checked
 # below to have a fixed, non-empty value) and literal paths it may remove
@@ -83,7 +85,8 @@ for rel in SCRIPTS:
                 problems.append(f"{where}: runs '{w}': {line.strip()}")
         if re.search(r"\bnvram\s+(erase|restore|reset)\b", line):
             problems.append(f"{where}: nvram erase/restore: {line.strip()}")
-        for m in re.finditer(r"(?:\bnvram|\$NVRAM)\s+set\s+\"?([A-Za-z0-9_]+)=", line):
+        # (the nvram command itself, or a variable holding it, quoted or not)
+        for m in re.finditer(r"(?:\bnvram|\"?\$\{?(?:NVRAM|nv|NV)\}?\"?)\s+set\s+\"?([A-Za-z0-9_]+)=", line):
             if m.group(1) not in NVRAM_KEYS:
                 problems.append(f"{where}: writes nvram {m.group(1)}: {line.strip()}")
         if re.search(r"\bdd\b[^|;]*\bof=", line):

@@ -279,6 +279,21 @@ What is different on FreshTomato:
 * FreshTomato rebuilds its firewall now and then (WAN reconnect, saving
   settings). LobbyFence's rules come back within a second through FreshTomato's
   firewall event, and the learning loop checks every pass as well.
+* **A reset to factory defaults** (Administration > Configuration > Restore
+  Default Configuration, normal or thorough) sets FreshTomato's own settings
+  back, but not JFFS, where LobbyFence keeps its program, settings and learned
+  servers - they would simply come back once JFFS is on again. So LobbyFence
+  keeps one comment line in the router's Init script (Administration >
+  Scripts > Init: `# LobbyFence-reset-mark ...`; it runs nothing), which a
+  reset clears. When LobbyFence starts and that line is gone, it starts like a
+  new install - default settings, no zones, no learned servers or crash
+  records - and keeps the earlier ones on JFFS. For a week its page offers to
+  **bring them back** (Status); `/jffs/lobbyfence/lobbyfence restore` does it
+  any time. A reset also turns JFFS off, so LobbyFence only starts again once
+  you turn JFFS back on. To start fresh by hand: `/jffs/lobbyfence/lobbyfence
+  fresh`. To take LobbyFence off the router completely, use `purge` (see
+  [Install](#install)), or Format/Erase on the JFFS page, which deletes
+  everything on JFFS.
 * With hardware acceleration (CTF) on, LobbyFence marks the game device's
   packets so the router still checks them - the same trick FreshTomato uses
   for its VPNs. Nothing to configure. With QoS on, CTF is off anyway.
@@ -1009,7 +1024,8 @@ thing an add-on can do. What LobbyFence does and doesn't do about that:
   server or lag helper, LobbyFence checks the process is still that program -
   a process number from a file may belong to something else by then.
 * **Uninstalling leaves the router as it was.** `purge` takes out the files,
-  hooks, nvram entry, firewall rules, sets and queues - also ones left by a
+  hooks, nvram entry (on FreshTomato: its line in the Init script, the rest of
+  the script stays), firewall rules, sets and queues - also ones left by a
   LobbyFence command still running at that moment.
 
 **If something goes wrong:** LobbyFence only ever blocks the zone's device, so
@@ -1087,14 +1103,18 @@ problems unlikely, not impossible.
   without the SET target, IPv6 rules an `ip6tables` refuses (what is left
   out, what the log and the debug report say), Save & Apply while the
   watchdog runs alongside (one learning loop, nothing on record as a
-  crash), `diag`, and the lag simulator's tc setup (against
+  crash), a reset to factory defaults (the fresh start, `restore` through
+  the CGI, `fresh`, an install from before the check, the Init script's
+  other lines kept), `diag`, and the lag simulator's tc setup (against
   `fake_tomato_tc.sh`, which records the commands, since the test kernel is
   not FreshTomato's).
 * `tomato_browser_test.sh ... <maplibre-dist> <freshtomato www dir>` — the
   FreshTomato pages in headless Chromium against that router: FreshTomato's own
   `tomato.js` with the added menu entry, the map and settings tabs, Save /
   Apply / Reset through the real CGI (a rule clicked on the map survives a
-  later Save & Apply of other changes), a new zone's firewall rules.
+  later Save & Apply of other changes), a new zone's firewall rules, and a
+  reset to factory defaults: the fresh start shown on the page and its
+  *Bring them back* bringing the zones back.
 * `ddwrt_netns_test.sh <workdir> <ddwrt-busybox> <its applet list> <full-busybox> <ipset> <lighttpd prefix>` —
   the DD-WRT port end to end, made from the FreshTomato test: BusyBox built
   with DD-WRT's configuration as `/bin/sh`, ipset 7, legacy iptables and

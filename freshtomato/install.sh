@@ -32,6 +32,7 @@ files/usr/share/lobbyfence/servers.txt:share/servers.txt:644
 files/usr/share/lobbyfence/fw-ipt.sh:share/fw-ipt.sh:644
 freshtomato/functions.sh:share/functions.sh:644
 freshtomato/conf.awk:share/conf.awk:644
+freshtomato/lobbyfence.conf:share/lobbyfence.conf.default:644
 freshtomato/lobbyfence:lobbyfence:755
 freshtomato/www/lobbyfence.asp:www/lobbyfence.asp:644
 freshtomato/www/lobbyfence.cgi:www/lobbyfence.cgi:755
@@ -51,6 +52,20 @@ freshtomato/install.sh:install.sh:755
 
 hooks_remove() {
 	rm -f "$HOOKS/lobbyfence.init" "$HOOKS/lobbyfence.fire" "$HOOKS/lobbyfence.shut"
+}
+
+# the line LobbyFence keeps in the router's Init script to notice a reset to
+# factory defaults (see "a reset to factory defaults" in $DEST/lobbyfence) -
+# the rest of the script stays as it is
+reset_unmark() {
+	local nv="${LF_NVRAM:-nvram}" s
+	have "$nv" || return 0
+	s="$("$nv" get script_init 2>/dev/null)"
+	case "$s" in *"# LobbyFence-reset-mark "*) ;; *) return 0;; esac
+	s="$(printf '%s\n' "$s" | grep -v '^# LobbyFence-reset-mark ')"
+	if [ -n "$s" ]; then "$nv" set script_init="$s"; else "$nv" unset script_init; fi
+	"$nv" commit >/dev/null 2>&1
+	rm -f "$DEST/.reset-mark" "$DEST/.fresh-start"
 }
 
 # ---------------------------------------------- RegionGate, LobbyFence's old name
@@ -182,6 +197,7 @@ uninstall() {
 	fw_leftovers
 	[ -x "$DEST/lobbyfence" ] && "$DEST/lobbyfence" menu-off >/dev/null 2>&1
 	hooks_remove
+	reset_unmark
 	rm -f "$WWWEXT/lobbyfence.asp" "$WWWEXT/cgi-bin/lobbyfence.cgi"
 	rm -rf "$WWWEXT/lobbyfence" "$RUN"
 	if [ "$1" = purge ]; then

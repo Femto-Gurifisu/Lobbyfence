@@ -800,10 +800,12 @@ counter_of() {
 	echo 0
 }
 
-# for the web page's Status: recorded crashes and the last error message
-# (cheap: two file tests when there has been neither)
+# for the web page's Status: recorded crashes, the last error message, and
+# when LobbyFence started fresh after a reset to factory defaults (FreshTomato:
+# while the earlier settings are kept for "restore")
+# (cheap: three file tests when there has been none of them)
 problems_json() {
-	local n=0 ct=0 et=0 etext=""
+	local n=0 ct=0 et=0 etext="" ft=0 fdir="" fwhy=asked
 	if [ -s "$(crash_file)" ] || [ -s "$LF_RUN/crash.log" ]; then
 		set -- $(crash_summary); n="${1:-0}"; ct="${2:-0}"
 	fi
@@ -811,7 +813,12 @@ problems_json() {
 		read -r et etext < "$LF_RUN/last_error"
 		is_uint "$et" || et=0
 	fi
-	printf '"problems":{"crashes":%d,"crash_time":%d,"error":"%s","error_time":%d},' "$n" "$ct" "$(json_str "$etext")" "$et"
+	if [ -n "${LF_FRESH_FILE:-}" ] && [ -s "$LF_FRESH_FILE" ]; then
+		read -r ft fdir < "$LF_FRESH_FILE"
+		is_uint "$ft" && [ -d "$fdir" ] || ft=0
+		case "$fdir" in */before-reset-*) fwhy=reset;; esac
+	fi
+	printf '"problems":{"crashes":%d,"crash_time":%d,"error":"%s","error_time":%d,"fresh_time":%d,"fresh_why":"%s"},' "$n" "$ct" "$(json_str "$etext")" "$et" "$ft" "$fwhy"
 }
 
 write_status() {
@@ -1821,6 +1828,10 @@ case "$cmd" in
 	diag) do_diag;;
 	debug) do_debug "$@";;
 	apitest) do_apitest "$@";;
+	# (the web page's "Bring them back": FreshTomato's own service script keeps
+	# the settings from before a reset to factory defaults - see "fresh" there;
+	# anywhere else there is nothing to bring back)
+	restore) echo "there are no settings from before a reset (or a fresh start) to bring back" >&2; exit 1;;
 	live) do_live;;
 	devices) do_devices;;
 	version|-v|--version) echo "$LF_VERSION";;

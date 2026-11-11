@@ -69,6 +69,9 @@
 				"/usr/sbin/lobbyfence remove-servers *": [
 					"exec"
 				],
+				"/usr/sbin/lobbyfence restore": [
+					"exec"
+				],
 				"/usr/sbin/lobbyfence unlist *": [
 					"exec"
 				]

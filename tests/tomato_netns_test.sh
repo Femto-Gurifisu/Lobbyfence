@@ -721,10 +721,79 @@ t1=$(date +%s)
 kill "$HOLDER" 2>/dev/null; wait "$HOLDER" 2>/dev/null
 sed -i '/lock held for too long/d' "$W/stderr.log" 2>/dev/null
 
+# --- 13d. a reset to factory defaults: FreshTomato sets its own settings back
+# (the Init script among them) but leaves JFFS - LobbyFence notices it by the
+# line it keeps in the Init script, starts fresh, and keeps the earlier
+# settings and learned servers for "restore"
+nv() { inr env PATH="$TPATH" "$LF_NVRAM" "$@"; }
+started() { # (the .init hook starts LobbyFence in the background)
+	n=0; while { [ ! -s "$LF_RUN/status.json" ] || [ -d "$LF_RUN/svc.lock" ]; } && [ $n -lt 60 ]; do sleep 0.5; n=$((n + 1)); done
+}
+tok="$(cat "$LF_HOME/.reset-mark" 2>/dev/null)"
+[ -n "$tok" ] && nv get script_init | grep -q "^# LobbyFence-reset-mark $tok " \
+	&& pass "reset check: a line in the router's Init script, its token on JFFS too" || fail "no reset mark: file '$tok', Init script '$(nv get script_init)'"
+# (the person's own Init script stays as it is around that line)
+nv set script_init="$(printf 'echo my own line\n%s' "$(nv get script_init)")"
+lf start >/dev/null 2>&1
+[ "$(cat "$LF_HOME/.reset-mark")" = "$tok" ] && [ -s "$LF_HOME/data/zones/game.ips" ] && [ "$(cfg get lobbyfence.game)" = zone ] \
+	&& ! ls -d "$LF_HOME"/before-* >/dev/null 2>&1 && [ "$(nv get script_init | head -n 1)" = "echo my own line" ] \
+	&& pass "a start with the line in place resets nothing, and the person's own Init script lines stay" || fail "start reset something: $(ls -a "$LF_HOME") / $(nv get script_init)"
+expect "...the zone filters as before" "45.10.0.1 blocked 80.20.0.1 blocked" "$(probe 45.10.0.1 80.20.0.1)"
+lf stop
+# the reset (FreshTomato's defaults again: an empty Init script; JFFS as it was), then the boot
+nv unset script_init
+rm -rf "$LF_RUN"; mkdir -p "$LF_RUN"
+inr env PATH="$TPATH" "$W/jffs/etc/config/lobbyfence.init"
+started
+b="$(ls -d "$LF_HOME"/before-reset-* 2>/dev/null | head -n 1)"
+[ -n "$b" ] && grep -q "config zone 'game'" "$b/lobbyfence.conf" 2>/dev/null && [ -s "$b/data/zones/game.ips" ] && grep -q "restore" "$b/README.txt" 2>/dev/null \
+	&& pass "after a reset: the earlier settings and learned servers are kept in ${b##*/}" || fail "reset: nothing kept: $(ls -a "$LF_HOME")"
+! grep -q "^config zone" "$LF_HOME/lobbyfence.conf" && grep -q "option enabled '0'" "$LF_HOME/lobbyfence.conf" \
+	&& grep -q "option data_dir '$LF_HOME/data'" "$LF_HOME/lobbyfence.conf" && [ ! -e "$LF_HOME/data/zones/game.ips" ] \
+	&& pass "...and LobbyFence starts with its default settings, like a new install" || fail "reset: settings not fresh: $(cat "$LF_HOME/lobbyfence.conf")"
+expect "...nothing is filtered any more" "45.10.0.1 ok 80.20.0.1 ok" "$(probe 45.10.0.1 80.20.0.1)"
+expect "...the web page is told (Status)" "reset True 0" "$(st "print(d['problems']['fresh_why'], d['problems']['fresh_time'] > 0, d['problems']['crashes'])")"
+tok2="$(cat "$LF_HOME/.reset-mark" 2>/dev/null)"
+[ -n "$tok2" ] && [ "$tok2" != "$tok" ] && nv get script_init | grep -q "^# LobbyFence-reset-mark $tok2 " && grep -q "the router was reset to its default settings" "$LF_RUN/log" \
+	&& pass "...a new line in the Init script, and the log says what happened" || fail "reset: mark / log: '$tok2' '$(nv get script_init)'"
+# the earlier ones back, as the web page asks for them (its CGI)
+out="$(cgi "$TOKEN" "exec restore")"
+started
+r="$(ls -d "$LF_HOME"/replaced-* 2>/dev/null | head -n 1)"
+echo "$out" | grep -q '"code":0' && grep -q "^config zone 'game'" "$LF_HOME/lobbyfence.conf" && [ -s "$LF_HOME/data/zones/game.ips" ] && [ ! -e "$b" ] && [ -n "$r" ] \
+	&& pass "restore (web page): the earlier settings and learned servers are back, the fresh ones kept in ${r##*/}" || fail "restore: $out / $(ls -a "$LF_HOME")"
+expect "...it filters as before the reset" "45.10.0.1 blocked 80.20.0.1 blocked" "$(probe 45.10.0.1 80.20.0.1)"
+expect "...and the page no longer says it started fresh" "0" "$(st "print(d['problems']['fresh_time'])")"
+out="$(cgi "$TOKEN" "exec restore")"
+echo "$out" | grep -q '"code":1' && echo "$out" | grep -q "no settings from before" && grep -q "^config zone 'game'" "$LF_HOME/lobbyfence.conf" \
+	&& pass "restore with nothing to bring back: says so, changes nothing" || fail "second restore: $out"
+# a fresh start asked for by hand, and back
+lf fresh >/dev/null 2>&1
+bf="$(ls -d "$LF_HOME"/before-fresh-* 2>/dev/null | head -n 1)"
+[ -n "$bf" ] && grep -q "^config zone 'game'" "$bf/lobbyfence.conf" && ! grep -q "^config zone" "$LF_HOME/lobbyfence.conf" \
+	&& [ "$(st "print(d['problems']['fresh_why'])")" = asked ] && pass "fresh (by hand): default settings, the earlier ones kept" || fail "fresh: $(ls -a "$LF_HOME")"
+lf restore >/dev/null 2>&1
+grep -q "^config zone 'game'" "$LF_HOME/lobbyfence.conf" && [ ! -e "$bf" ] && pass "...and restore brings them back" || fail "restore after fresh: $(ls -a "$LF_HOME")"
+# an install from before this check (no token on JFFS, no line): set up at its next start, nothing reset
+rm -f "$LF_HOME/.reset-mark"; nv set script_init="echo my own line"
+lf restart >/dev/null 2>&1
+[ -s "$LF_HOME/.reset-mark" ] && grep -q "^config zone 'game'" "$LF_HOME/lobbyfence.conf" && ! ls -d "$LF_HOME"/before-reset-* >/dev/null 2>&1 \
+	&& [ "$(nv get script_init | head -n 1)" = "echo my own line" ] && nv get script_init | grep -q "^# LobbyFence-reset-mark " \
+	&& pass "an install from before the reset check: set up at the next start, nothing reset" || fail "upgrade: $(ls -a "$LF_HOME") / $(nv get script_init)"
+# nvram answering nothing: nothing can be told, so nothing is reset
+printf '#!/bin/sh\nexit 0\n' > "$W/bin/nvram-mute"; chmod +x "$W/bin/nvram-mute"
+inr env PATH="$TPATH" LF_NVRAM="$W/bin/nvram-mute" "$LF_HOME/lobbyfence" restart >/dev/null 2>&1
+grep -q "^config zone 'game'" "$LF_HOME/lobbyfence.conf" && ! ls -d "$LF_HOME"/before-reset-* >/dev/null 2>&1 \
+	&& pass "nvram not answering: nothing is reset" || fail "mute nvram reset: $(ls -a "$LF_HOME")"
+lf stop
+
 # --- 14. uninstall
 inr env PATH="$TPATH" LF_JFFS="$W/jffs" LF_FORCE=1 "$TOMATO_SH" sh "$HERE/../freshtomato/install.sh" remove >/dev/null 2>&1
 [ ! -e "$W/jffs/etc/config/lobbyfence.fire" ] && [ ! -e "$LF_HOME/bin" ] && [ -f "$LF_HOME/lobbyfence.conf" ] && [ -d "$LF_HOME/data" ] \
 	&& pass "uninstall removes the program and hooks, keeps settings and data" || fail "uninstall: $(find "$W/jffs" | head)"
+[ "$(cat "$W/nvram/script_init" 2>/dev/null)" = "echo my own line" ] && [ ! -e "$LF_HOME/.reset-mark" ] \
+	&& pass "...takes its line out of the router's Init script and leaves the person's own" || fail "uninstall and the Init script: '$(cat "$W/nvram/script_init" 2>/dev/null)'"
+rm -f "$W/nvram/script_init"     # (the person's own line goes too: the router as it was before the test)
 [ -z "$(ipt -S | grep LF_)" ] && [ -z "$(ips list -n | grep '^lf_')" ] && pass "uninstall leaves no firewall rules or sets" || fail "rules left: $(ipt -S | grep -c LF_)"
 
 # --- 15. brick safety: purge with the copy the installer kept, then a fresh install

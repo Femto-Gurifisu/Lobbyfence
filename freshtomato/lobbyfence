@@ -7,6 +7,10 @@
 #   watchdog                 run every minute by cron: restarts the learning loop if it died
 #   web                      (re)install the web page (http://<router>/ext/lobbyfence.asp)
 #   menu                     add "LobbyFence" to FreshTomato's menu and say how it went
+#   restore                  bring back the settings and learned servers LobbyFence had
+#                            before the router was reset to its defaults (or before "fresh")
+#   fresh                    start fresh by hand: default settings, no zones, no learned
+#                            servers or records (the earlier ones are kept for "restore")
 #   anything else            passed to the router script: status, list, whereis, ...
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
@@ -24,6 +28,9 @@ export LF_DATA_DEFAULT="${LF_DATA_DEFAULT:-$LF_HOME/data}"
 MAIN="${LF_MAIN:-$LF_HOME/bin/lobbyfence-main}"
 WWWEXT="${LF_WWWEXT:-/tmp/var/wwwext}"
 SELF="$LF_HOME/lobbyfence"
+NVRAM="${LF_NVRAM:-nvram}"
+# (the web page's Status says so for a week after LobbyFence started fresh)
+export LF_FRESH_FILE="$LF_HOME/.fresh-start"
 
 have() { type "$1" >/dev/null 2>&1; }
 
@@ -136,6 +143,145 @@ svc_busy() {
 cron_on() { have cru && cru a lobbyfence "* * * * * $SELF watchdog"; }
 cron_off() { have cru && cru d lobbyfence; }
 
+# ---------------------------------------------- a reset to factory defaults
+# FreshTomato's Restore Default Configuration (normal or thorough) sets the
+# router's own settings back, but leaves JFFS as it is - and with it
+# LobbyFence's settings, learned servers and records, which would simply come
+# back once JFFS is switched on again. So that a reset gives LobbyFence a
+# fresh start as well, it keeps one line in the router's Init script
+# (Administration > Scripts > Init; a comment, it runs nothing), which a reset
+# clears - the same token is in $RESET_MARK on JFFS. The file there and the
+# line gone: the router was reset, or got an older saved configuration back.
+# The earlier settings and data then move to a folder of their own (kept for
+# "restore", the 3 newest) and LobbyFence starts with its default settings,
+# like a new install.
+RESET_MARK="$LF_HOME/.reset-mark"
+MARK_TAG="# LobbyFence-reset-mark"
+init_script() { "$NVRAM" get script_init 2>/dev/null; }
+mark_in_nvram() { init_script | sed -n "s/^$MARK_TAG \([0-9A-Za-z-]*\).*/\1/p" | head -n 1; }
+
+reset_mark() {
+	local t s
+	t="$(date +%s)-$$"
+	s="$(init_script | grep -v "^$MARK_TAG ")"
+	s="${s:+$s
+}$MARK_TAG $t - keep this line: LobbyFence ($LF_HOME) tells by it that the router was not reset to its defaults"
+	if "$NVRAM" set script_init="$s" && "$NVRAM" commit >/dev/null 2>&1 && [ "$(mark_in_nvram)" = "$t" ]; then
+		echo "$t" > "$RESET_MARK"
+	else
+		rm -f "$RESET_MARK"
+		log warning "could not add LobbyFence's line to the router's Init script - a reset to factory defaults will not give LobbyFence a fresh start"
+	fi
+}
+
+# the data folder a configuration file names ("" = LobbyFence's own)
+conf_data_dir() {
+	awk '$1 == "option" && $2 == "data_dir" { v = $3; gsub(/^["\047]|["\047]$/, "", v); print v; exit }' "$1" 2>/dev/null
+}
+
+# settings, learned servers and records to <folder> (by "restore" too)
+lf_park() {
+	mkdir -p "$1" || return 1
+	[ -f "$LF_CONF_FILE" ] && mv "$LF_CONF_FILE" "$1/lobbyfence.conf"
+	[ -d "$LF_HOME/data" ] && mv "$LF_HOME/data" "$1/data"
+	[ -f "$LF_HOME/.nomenu" ] && mv "$LF_HOME/.nomenu" "$1/.nomenu"
+	rm -f "$LF_CONF_STAGED"
+	return 0
+}
+
+# ...and from <folder> back in place
+lf_unpark() {
+	mv "$1/lobbyfence.conf" "$LF_CONF_FILE" || return 1
+	[ -d "$1/data" ] && mv "$1/data" "$LF_HOME/data"
+	[ -f "$1/.nomenu" ] && mv "$1/.nomenu" "$LF_HOME/.nomenu"
+	return 0
+}
+
+# the 3 newest of a kind of folder are kept
+lf_prune() { # before-reset / before-fresh / replaced
+	local d
+	case "$1" in before-reset|before-fresh|replaced) ;; *) return 0;; esac
+	for d in $(ls -d "$LF_HOME/$1"-* 2>/dev/null | sort -r | sed 1,3d); do rm -rf "$d"; done
+}
+
+# a folder lf_unpark emptied (its note aside, nothing else is in it)
+lf_drop() {
+	rm -f "$1/README.txt"
+	rmdir "$1" 2>/dev/null
+}
+
+fresh_start() { # reset (the router was reset to its defaults) / fresh (asked for)
+	local b d other
+	b="$LF_HOME/before-$1-$(date +%Y%m%d-%H%M%S)"
+	d="$(conf_data_dir "$LF_CONF_FILE")"
+	case "$d" in ''|"$LF_HOME/data"|"$LF_HOME/data/") other="";; *) other="$d";; esac
+	daemon_stop
+	lf_park "$b" || { log err "could not start fresh: cannot write $b"; return 1; }
+	if [ -f "$LF_SHARE/lobbyfence.conf.default" ]; then
+		cp "$LF_SHARE/lobbyfence.conf.default" "$LF_CONF_FILE"
+		sed -i "s#option data_dir .*#option data_dir '$LF_HOME/data'#" "$LF_CONF_FILE"
+	else
+		printf "config globals 'globals'\n\toption enabled '0'\n\toption data_dir '%s'\n" "$LF_HOME/data" > "$LF_CONF_FILE"
+	fi
+	mkdir -p "$LF_HOME/data"
+	# (records in memory from before: a crash, the last error)
+	rm -f "$LF_RUN/crash.log" "$LF_RUN/last_error"
+	{
+		if [ "$1" = reset ]; then
+			echo "LobbyFence's settings, learned servers and records from before the router was reset to its default settings ($(date '+%F %T'))."
+		else
+			echo "LobbyFence's settings, learned servers and records from before it was started fresh ($(date '+%F %T'))."
+		fi
+		echo "To bring them back: $SELF restore"
+		[ -n "$other" ] && echo "(The learned servers in $other, the data folder those settings named, were left where they are.)"
+	} > "$b/README.txt"
+	echo "$(date +%s) $b" > "$LF_FRESH_FILE"
+	lf_prune "before-$1"
+	if [ "$1" = reset ]; then
+		log notice "the router was reset to its default settings - LobbyFence starts fresh as well (default settings, no zones). Its earlier settings and learned servers are kept in $b - '$SELF restore' brings them back"
+	else
+		log notice "started fresh (default settings, no zones) - the earlier settings and learned servers are kept in $b - '$SELF restore' brings them back"
+	fi
+}
+
+reset_check() {
+	local want=""
+	# (nvram not answering at all: nothing can be told, so nothing is done)
+	[ -n "$("$NVRAM" get lan_ipaddr 2>/dev/null)" ] || return 0
+	[ -f "$RESET_MARK" ] && read -r want < "$RESET_MARK"
+	[ -n "$want" ] && [ "$(mark_in_nvram)" = "$want" ] && return 0
+	# (no token file yet - a new install, or one from before this check: nothing to compare)
+	[ -n "$want" ] && fresh_start reset
+	reset_mark
+}
+
+# the newest folder from before a reset (or a fresh start) back in place; what
+# is in use now goes to a folder of its own
+do_restore() {
+	local b cur
+	b="$(ls -d "$LF_HOME"/before-reset-* "$LF_HOME"/before-fresh-* 2>/dev/null | sed 's#.*/before-[a-z]*-\([0-9-]*\)$#\1 &#' | sort | tail -n 1 | cut -d' ' -f2-)"
+	if [ -z "$b" ] || [ ! -f "$b/lobbyfence.conf" ]; then
+		echo "there are no settings from before a reset (or a fresh start) to bring back" >&2
+		return 1
+	fi
+	do_stop
+	cur="$LF_HOME/replaced-$(date +%Y%m%d-%H%M%S)"
+	lf_park "$cur" || { echo "cannot write $cur" >&2; do_start; return 1; }
+	if ! lf_unpark "$b"; then
+		lf_unpark "$cur" && lf_drop "$cur"     # (what was in use, back as it was)
+		do_start
+		echo "could not move the earlier settings back - nothing was changed" >&2
+		return 1
+	fi
+	mkdir -p "$LF_HOME/data"
+	lf_drop "$b"
+	rm -f "$LF_FRESH_FILE"
+	lf_prune replaced
+	log notice "brought back the settings and learned servers from $b (the ones in use until now are kept in $cur)"
+	echo "brought back the settings and learned servers from before (the ones in use until now are kept in $cur)"
+	do_start
+}
+
 # the web page lives in /www/ext (a link to /tmp/var/wwwext, cleared at boot)
 web_install() {
 	mkdir -p "$WWWEXT/cgi-bin" "$WWWEXT/lobbyfence" || return 1
@@ -196,10 +342,13 @@ debug_extra() {
 	echo "cron: $(have cru && cru l 2>/dev/null | grep lobbyfence)"
 	echo "web page links: $(ls "$WWWEXT" "$WWWEXT/cgi-bin" 2>/dev/null | grep -i lobbyfence | tr '\n' ' ')"
 	echo "menu entry: $(menu_mounted "${LF_TOMATO_JS:-/www/tomato.js}" && echo added || echo 'not added')"
+	echo "reset check: $(if [ ! -f "$RESET_MARK" ]; then echo 'not set up yet'; elif [ "$(mark_in_nvram)" = "$(cat "$RESET_MARK")" ]; then echo 'line in the Init script'; else echo 'line in the Init script is MISSING (reset to defaults? the next start starts fresh)'; fi)"
+	echo "kept from before a reset or a fresh start: $(ls -d "$LF_HOME"/before-* "$LF_HOME"/replaced-* 2>/dev/null | sed 's#.*/##' | tr '\n' ' ')"
 }
 
 do_start() {
 	run_dir
+	reset_check
 	web_install
 	cron_on
 	if enabled; then
@@ -247,6 +396,15 @@ case "$1" in
 	web) web_install;;
 	debug) export LF_DEBUG_EXTRA="$SELF debug-extra"; exec "$MAIN" "$@";;
 	debug-extra) debug_extra;;
+	restore) svc_lock; do_restore; rc=$?; svc_unlock; exit $rc;;
+	fresh)
+		svc_lock
+		run_dir
+		fresh_start fresh && do_start
+		rc=$?
+		svc_unlock
+		[ "$rc" = 0 ] && echo "started fresh - the earlier settings and learned servers are kept ('$SELF restore' brings them back)"
+		exit $rc;;
 	menu) mkdir -p "$LF_RUN"; menu_link verbose;;
 	menu-off) menu_unlink;;
 	*) exec "$MAIN" "$@";;

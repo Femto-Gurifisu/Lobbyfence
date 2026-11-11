@@ -285,6 +285,48 @@ def main():
         r = inr(str(WWWEXT / "cgi-bin/lobbyfence.cgi"), data=b"\nexec block game 45.10.0.1\n")
         check("CGI without the page's token does nothing", b"error" in r.stdout and "45.10.0.1" not in (HOME / "lobbyfence.conf").read_text().split("block_ip")[-1][:30])
 
+        # a reset to factory defaults (FreshTomato's defaults again: an empty Init
+        # script; JFFS as it was), then the boot: LobbyFence starts fresh, the page
+        # says so, and "Bring them back…" brings the earlier zones back
+        zones_before = sorted(re.findall(r"^config zone '([^']+)'", (HOME / "lobbyfence.conf").read_text(), re.M))
+        inr(ENV["LF_NVRAM"], "unset", "script_init")
+        inr(str(HOME.parent / "etc/config/lobbyfence.init"))
+        def status():
+            try:
+                return json.loads((RUN / "status.json").read_text())
+            except Exception:
+                return {}
+        for _ in range(60):
+            if (status().get("problems") or {}).get("fresh_time", 0) > 0 and not (RUN / "svc.lock").exists():
+                break
+            page.wait_for_timeout(500)
+        conf = (HOME / "lobbyfence.conf").read_text()
+        check("after a reset to factory defaults: LobbyFence starts fresh (no zones), the earlier ones are kept",
+              zones_before and "config zone" not in conf and list(HOME.glob("before-reset-*")), [zones_before, conf[:200]])
+        rp = ctx.new_page()
+        rp.on("pageerror", lambda e: errs.append("restore page: " + str(e)))
+        rp.goto("http://router.test/ext/lobbyfence/app.asp")
+        rp.wait_for_function("document.querySelector('.lf-panel') && document.querySelector('.lf-panel').innerText.includes('started fresh')", timeout=30000)
+        check("the page says so: the router was reset, LobbyFence started fresh, the earlier zones are kept",
+              "The router was reset to its default settings, so LobbyFence started fresh too" in rp.locator(".lf-panel").inner_text())
+        if SHOTS:
+            rp.locator(".lf-panel").screenshot(path=str(SHOTS / "tomato-fresh-start.png"))
+        rp.locator(".lf-restore").click()
+        rp.locator(".modal").get_by_role("button", name="Bring them back").click()
+        try:
+            rp.wait_for_function("document.querySelector('.lf-panel') && !document.querySelector('.lf-restore') && document.querySelector('.lf-bar select')", timeout=40000)
+            ok = True
+        except Exception:
+            ok = False
+        conf = (HOME / "lobbyfence.conf").read_text()
+        zones_after = sorted(re.findall(r"^config zone '([^']+)'", conf, re.M))
+        r = inr(str(W / "bin/iptables"), "-n", "-L", "LF_game_o4")
+        opts = rp.locator(".lf-bar select").first.locator("option").all_inner_texts()
+        check("Bring them back: the earlier zones are back on the router and in the page, and filter again",
+              ok and zones_after == zones_before and r.returncode == 0 and not list(HOME.glob("before-reset-*")) and len(opts) >= len(zones_before),
+              [ok, zones_before, zones_after, r.returncode, opts])
+        rp.close()
+
         real = [e for e in errs if "favicon" not in e and "404" not in e]
         check("no JavaScript errors", not real, real[:6])
         b.close()

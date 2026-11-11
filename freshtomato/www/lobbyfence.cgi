@@ -89,6 +89,7 @@ case "$cmd" in
 			live|devices|cycle|export|builtin-servers) run "$LF" "$sub";;
 			apitest) run "$LF" apitest;;
 			restart) run "$LF" restart;;
+			restore) run "$LF" restore;;
 			debug)
 				# the debug report, or "debug clear" (forget the crash records)
 				case "$1" in ''|clear) run "$LF" debug $1;; *) fail "not allowed";; esac;;

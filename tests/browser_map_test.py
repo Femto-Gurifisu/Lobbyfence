@@ -1115,6 +1115,30 @@ def main():
             s.problems = { crashes: 1, crash_time: 1699996400, error: 'test error', error_time: 1699999000 }; window.view.renderStatus(); }""")
         txt = page.locator(".lf-panel").inner_text()
         check("crash and error notes go by the router's clock", "stopped unexpectedly (1 h ago)" in txt and "Last error, 16 min ago" in txt, txt[-400:])
+        # (FreshTomato) started fresh after the router was reset to its defaults: said for a week, with a way back
+        page.evaluate("""() => { const s = window.view.status; s.updated = 1700000000;
+            s.problems = { crashes: 0, crash_time: 0, error: '', error_time: 0, fresh_time: 1699996400, fresh_why: 'reset' }; window.view.renderStatus(); }""")
+        txt = page.locator(".lf-panel").inner_text()
+        check("after a reset to factory defaults: the panel says LobbyFence started fresh and the earlier zones are kept",
+              "The router was reset to its default settings, so LobbyFence started fresh too (1 h ago)" in txt and "earlier zones and learned servers are kept" in txt, txt[-500:])
+        page.evaluate("window.__execs = []; window.__execResult = { code: 1, stdout: '', stderr: 'there are no settings from before a reset (or a fresh start) to bring back' }")
+        page.locator(".lf-restore").click()
+        modal = page.locator("#modal")
+        modal.get_by_role("button", name="Bring them back").click()
+        page.wait_for_function("document.querySelector('#modal').innerText.includes('Could not bring them back')")
+        check("Bring them back… asks the router to restore; a refusal is shown, nothing reloads",
+              page.evaluate("window.__execs.slice(-1)[0]") == ["/usr/sbin/lobbyfence", "restore"] and "there are no settings from before" in modal.inner_text()
+              and modal.get_by_role("button", name="Bring them back").is_enabled())
+        page.evaluate("window.__reloaded = 0; window.view.reloadPage = () => { window.__reloaded = 1; }; window.__execResult = { code: 0, stdout: 'brought back', stderr: '' }")
+        modal.get_by_role("button", name="Bring them back").click()
+        page.wait_for_function("window.__reloaded === 1", timeout=3000)
+        check("...and when it worked, the page loads again (the earlier zones come from the router)", page.evaluate("window.__reloaded") == 1)
+        page.locator("#modal").get_by_role("button", name="Cancel").click()
+        page.evaluate("""() => { const s = window.view.status; s.problems.fresh_why = 'fresh'; window.view.renderStatus(); }""")
+        check("a fresh start asked for by hand is said so", "LobbyFence was started fresh 1 h ago" in page.locator(".lf-panel").inner_text())
+        page.evaluate("""() => { const s = window.view.status; s.problems.fresh_time = 1700000000 - 8 * 86400; window.view.renderStatus(); }""")
+        check("...and no longer after a week", page.locator(".lf-restore").count() == 0)
+        page.evaluate("window.__execResult = null")
         page.evaluate("() => { const s = window.view.status; s.updated = window.__upd; delete s.problems; window.view.renderStatus(); }")
 
         # ---- 6b. Servers file: see the saved servers by game, download / copy / import / paste
