@@ -3747,6 +3747,7 @@ return view.extend({
 		else if (EMBED && lag.error) {
 			var whyT = { nonetem: _('LobbyFence has no netem module for this firmware\'s kernel (%s).').format(st && st.kernel || '?'),
 				netemrefused: _('The router\'s kernel refused LobbyFence\'s netem module - it was built for a different firmware build. Nothing was changed.'),
+				netemconfig: _('This firmware\'s kernel is configured differently from the one LobbyFence\'s netem module was built for, so the module is not used. Nothing was changed.'),
 				netemcrash: _('The router restarted while the lag simulator was using netem (perhaps the netem module crashed it), so netem is not used again. If the restart had another cause (a power cut, say), delete %s over SSH and press Save & Apply.').format(MERLIN ? '/jffs/addons/lobbyfence/.netem-loading' : '/jffs/lobbyfence/.netem-loading'),
 				selftest: _('The netem module failed its self-test on this router, so it is not used.'),
 				noclassify: _('This firmware\'s firewall can\'t pick the lag queue (CLASSIFY is missing).'),

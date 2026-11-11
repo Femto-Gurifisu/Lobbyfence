@@ -35,6 +35,7 @@ LAG_QBASE=7400                       # queues 7401..7412, one per lag zone
 # netem modules LobbyFence carries: netem/<model>-<kernel>/sch_netem.ko
 LF_NETEM_DIR="${LF_NETEM_DIR:-${LF_HOME:-/jffs/addons/lobbyfence}/netem}"
 NETEM_TESTDEV=lfnetem0
+LF_PROC_CONFIG="${LF_PROC_CONFIG:-/proc/config.gz}"
 
 # the netem module for this router: the firmware's own if it has one, else
 # the one LobbyFence carries for exactly this model and kernel (none: empty)
@@ -150,7 +151,46 @@ lag_chains_set() { # netem|nfqueue
 
 # ---- netem
 
-# once per boot, before netem carries real traffic: a private dummy interface
+# the options C code sees in a kernel configuration (gzip file): NAME=value
+# (names and paths - the string options - and netem itself aside)
+kconfig_opts() {
+	gunzip -c "$1" 2>/dev/null | awk -F= '/^CONFIG_[A-Za-z0-9_]+=/ && $2 !~ /^"/ && $1 != "CONFIG_NET_SCH_NETEM"'
+}
+
+# a module LobbyFence carries is loaded only into the kernel configuration it
+# was built for: every option of the router's own (/proc/config.gz) must be
+# what kernel-config.gz next to the module says - a kernel configured
+# differently may lay out its structures differently from what the module
+# expects. (The firmware's own module, or one that is loaded already, isn't
+# LobbyFence's to check.) The differences are kept in netem.config for diag.
+netem_config_ok() {
+	local d r="$LF_RUN/netem.config" n
+	case "$LF_NETEM_KO" in "$LF_NETEM_DIR"/*) ;; *) return 0;; esac
+	grep -q '^sch_netem ' "${LF_PROC_MODULES:-/proc/modules}" 2>/dev/null && return 0
+	d="${LF_NETEM_KO%/*}"
+	if [ ! -f "$d/kernel-config.gz" ] || [ ! -f "$LF_PROC_CONFIG" ]; then
+		echo "unknown: $([ -f "$LF_PROC_CONFIG" ] && echo "$d/kernel-config.gz is missing" || echo "this kernel doesn't show its configuration ($LF_PROC_CONFIG)")" > "$r"
+		log warning "lag simulator: the router's kernel configuration can't be compared with the netem module's - lf-lagd is used instead"
+		return 1
+	fi
+	kconfig_opts "$d/kernel-config.gz" > "$r.module"
+	kconfig_opts "$LF_PROC_CONFIG" > "$r.router"
+	awk -F= 'NR == FNR { m[$1] = $2; next } { r[$1] = $2 }
+		END {
+			for (k in m) { if (!(k in r)) print k ": module " m[k] ", router off"; else if (m[k] != r[k]) print k ": module " m[k] ", router " r[k] }
+			for (k in r) if (!(k in m)) print k ": module off, router " r[k]
+		}' "$r.module" "$r.router" | sort > "$r.diff"
+	n="$(grep -c . "$r.diff")"
+	if [ -s "$r.module" ] && [ -s "$r.router" ] && [ "$n" = 0 ]; then
+		rm -f "$r.module" "$r.router" "$r.diff"; echo ok > "$r"; return 0
+	fi
+	rm -f "$r.module" "$r.router"
+	{ echo "differs: $n options"; cat "$r.diff"; } > "$r"; rm -f "$r.diff"
+	log warning "lag simulator: this firmware's kernel is configured differently from the one the netem module was built for ($n options, first: $(sed -n 2p "$r")) - lf-lagd is used instead"
+	return 1
+}
+
+# once per boot, before netem carries real traffic: a private test interface
 # with LobbyFence's queue on it, a few pings through the netem band, and the
 # packets must come out the other end of netem (its timers and queue work).
 # Nothing about it is reachable from outside (198.18.254.0/30, benchmark range).
@@ -159,7 +199,9 @@ netem_selftest() {
 	[ -f "$r" ] && { [ "$(cat "$r")" = ok ]; return; }
 	echo running > "$r"
 	$IPCMD link del "$d" >/dev/null 2>&1
-	if ! $IPCMD link add "$d" type dummy >/dev/null 2>&1; then
+	# (kernel 4.1 firmware has no dummy driver: an ifb interface does the same
+	# here - it drops what the router itself sends into it, after the queue)
+	if ! $IPCMD link add "$d" type dummy >/dev/null 2>&1 && ! $IPCMD link add "$d" type ifb >/dev/null 2>&1; then
 		echo nodummy > "$r"; log warning "lag simulator: netem self-test: no test interface - netem not used"; return 1
 	fi
 	if $IPCMD link set "$d" up 2>/dev/null && $IPCMD addr add 198.18.254.1/30 dev "$d" 2>/dev/null && \
@@ -224,6 +266,7 @@ netem_apply() {
 	[ "$NETEM_HAVE" = 1 ] || { NETEM_ERR=nonetem; return 1; }
 	have "$TC" || { NETEM_ERR=notc; return 1; }
 	ipt_target_ok 4 "$(lag_class_target 1)" mangle || { NETEM_ERR=noclassify; return 1; }
+	netem_config_ok || { NETEM_ERR=netemconfig; return 1; }
 	ipt_netem_load || return 1
 	netem_selftest || { NETEM_ERR=selftest; netem_trial_unused; return 1; }
 	for zn in $LAG_ZONES; do
@@ -415,7 +458,7 @@ fw_tick() {
 }
 
 # netem on this router: none (no module for it), ready, trial, works,
-# crashed (a restart during the trial), selftest-failed
+# crashed (a restart during the trial), other-kernel-config, selftest-failed
 netem_state() {
 	local g
 	netem_guard; g=$?
@@ -423,6 +466,7 @@ netem_state() {
 	elif [ "$g" = 1 ]; then echo crashed
 	elif netem_ok; then echo works
 	elif [ "$g" = 0 ]; then echo trial
+	elif [ -f "$LF_RUN/netem.config" ] && [ "$(cat "$LF_RUN/netem.config")" != ok ]; then echo other-kernel-config
 	elif [ -f "$LF_RUN/netem.selftest" ] && [ "$(cat "$LF_RUN/netem.selftest")" != ok ]; then echo selftest-failed
 	else echo ready
 	fi
@@ -434,6 +478,7 @@ fw_diag() {
 	echo "hardware acceleration: $(have "$FC" && echo 'flow cache present' || echo 'no flow cache tool'); game connections kept out of it: $(ipt_target_ok 4 SKIPLOG && echo yes || echo 'no (SKIPLOG missing)')"
 	echo "lag simulator: $(if [ "$LAG_SUPPORTED" != 1 ]; then echo 'lf-lagd missing'; elif [ ! -s "$LF_RUN/lag.zones" ]; then echo 'not in use'; elif [ "$(cat "$LF_RUN/lag.kind" 2>/dev/null)" = netem ]; then echo "netem, queues on:$(tr '\n' ' ' 2>/dev/null < "$LF_RUN/lag.devs" | sed 's/^/ /; s/ $//')"; else echo "lf-lagd, running for:$(for p in "$LF_RUN"/lagd.*.pid; do [ -f "$p" ] && kill -0 "$(cat "$p")" 2>/dev/null && { p="${p##*/lagd.}"; printf ' %s' "${p%.pid}"; }; done)$([ -s "$LF_RUN/lag.why" ] && echo " (netem not used: $(cat "$LF_RUN/lag.why"))")"; fi)"
 	echo "netem: $(netem_state)$([ -n "$LF_NETEM_KO" ] && echo " - module $LF_NETEM_KO")"
+	if [ -f "$LF_RUN/netem.config" ] && [ "$(cat "$LF_RUN/netem.config")" != ok ]; then sed 's/^/netem kernel configuration: /' "$LF_RUN/netem.config"; fi
 }
 
 fw_status_json() {

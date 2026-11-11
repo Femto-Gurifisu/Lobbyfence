@@ -56,6 +56,7 @@ list() { # platform -> the package's files, one per line
 			echo asuswrt-merlin/netem/dwarf_layouts.py
 			for d in asuswrt-merlin/netem/*/; do
 				[ -f "$d/sch_netem.ko" ] || continue
+				echo "${d}sch_netem.ko"
 				echo "${d}SHA256SUMS"
 				echo "${d}kernel-config.gz"
 			done;;

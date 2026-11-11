@@ -2,7 +2,7 @@
 # Stand-ins for the GT-AXE16000's tc / ip / ping / insmod / iptables for the
 # netem unit test (the test kernel has no netem, prio, dummy or fw). One
 # script, called by the name of the tool it stands in for. State + log in
-# FAKE_DIR; switches: no-dummy, netem-broken (netem passes nothing),
+# FAKE_DIR; switches: no-dummy, no-ifb, kver (the kernel version), netem-broken (netem passes nothing),
 # insmod-fail, no-classify, busy.<dev> (a QoS queue on that device), wan
 # (the internet device, default eth0).
 D="${FAKE_DIR:?}"; mkdir -p "$D/dev"
@@ -41,7 +41,7 @@ tc)
 	esac;;
 ip)
 	case "$1 $2" in
-		"link add") [ -f "$D/no-dummy" ] && { echo "RTNETLINK answers: Operation not supported" >&2; exit 2; }
+		"link add") [ -f "$D/no-$5" ] && { echo "RTNETLINK answers: Operation not supported" >&2; exit 2; }
 			touch "$D/link.$3";;
 		"link del") [ -f "$D/link.$3" ] || exit 1; rm -f "$D/link.$3" "$D/dev/$3" "$D/pings.$3";;
 		"route get")
@@ -66,6 +66,6 @@ iptables-restore|ip6tables-restore)
 	case "$in" in *CLASSIFY*) [ -f "$D/no-classify" ] && exit 1;; esac
 	case "$in" in *"-A LF_TEST -j CLASSIFY"*) echo "$in" | grep -q '^\*mangle' || exit 1;; esac
 	exit 0;;
-uname) echo 4.19.183;;
+uname) cat "$D/kver" 2>/dev/null || echo 4.19.183;;
 esac
 exit 0

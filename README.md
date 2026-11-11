@@ -316,7 +316,8 @@ Not supported: MIPS FreshTomato builds (older firewall tools, usually no curl).
 
 LobbyFence runs on **Asuswrt-Merlin** for ASUS routers with Broadcom's HND
 platform - the Wi-Fi 6 / 6E RT-AX and GT-AX models (for example RT-AX86U,
-RT-AX88U, RT-AX58U, GT-AX6000, RT-AX86U Pro, RT-AX88U Pro) - on firmware
+RT-AX88U, RT-AX58U, GT-AX6000, RT-AX86U Pro, RT-AX88U Pro) and the Wi-Fi 7
+RT-BE and GT-BE models (for example GT-BE98 Pro, RT-BE96U, RT-BE88U) - on firmware
 384.15 or newer (needs Merlin's add-on support; stock ASUS firmware can't run
 add-ons). It is the same program and the same map page as on FreshTomato:
 iptables + ipset, with the page added to Merlin's web interface through its
@@ -386,25 +387,38 @@ What is different on Asuswrt-Merlin:
   accelerated.
 * **Lag simulator** - two ways, picked automatically:
   * **netem** (the kernel's own network emulator, the same as on OpenWrt and
-    FreshTomato) on the **GT-AXE16000, GT-AX6000, GT-AX11000 Pro, RT-AX86U
-    Pro, RT-AX88U Pro and ZenWiFi Pro XT12** (kernel 4.19.183). ASUS's
-    firmware has no netem, so LobbyFence carries a module built from the
-    firmware's own kernel source with each model's own configuration. Each
-    was checked against ASUS's own precompiled drivers for that model (875
-    kernel structures per model, all identical in layout; see
-    `asuswrt-merlin/netem/README.md`). It is used only on a matching model
-    and kernel (`nvram get productid` or `odmpid`, `uname -r`), and it has to pass three
-    safety steps:
-    1. A self-test once per boot, on a private test interface, before it
+    FreshTomato) on every model Merlin builds firmware for today:
+
+    | Models | Kernel |
+    | --- | --- |
+    | GT-BE98 Pro, RT-BE96U, RT-BE88U / RT-BE7200, RT-BE86U, RT-BE92U, RT-BE58 Go | 4.19.294 |
+    | GT-AXE16000, GT-AX6000, GT-AX11000 Pro, RT-AX86U Pro, RT-AX88U Pro, ZenWiFi Pro XT12 | 4.19.183 |
+    | RT-AX86U / RT-AX86S, RT-AX68U, GT-AXE11000, RT-AX58U / RT-AX3000 | 4.1.52 |
+    | RT-AX88U, GT-AX11000 | 4.1.51 |
+
+    ASUS's firmware has no netem, so LobbyFence carries a module built from
+    the firmware's own kernel source with each model's own configuration and
+    compiler. Sixteen of the eighteen were also checked against ASUS's own
+    precompiled drivers for that model (the kernel structures both use are
+    laid out identically); ASUS ships none with debug information for the
+    RT-AX58U and RT-BE58 Go, so those two rest on the build and the check on
+    the router. The details are in `asuswrt-merlin/netem/README.md`. A
+    module is used only on a matching model and kernel (`nvram get
+    productid` or `odmpid`, `uname -r`), and it has to pass four safety
+    steps:
+    1. The router's own kernel configuration (`/proc/config.gz`) must be
+       exactly the one the module was built for. If one option differs -
+       another firmware build, say - the module is never loaded.
+    2. A self-test once per boot, on a private test interface, before it
        touches real traffic.
-    2. A guard on every boot it is used: if the router restarts while
+    3. A guard on every boot it is used: if the router restarts while
        netem is in use, netem is never used again by itself.
-    3. A fallback to lf-lagd whenever anything about it doesn't work.
+    4. A fallback to lf-lagd whenever anything about it doesn't work.
        That includes QoS or the bandwidth limiter using the connection.
 
     The zone's rule puts its game packets in their own netem queue (CLASSIFY,
     no packet marks).
-  * **lf-lagd** on every other model: a small C program (one static ARM
+  * **lf-lagd** on every other model, and whenever netem can't be used: a small C program (one static ARM
     binary; source and build script in `asuswrt-merlin/lagd/`). The firewall
     hands the zone's game packets to it through the kernel's packet queue
     (NFQUEUE); it holds each one for the delay (plus jitter, minus loss) and
@@ -420,11 +434,21 @@ What is different on Asuswrt-Merlin:
 * Command line: `/jffs/addons/lobbyfence/lobbyfence status`, `... diag`,
   `... list <zone>`, `... whereis <address>`, `... restart`.
 
-Supported models: the Wi-Fi 6 / 6E HND models on Merlin 3004.388.x or
-3006.102.x - RT-AX86U / Pro / S, RT-AX88U / Pro, RT-AX68U, RT-AX58U, RT-AX56U,
-GT-AX6000, GT-AX11000 / Pro, GT-AXE11000, GT-AXE16000, ZenWiFi XT12,
-RT-AC68U V4. Wi-Fi 7 models (RT-BE96U, GT-BE98 Pro, RT-BE88U, RT-BE86U,
-RT-BE92U, RT-BE58 Go) are the same platform family but untested.
+Supported models: the ones Merlin builds firmware for, on 3004.388.x or
+3006.102.x.
+
+* Wi-Fi 6 / 6E: RT-AX86U / S / Pro, RT-AX88U / Pro, RT-AX68U, RT-AX58U /
+  RT-AX3000 (V1), GT-AX6000, GT-AX11000 / Pro, GT-AXE11000, GT-AXE16000,
+  ZenWiFi Pro XT12.
+* Wi-Fi 7: GT-BE98 Pro, RT-BE96U, RT-BE88U / RT-BE7200, RT-BE86U, RT-BE92U,
+  RT-BE58 Go. Their firmware has the same firewall parts, flow cache and
+  add-on support as the Wi-Fi 6 models (checked in Merlin 3006.102.9's
+  source and kernel configuration). LobbyFence has not been run on a real
+  Wi-Fi 7 router yet - reports are welcome.
+
+Models Merlin has stopped building for (RT-AX56U, RT-AC68U V4) work on their
+last Merlin release, with lf-lagd for the lag simulator. The GT-BE19000AI
+isn't in Merlin's published source yet; it also uses lf-lagd.
 
 Not supported: older Wi-Fi 5 models (RT-AC68U v1-v3, RT-AC88U, RT-AC3100,
 RT-AC5300, ...) - their CTF acceleration would let game traffic skip the
@@ -1097,8 +1121,12 @@ problems unlikely, not impossible.
 * `merlin_netem_unit.sh <workdir> [shell]` — the Merlin lag simulator's choice
   between netem and lf-lagd, with stand-ins for the GT-AXE16000's `tc`, `ip`,
   `ping` and `insmod`. It covers:
-  - the self-test on a private dummy interface before any real device gets
-    a queue
+  - which module is picked: one per model and kernel version, each fitting
+    its checksum and kernel configuration
+  - the kernel configuration check (an option that differs, one only the
+    router has, no `/proc/config.gz`) - the module is never loaded
+  - the self-test on a private test interface (dummy, or ifb on kernel 4.1)
+    before any real device gets a queue
   - the queues and CLASSIFY bands
   - the trial
   - every fallback: QoS on, self-test failing, module refused, a restart

@@ -4,7 +4,8 @@
 # has no netem / prio / dummy): self-test on a private dummy interface, the
 # queues and CLASSIFY targets it sets up, the two-minute trial, and every way
 # of falling back to lf-lagd (QoS on, self-test failing, the kernel refusing
-# the module, a restart during an earlier trial, another model).
+# the module, a kernel configured differently from the module's, a restart
+# during an earlier trial, another model).
 #   usage: merlin_netem_unit.sh <workdir> [shell]
 W="$1"; SH="${2:-sh}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -13,9 +14,14 @@ rm -rf "$W"; mkdir -p "$W/bin" "$W/home/netem/gt-axe16000-4.19.183"
 for t in tc ip ping insmod iptables ip6tables iptables-restore ip6tables-restore uname; do
 	ln -s "$HERE/fake_merlin_netem.sh" "$W/bin/$t"
 done
-for d in "$REPO"/asuswrt-merlin/netem/*-4.19.183; do
-	mkdir -p "$W/home/netem/${d##*/}"; cp "$d/sch_netem.ko" "$W/home/netem/${d##*/}/"
+for d in "$REPO"/asuswrt-merlin/netem/*-[0-9]*; do
+	mkdir -p "$W/home/netem/${d##*/}"; cp "$d/sch_netem.ko" "$d/kernel-config.gz" "$W/home/netem/${d##*/}/"
 done
+# the router's own /proc/config.gz: the module's configuration without netem
+# (as the firmware has it), or changed by the sed expression given
+proc_config() { # folder [sed expression]
+	gunzip -c "$REPO/asuswrt-merlin/netem/$1/kernel-config.gz" | sed -e 's/^CONFIG_NET_SCH_NETEM=m$/# CONFIG_NET_SCH_NETEM is not set/' ${2:+-e "$2"} | gzip -c > "$W/fake/config.gz"
+}
 # lf-lagd stand-in: says it runs (like the real one) and waits
 printf '#!/bin/sh\necho "lf-lagd: queue $2, delay" >&2\nexec sleep 60\n' > "$W/home/lf-lagd"; chmod 755 "$W/home/lf-lagd"
 echo 0123-boot-id > "$W/boot_id"
@@ -25,11 +31,12 @@ run() { # name 'setup shell' 'commands' [model]
 	rm -rf "$W/fake" "$W/run"; mkdir -p "$W/fake" "$W/run"
 	rm -f "$W/home/.netem-ok" "$W/home/.netem-loading"
 	printf 'LF_game_q\nLF_z2_q\n' > "$W/fake/chains"
+	proc_config gt-axe16000-4.19.183
 	(cd "$W/fake" && eval "$2")
 	cat > "$W/s.sh" <<EOT
 PATH="$W/bin:\$PATH"; FAKE_DIR="$W/fake"; export FAKE_DIR
 LF_RUN="$W/run"; LF_HOME="$W/home"; LF_SHARE="$REPO/files/usr/share/lobbyfence"
-LF_LAGD="$W/home/lf-lagd"; LF_PROC_MODULES="$W/fake/proc.modules"; LF_BOOT_ID="$W/boot_id"; LF_IPV6=0
+LF_LAGD="$W/home/lf-lagd"; LF_PROC_MODULES="$W/fake/proc.modules"; LF_PROC_CONFIG="$W/fake/config.gz"; LF_BOOT_ID="$W/boot_id"; LF_IPV6=0
 have() { type "\$1" >/dev/null 2>&1; }
 log() { echo "LOG \$*" >> "$W/run/log"; }
 nvram() { [ "\$1" = get ] || return 0; case "\$2" in productid) echo "${4:-GT-AXE16000}";; odmpid) echo "${5:-}";; esac; }
@@ -52,15 +59,29 @@ F=0; ok() { echo "PASS: $*"; }; no() { echo "FAIL: $*"; F=1; }
 r="$W/run"; f="$W/fake"
 
 # --- 0. which module: one per model (productid, else odmpid), only for the running kernel
-for mdl in GT-AX6000 XT12 GT-AX11000_PRO RT-AX86U_PRO RT-AX88U_PRO GT-AXE16000; do
-	run M ':' 'echo "ko=$(merlin_netem_ko)"' "$mdl"
-	l="$(echo "$mdl" | tr A-Z a-z)"
-	grep -qx "ko=$W/home/netem/$l-4.19.183/sch_netem.ko" "$W/out.M" && ok "$mdl: its netem module is found" || no "$mdl: $(cat "$W/out.M")"
+n=0
+for d in "$REPO"/asuswrt-merlin/netem/*-[0-9]*; do
+	d="${d##*/}"; l="${d%-*}"; kv="${d##*-}"; mdl="$(echo "$l" | tr a-z A-Z)"; n=$((n + 1))
+	# found for its model and kernel, its configuration is this kernel's, and
+	# it is the module the checksum file names
+	run M "echo $kv > kver; proc_config $d" 'echo "ko=$(merlin_netem_ko)"; netem_config_ok && echo config-ok' "$mdl"
+	grep -qx "ko=$W/home/netem/$d/sch_netem.ko" "$W/out.M" && grep -qx config-ok "$W/out.M" \
+		&& (cd "$REPO/asuswrt-merlin/netem/$d" && sha256sum -c SHA256SUMS >/dev/null 2>&1) \
+		&& gunzip -c "$REPO/asuswrt-merlin/netem/$d/kernel-config.gz" | grep -qx "CONFIG_NET_SCH_NETEM=m" \
+		&& gunzip -c "$REPO/asuswrt-merlin/netem/$d/kernel-config.gz" | grep -q "^# Linux/arm.* $kv Kernel Configuration" \
+		&& strings -a "$REPO/asuswrt-merlin/netem/$d/sch_netem.ko" | grep -q "^vermagic=$kv SMP preempt mod_unload " \
+		&& ok "$mdl (kernel $kv): its netem module is found and fits its kernel configuration" || no "$mdl: $(cat "$W/out.M")"
+	# the same model on another kernel version: no module
+	run M 'echo 4.19.999 > kver' 'echo "ko=$(merlin_netem_ko)"' "$mdl"
+	grep -qx "ko=" "$W/out.M" || no "$mdl on another kernel: $(cat "$W/out.M")"
 done
+[ "$n" = 18 ] && ok "18 models carry a module, none is used on another kernel version" || no "module folders: $n"
 run M ':' 'echo "ko=$(merlin_netem_ko)"' 'ZENWIFI_PRO_XT12' 'XT12'
 grep -qx "ko=$W/home/netem/xt12-4.19.183/sch_netem.ko" "$W/out.M" && ok "found by odmpid when productid is another name" || no "odmpid: $(cat "$W/out.M")"
-run M ':' 'echo "ko=$(merlin_netem_ko)"' 'RT-AX86U'
-grep -qx "ko=" "$W/out.M" && ok "a model without a module: none (lf-lagd)" || no "RT-AX86U: $(cat "$W/out.M")"
+run M ':' 'echo "ko=$(merlin_netem_ko)"' 'RT-AX56U'
+grep -qx "ko=" "$W/out.M" && ok "a model without a module: none (lf-lagd)" || no "RT-AX56U: $(cat "$W/out.M")"
+run M 'echo 4.1.52 > kver' 'echo "ko=$(merlin_netem_ko)"' 'RT-AX86U' 'RT-AX86S'
+grep -qx "ko=$W/home/netem/rt-ax86u-4.1.52/sch_netem.ko" "$W/out.M" && ok "RT-AX86S (sold under another name): the RT-AX86U module" || no "RT-AX86S: $(cat "$W/out.M")"
 
 # --- A. the GT-AXE16000: netem works
 run A ':' 'ipt_lag_apply; ipt_lag_zones; fw_mangle_extra 4 > "$LF_RUN/mangle"; fw_status_json > "$LF_RUN/st"; echo "state=$(netem_state)"
@@ -114,8 +135,35 @@ run D2 'echo "other-boot 50" > "'"$W"'/home/.netem-loading"' 'netem_id > "$LF_HO
 run E 'touch insmod-fail' 'ipt_lag_apply'
 [ "$(cat "$r/lag.why")" = netemrefused ] && [ "$(cat "$r/lag.kind")" = nfqueue ] && [ ! -f "$W/home/.netem-loading" ] && ok "module refused: lf-lagd, no trial left behind" || no "refused: $(cat "$r/log")"
 
+# --- E2. the firmware's kernel is configured differently from the module's: never loaded
+run E2 'proc_config gt-axe16000-4.19.183 "s/^CONFIG_NET_SWITCHDEV=y$/# CONFIG_NET_SWITCHDEV is not set/; s/^CONFIG_NR_CPUS=.*/CONFIG_NR_CPUS=8/"' 'ipt_lag_apply; echo "state=$(netem_state)"; fw_diag'
+! grep -q "^insmod\|lfnetem0" "$f/calls.log" && [ "$(cat "$r/lag.why")" = netemconfig ] && [ "$(cat "$r/lag.kind")" = nfqueue ] && [ ! -f "$W/home/.netem-loading" ] \
+	&& grep -q "state=other-kernel-config" "$W/out.E2" && ok "another kernel configuration: module never loaded, lf-lagd, no trial" || no "E2: $(cat "$W/out.E2" "$f/calls.log" "$r/log" 2>&1)"
+grep -q "netem kernel configuration: differs: 2 options" "$W/out.E2" && grep -q "CONFIG_NET_SWITCHDEV: module y, router off" "$W/out.E2" && grep -q "CONFIG_NR_CPUS: module [0-9]*, router 8" "$W/out.E2" \
+	&& grep -q "configured differently .*2 options" "$r/log" && ok "...diag and the log name the options that differ" || no "E2 diag: $(cat "$W/out.E2" "$r/log")"
+run E3 'proc_config gt-axe16000-4.19.183 "s/^# CONFIG_NET_SCH_DRR is not set$/CONFIG_NET_SCH_DRR=m/"' 'ipt_lag_apply'
+[ "$(cat "$r/lag.why")" = netemconfig ] && grep -q "CONFIG_NET_SCH_DRR: module off, router m" "$r/netem.config" && ok "an option only the router has counts too" || no "E3: $(cat "$r/netem.config" "$r/log" 2>&1)"
+run E4 'proc_config gt-axe16000-4.19.183 "s/^CONFIG_DEFAULT_HOSTNAME=.*/CONFIG_DEFAULT_HOSTNAME=\"router\"/; s/^# CONFIG_NET_SCH_NETEM is not set/CONFIG_NET_SCH_NETEM=y/"; echo "# comment" | gzip -c >> config.gz' 'ipt_lag_apply'
+[ "$(cat "$r/lag.kind")" = netem ] && [ "$(cat "$r/netem.config")" = ok ] && ok "names (string options), comments and netem's own option don't count" || no "E4: $(cat "$r/netem.config" "$r/log" 2>&1)"
+run E5 'rm -f config.gz' 'ipt_lag_apply; echo "state=$(netem_state)"'
+! grep -q "^insmod" "$f/calls.log" && [ "$(cat "$r/lag.why")" = netemconfig ] && grep -q "^unknown: " "$r/netem.config" && ok "a kernel that doesn't show its configuration: module not loaded" || no "E5: $(cat "$r/netem.config" "$f/calls.log" 2>&1)"
+run E6 'rm -f "'"$W"'/home/netem/gt-axe16000-4.19.183/kernel-config.gz"' 'ipt_lag_apply'
+! grep -q "^insmod" "$f/calls.log" && [ "$(cat "$r/lag.why")" = netemconfig ] && ok "a module without its configuration file: not loaded" || no "E6: $(cat "$f/calls.log")"
+cp "$REPO/asuswrt-merlin/netem/gt-axe16000-4.19.183/kernel-config.gz" "$W/home/netem/gt-axe16000-4.19.183/"
+run E7 'rm -f config.gz; echo "sch_netem 24576 0 - Live 0xffffffc000a00000" > proc.modules' 'ipt_lag_apply'
+[ "$(cat "$r/lag.kind")" = netem ] && ! grep -q "^insmod" "$f/calls.log" && ok "netem already in the kernel (the firmware's own): used without the check" || no "E7: $(cat "$r/log" 2>&1)"
+
+# --- E8. kernel 4.1 firmware has no dummy driver: the self-test runs on an ifb interface
+run E8 'echo 4.1.51 > kver; proc_config rt-ax88u-4.1.51; touch no-dummy' 'ipt_lag_apply' RT-AX88U
+grep -q "ip link add lfnetem0 type dummy" "$f/calls.log" && grep -q "ip link add lfnetem0 type ifb" "$f/calls.log" && [ "$(cat "$r/netem.selftest")" = ok ] \
+	&& grep -q "insmod $W/home/netem/rt-ax88u-4.1.51/sch_netem.ko" "$f/calls.log" && [ "$(cat "$r/lag.kind")" = netem ] && grep -q "ip link del lfnetem0" "$f/calls.log" \
+	&& ok "RT-AX88U (kernel 4.1, no dummy driver): self-test on an ifb interface, then netem" || no "E8: $(cat "$f/calls.log" "$r/log")"
+run E9 'touch no-dummy no-ifb' 'ipt_lag_apply'
+[ "$(cat "$r/lag.why")" = selftest ] && [ "$(cat "$r/netem.selftest")" = nodummy ] && [ "$(cat "$r/lag.kind")" = nfqueue ] && ! grep -q "dev br0 root" "$f/calls.log" \
+	&& ok "no test interface at all: no self-test, so no netem (lf-lagd)" || no "E9: $(cat "$r/log")"
+
 # --- F. another model: no netem, lf-lagd directly
-run F ':' 'echo "have=$NETEM_HAVE"; ipt_lag_apply; echo "state=$(netem_state)"' RT-AX86U
+run F ':' 'echo "have=$NETEM_HAVE"; ipt_lag_apply; echo "state=$(netem_state)"' RT-AX56U
 grep -q "have=0" "$W/out.F" && ! grep -q "insmod\|lfnetem0" "$f/calls.log" && [ "$(cat "$r/lag.kind")" = nfqueue ] && [ ! -f "$r/lag.why" ] && grep -q "state=none" "$W/out.F" \
 	&& ok "other models: lf-lagd, netem never touched" || no "other model: $(cat "$W/out.F" "$f/calls.log")"
 

@@ -5,42 +5,68 @@ LobbyFence carries the module for the models listed here, built from the
 firmware's own kernel source. On any other model the lag simulator uses
 LobbyFence's own helper (lf-lagd) instead, which works on every model.
 
-| folder | model | kernel | firmware it was checked against |
+| folder | model | kernel | built from |
 | --- | --- | --- | --- |
-| `gt-axe16000-4.19.183/` | ASUS GT-AXE16000 | 4.19.183 (Broadcom HND 5.04, BCM4912) | Asuswrt-Merlin 3006.102.9 and 3004.388.12 |
-| `gt-ax6000-4.19.183/` | ASUS GT-AX6000 | 4.19.183 (Broadcom HND 5.04, BCM4912) | Asuswrt-Merlin 3006.102.9 |
-| `gt-ax11000_pro-4.19.183/` | ASUS GT-AX11000 Pro | 4.19.183 (Broadcom HND 5.04, BCM4912) | Asuswrt-Merlin 3006.102.9 |
-| `rt-ax86u_pro-4.19.183/` | ASUS RT-AX86U Pro | 4.19.183 (Broadcom HND 5.04, BCM4912) | Asuswrt-Merlin 3006.102.9 |
-| `rt-ax88u_pro-4.19.183/` | ASUS RT-AX88U Pro | 4.19.183 (Broadcom HND 5.04, BCM4912) | Asuswrt-Merlin 3006.102.9 |
-| `xt12-4.19.183/` | ASUS ZenWiFi Pro XT12 | 4.19.183 (Broadcom HND 5.04, BCM4912) | Asuswrt-Merlin 3006.102.9 |
+| `gt-be98_pro-4.19.294/` | ASUS GT-BE98 Pro | 4.19.294 (HND 5.04 BE, BCM6813) | Merlin 3006.102.9 |
+| `rt-be96u-4.19.294/` | ASUS RT-BE96U | 4.19.294 (HND 5.04 BE, BCM6813) | Merlin 3006.102.9 |
+| `rt-be88u-4.19.294/` | ASUS RT-BE88U, RT-BE7200 | 4.19.294 (HND 5.04 BE, BCM6813) | Merlin 3006.102.9 |
+| `rt-be86u-4.19.294/` | ASUS RT-BE86U | 4.19.294 (HND 5.04 BE, BCM6813) | Merlin 3006.102.9 |
+| `rt-be92u-4.19.294/` | ASUS RT-BE92U | 4.19.294 (HND 5.04 BE, BCM6765) | Merlin 3006.102.9 |
+| `rt-be58_go-4.19.294/` | ASUS RT-BE58 Go | 4.19.294 (HND 5.04 BE, BCM6764, 32-bit) | Merlin 3006.102.9 |
+| `gt-axe16000-4.19.183/` | ASUS GT-AXE16000 | 4.19.183 (HND 5.04, BCM4912) | Merlin 3006.102.9 (same kernel headers in 3004.388.12) |
+| `gt-ax6000-4.19.183/` | ASUS GT-AX6000 | 4.19.183 (HND 5.04, BCM4912) | Merlin 3006.102.9 |
+| `gt-ax11000_pro-4.19.183/` | ASUS GT-AX11000 Pro | 4.19.183 (HND 5.04, BCM4912) | Merlin 3006.102.9 |
+| `rt-ax86u_pro-4.19.183/` | ASUS RT-AX86U Pro | 4.19.183 (HND 5.04, BCM4912) | Merlin 3006.102.9 |
+| `rt-ax88u_pro-4.19.183/` | ASUS RT-AX88U Pro | 4.19.183 (HND 5.04, BCM4912) | Merlin 3006.102.9 |
+| `xt12-4.19.183/` | ASUS ZenWiFi Pro XT12 | 4.19.183 (HND 5.04, BCM4912) | Merlin 3006.102.9 |
+| `rt-ax86u-4.1.52/` | ASUS RT-AX86U, RT-AX86S | 4.1.52 (HND 5.02L.07p2, profile 962118GW) | Merlin 3004.388.13 |
+| `rt-ax68u-4.1.52/` | ASUS RT-AX68U | 4.1.52 (HND 5.02L.07p2, profile 962118GW) | Merlin 3004.388.13 |
+| `gt-axe11000-4.1.52/` | ASUS GT-AXE11000 | 4.1.52 (HND 5.02L.07p2, profile 962118GW) | Merlin 3004.388.13 |
+| `rt-ax58u-4.1.52/` | ASUS RT-AX58U, RT-AX3000 (V1) | 4.1.52 (HND 5.02 675x, profile 96750GW, 32-bit) | Merlin 3004.388.13 |
+| `rt-ax88u-4.1.51/` | ASUS RT-AX88U | 4.1.51 (HND 5.02, profile 94908HND) | Merlin 3004.388.13 |
+| `gt-ax11000-4.1.51/` | ASUS GT-AX11000 | 4.1.51 (HND 5.02, profile 94908HND) | Merlin 3004.388.13 |
 
-These are all the models Merlin builds on Broadcom's HND 5.04 SDK with the
-BCM4912 profile (94912GW). Each was built with its own kernel configuration
-and model define; the six modules came out byte-for-byte identical (the
+These are all the models Merlin 3004.388.13 and 3006.102.9 build firmware
+for, except the GT-BE19000AI (not in Merlin's published source yet). Each
+was built with its own kernel configuration and model define. Models that
+share a kernel tree and processor came out byte-for-byte identical (the
 per-model differences - for example Bluetooth on the XT12 or conntrack
-netlink - don't reach netem).
+netlink - don't reach netem): one module for the five 64-bit Wi-Fi 7 models,
+one for the six 4.19.183 models, one for the RT-AX86U / RT-AX68U /
+GT-AXE11000, one for the RT-AX88U / GT-AX11000. The RT-BE58 Go and RT-AX58U
+have 32-bit processors and a module of their own each.
 
 A module is used only when the router's model (`nvram get productid`, or
 `odmpid`, the name some models are sold under) and kernel version
-(`uname -r`) match its folder name. The kernel checks the module's version
-string itself when it is loaded.
+(`uname -r`) match its folder name, and the router's kernel configuration
+is the one in the folder's `kernel-config.gz` (step 1 below). The installer
+copies only the folder for the router it runs on.
 
-Not included yet: the models on Merlin's 3004.388 branch with kernel 4.1
-(RT-AX86U, RT-AX86S, RT-AX88U, RT-AX68U, RT-AX58U, RT-AX56U, GT-AX11000,
-GT-AXE11000, RT-AC68U V4) and the Wi-Fi 7 models (HND 5.04 BE SDK). They use
-lf-lagd.
+Any other model uses lf-lagd.
 
 ## Safety steps on the router
 
-1. **The kernel checks the module.** If its version string doesn't match
+1. **The kernel configuration must be the module's.** Before the module is
+   loaded, LobbyFence compares the running kernel's own configuration
+   (`/proc/config.gz`) with `kernel-config.gz` next to the module: every
+   option C code sees - what is on, built in or a module, and every number.
+   Only names and paths (the string options) and netem's own option are left
+   out. If one option differs, or the kernel doesn't show its configuration,
+   the module is never loaded and lf-lagd is used; `lobbyfence diag` lists
+   the options that differ. A kernel built from the same source with the
+   same configuration and compiler lays out its structures the same way, so
+   this is the check that the module fits *this* router's firmware build.
+2. **The kernel checks the module.** If its version string doesn't match
    the running kernel, the kernel refuses it. Nothing changes and lf-lagd
    is used.
-2. **Self-test, once per boot.** LobbyFence creates a private dummy
-   interface (198.18.254.1/30, not reachable from anywhere) and puts its
+3. **Self-test, once per boot.** LobbyFence creates a private test
+   interface (198.18.254.1/30, not reachable from anywhere; a dummy
+   interface, or an ifb interface on the kernel 4.1 models, whose firmware
+   has no dummy driver) and puts its
    queue with a netem band on it. It sends three pings through it. netem
    must deliver them (its timers and queue work) before it touches real
    traffic. The interface is removed again afterwards.
-3. **A guard on every boot it is used.** This works the same way as on
+4. **A guard on every boot it is used.** This works the same way as on
    FreshTomato. A guard file (`/jffs/addons/lobbyfence/.netem-loading`)
    exists from loading the module until the lag queues are taken down
    cleanly (lag switched off, LobbyFence stopped, a proper shutdown). If the
@@ -50,7 +76,7 @@ lf-lagd.
    module crash the router on every boot. After the queues have carried game
    packets for 2 minutes, `.netem-ok` records that netem works with this
    firmware and module (for the page).
-4. **Fallback.** In any of these cases LobbyFence uses lf-lagd, so the
+5. **Fallback.** In any of these cases LobbyFence uses lf-lagd, so the
    lag simulator keeps working:
    - QoS or the bandwidth limiter is using the connection
    - the firewall can't set the queue band
@@ -149,7 +175,7 @@ with that model's configuration, netem and a probe file (which pulls in the
 network, scheduler, memory, timer, device and file headers with every type
 kept) built with `-g`, and compared with that model's own prebuilt ASUS
 objects (`router-sysdep.<model>/hnd_extra/prebuilt/bcm_mpm.o`, `otp.o`,
-`chipinfo.o`):
+`chipinfo.o`), for the six kernel 4.19.183 models:
 
 | model | compared | identical | different |
 | --- | --- | --- | --- |
@@ -164,5 +190,59 @@ To make sure the check notices a wrong kernel layout, one run used a
 configuration with a single network option switched off
 (`CONFIG_NET_SWITCHDEV`): it reported `net_device` as different, as it
 should.
+
+### The kernel 4.1 and Wi-Fi 7 models
+
+Built the same way from Merlin 3004.388.13 (kernel 4.1, ASUS's gcc 5.5
+toolchains) and 3006.102.9 (Wi-Fi 7, ASUS's gcc 10.3 toolchains): each
+model's `config_base` file, Merlin's KernelConfig rules for that model,
+`make olddefconfig`, `CONFIG_NET_SCH_NETEM=m`, `make net/sched/sch_netem.ko`
+in the firmware's kernel tree. Version strings: `4.1.51` / `4.1.52` /
+`4.19.294`, each with `SMP preempt mod_unload aarch64` (or `ARMv7 p2v8` on
+the two 32-bit models).
+
+The layout check, per model, against that model's own precompiled ASUS
+objects that carry debug information (type names reduced to the type they
+stand for, so only layout counts):
+
+| model | ASUS objects | structure definitions compared | identical | different |
+| --- | --- | --- | --- | --- |
+| RT-AX88U | 18 (`router-sysdep.rt-ax88u/hnd_extra/prebuilt/`) | 4024 | 3984 | 40 |
+| GT-AX11000 | 18 | 4024 | 3984 | 40 |
+| RT-AX86U | 20 | 4456 | 4415 | 41 |
+| RT-AX68U | 20 | 4456 | 4415 | 41 |
+| GT-AXE11000 | 20 | 4456 | 4415 | 41 |
+| GT-BE98 Pro | 1 (`bcmdrivers/broadcom/net/gdx/impl1/prebuilt/gdx_hw.o`) | 477 | 477 | 0 |
+| RT-BE96U, RT-BE88U, RT-BE86U | the same object | 477 | 477 | 0 |
+| RT-BE92U | the same object | 477 | 475 | 2 |
+
+What the differences are:
+
+- **Kernel 4.1 models:** `cred` and `user_struct` differ in every ASUS
+  object: ASUS compiled those drivers without the kernel's key store
+  (`CONFIG_KEYS`), which the firmware's kernel configuration
+  (`config_base.6a`) has on. netem uses neither. The rest (4 structures on
+  the RT-AX88U / GT-AX11000, `sk_buff` alone on the others) are in one
+  object only, `nciTMSkmod.o` - Trend Micro's module, compiled elsewhere
+  against another configuration. In every Broadcom object that has them,
+  `sk_buff` (512 bytes), `net_device` (1856), `netdev_queue` (384), `sock`,
+  `net`, `module`, `hrtimer`, `timer_list`, `sk_buff_head` and `nlattr` are
+  identical to the build here. `Qdisc` and `Qdisc_ops` aren't in ASUS's
+  objects; in this kernel they have no configuration-dependent members.
+- **Wi-Fi 7 models:** ASUS's `gdx_hw.o` was compiled for the BCM6813 and
+  includes `Qdisc` (320 bytes), `Qdisc_ops`, `sk_buff` (576), `net_device`
+  (2112), `netdev_queue` and `sock`: all identical, as are all 452 of
+  netem's own structures that appear in it. On the RT-BE92U (BCM6765, a
+  different kernel configuration from the object's) `net` and `proto` differ
+  from it, as expected; the structures netem works with are identical there
+  too.
+- **RT-AX58U and RT-BE58 Go:** ASUS ships no object with debug information
+  for these two 32-bit models, so there is nothing to compare against. Their
+  modules come from the same procedure that passes the comparison on every
+  other model, and on the router they depend on the kernel configuration
+  check like all the others.
+
+On the kernel 4.1 models every symbol the module needs is exported by the
+firmware's kernel as well (checked against the kernel source).
 
 `SHA256SUMS` in each folder holds the checksum of the module that ships.

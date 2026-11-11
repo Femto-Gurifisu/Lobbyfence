@@ -35,12 +35,6 @@ freshtomato/functions.sh:share/functions.sh:644
 freshtomato/conf.awk:share/conf.awk:644
 asuswrt-merlin/lobbyfence:lobbyfence:755
 asuswrt-merlin/bin/lf-lagd:bin/lf-lagd:755
-asuswrt-merlin/netem/gt-axe16000-4.19.183/sch_netem.ko:netem/gt-axe16000-4.19.183/sch_netem.ko:644
-asuswrt-merlin/netem/gt-ax6000-4.19.183/sch_netem.ko:netem/gt-ax6000-4.19.183/sch_netem.ko:644
-asuswrt-merlin/netem/gt-ax11000_pro-4.19.183/sch_netem.ko:netem/gt-ax11000_pro-4.19.183/sch_netem.ko:644
-asuswrt-merlin/netem/rt-ax86u_pro-4.19.183/sch_netem.ko:netem/rt-ax86u_pro-4.19.183/sch_netem.ko:644
-asuswrt-merlin/netem/rt-ax88u_pro-4.19.183/sch_netem.ko:netem/rt-ax88u_pro-4.19.183/sch_netem.ko:644
-asuswrt-merlin/netem/xt12-4.19.183/sch_netem.ko:netem/xt12-4.19.183/sch_netem.ko:644
 asuswrt-merlin/www/lobbyfence.asp:www/lobbyfence.asp:644
 asuswrt-merlin/www/lobbyfence/app.asp:www/lobbyfence/app.asp:644
 asuswrt-merlin/www/lobbyfence/lf-merlin.js:www/lobbyfence/lf-merlin.js:644
@@ -303,6 +297,19 @@ echo "$FILES" | while IFS=: read -r src dst mode; do
 	mkdir -p "$(dirname "$DEST/$dst")" || exit 1
 	cp "$SRC/$src" "$DEST/$dst.new" && chmod "$mode" "$DEST/$dst.new" && mv "$DEST/$dst.new" "$DEST/$dst" || exit 1
 done || die "copying the files failed (JFFS full?)"
+# the netem module for this router's model and kernel (if the package has
+# one), with the kernel configuration it was built for - LobbyFence compares
+# that with the running kernel's before it loads the module
+NETEM_FOR=""
+if have nvram; then
+	for m in "$(nvram get productid 2>/dev/null)" "$(nvram get odmpid 2>/dev/null)"; do
+		m="$(echo "$m" | tr 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' 'abcdefghijklmnopqrstuvwxyz')-$(uname -r)"
+		[ -f "$SRC/asuswrt-merlin/netem/$m/sch_netem.ko" ] || continue
+		mkdir -p "$DEST/netem/$m" && cp "$SRC/asuswrt-merlin/netem/$m/sch_netem.ko" "$SRC/asuswrt-merlin/netem/$m/kernel-config.gz" "$DEST/netem/$m/" \
+			|| die "copying the netem module failed (JFFS full?)"
+		NETEM_FOR="$m"
+	done
+fi
 
 # a new version number in the page addresses, so browsers fetch the new files
 v="$(date +%s)"
@@ -319,12 +326,10 @@ hooks_add || die "cannot write to $SCRIPTS"
 [ -n "${LF_NOSTART:-}" ] || "$DEST/lobbyfence" menu 2>&1 | sed 's/^/lobbyfence: menu: /'
 say "installed in $DEST"
 if have nvram; then
-	m="$(nvram get productid 2>/dev/null | tr 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' 'abcdefghijklmnopqrstuvwxyz')"
-	o="$(nvram get odmpid 2>/dev/null | tr 'ABCDEFGHIJKLMNOPQRSTUVWXYZ' 'abcdefghijklmnopqrstuvwxyz')"
-	if [ -f "$DEST/netem/$m-$(uname -r)/sch_netem.ko" ] || { [ -n "$o" ] && [ -f "$DEST/netem/$o-$(uname -r)/sch_netem.ko" ]; }; then
-		say "lag simulator: netem module for this $(nvram get productid) (kernel $(uname -r)) included - it is self-tested before first use"
+	if [ -n "$NETEM_FOR" ]; then
+		say "lag simulator: netem module for this $(nvram get productid) (kernel $(uname -r)) included - it is checked against this firmware's kernel and self-tested before first use"
 	else
-		say "lag simulator: uses LobbyFence's lf-lagd on this model (netem is only included for: $(ls "$DEST/netem" 2>/dev/null | sed 's/-[0-9][0-9.]*$//' | tr '\n' ' '))"
+		say "lag simulator: uses LobbyFence's lf-lagd on this model (netem is only included for: $(ls "$SRC/asuswrt-merlin/netem" 2>/dev/null | sed -n 's/-[0-9][0-9.]*$//p' | tr '\n' ' '))"
 	fi
 fi
 page="$(cat "$RUN/webui_page" 2>/dev/null)"

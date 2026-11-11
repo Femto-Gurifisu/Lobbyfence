@@ -16,6 +16,9 @@ import sys
 
 DIE = re.compile(r"^\s*<(\d+)><([0-9a-f]+)>: Abbrev Number: (\d+)(?: \((DW_TAG_\w+)\))?")
 ATTR = re.compile(r"^\s*<[0-9a-f]+>\s+(DW_AT_\w+)\s*:\s*(.*)$")
+# binutils 2.35 and newer put the attribute's form first ("(data2) 576",
+# "(strp) (offset: 0x..): name"); older ones print the value alone
+FORM = re.compile(r"^\([a-z_]+[0-9]*\)\s+")
 
 
 def parse(readelf, path):
@@ -39,7 +42,7 @@ def parse(readelf, path):
             continue
         a = ATTR.match(line)
         if a and cur is not None:
-            cur["attrs"][a.group(1)] = a.group(2)
+            cur["attrs"][a.group(1)] = FORM.sub("", a.group(2), count=1)
     return dies
 
 
