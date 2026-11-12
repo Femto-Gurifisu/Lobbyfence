@@ -150,28 +150,7 @@ for n, line in code_lines(main):
 # Peer-to-peer traffic (party chat, some lobbies) shows players' home addresses too - those
 # must never be added. Every address must be in a hosting network listed here.
 import ipaddress
-HOSTING = """
-  45.32.0.0/16 45.63.0.0/16 45.76.0.0/15 64.176.0.0/15 64.237.32.0/19 65.20.96.0/19 66.42.32.0/19 66.42.64.0/18
-  66.135.0.0/19 78.141.192.0/18 80.240.16.0/20 95.179.128.0/17 104.156.224.0/19 104.207.128.0/19 104.238.128.0/18
-  107.191.32.0/19 108.61.0.0/16 136.244.64.0/18 137.220.32.0/19 139.84.128.0/17 139.180.128.0/18 140.82.0.0/18
-  144.202.0.0/17 149.28.0.0/16 149.248.0.0/18 155.138.128.0/17 158.247.192.0/18 167.179.64.0/18 173.199.64.0/18
-  192.248.144.0/20 198.13.32.0/19 199.247.0.0/19 202.182.96.0/19 207.148.0.0/17 207.246.64.0/18 208.167.224.0/19
-  208.85.16.0/21 209.222.0.0/19 216.128.128.0/19 216.238.64.0/18 217.69.0.0/20 96.30.192.0/20
-
-  34.0.0.0/15 34.18.0.0/16 34.48.0.0/16 34.51.0.0/16 34.64.0.0/10 34.128.0.0/10 35.184.0.0/13 35.192.0.0/11
-  35.224.0.0/12 35.240.0.0/13
-
-  3.0.0.0/8 13.32.0.0/11 13.112.0.0/12 13.200.0.0/13 13.208.0.0/12 13.224.0.0/11 15.128.0.0/10 15.220.0.0/14
-  15.228.0.0/15 15.236.0.0/15 16.24.0.0/16 16.162.0.0/15 16.170.0.0/15 18.88.0.0/16 18.128.0.0/9 35.42.0.0/16
-  35.72.0.0/13 35.80.0.0/12 35.152.0.0/13 35.160.0.0/13 43.192.0.0/10 44.192.0.0/10 51.84.0.0/16 52.0.0.0/10
-  52.88.0.0/13 52.192.0.0/11 54.0.0.0/8 63.176.0.0/15 78.12.0.0/15 107.20.0.0/14 184.32.0.0/14 216.244.0.0/18
-
-  155.133.224.0/19 162.254.192.0/21 146.66.152.0/21 185.25.180.0/22 103.10.124.0/23 103.28.54.0/23 205.196.6.0/24
-  45.121.184.0/22
-
-  103.43.72.0/24 189.1.164.0/24 95.141.40.0/24 185.34.107.0/24 212.102.63.0/24 89.222.108.0/24 89.222.117.0/24
-  152.233.52.0/24 216.198.196.0/24 216.198.246.0/24 208.76.222.0/24
-"""   # Vultr / Choopa; Google Cloud; Amazon; Valve's relays; then data-centre blocks seen only in the
+HOSTING = " ".join(l.split("#")[0] for l in (REPO / "tools/server-networks.txt").read_text().splitlines())
       # games' data-centre ping rounds, next to the ones above (never a home connection). Kept narrow on
       # purpose: Google Fiber, AT&T and the like share first numbers with some of these.
 nets =[ipaddress.ip_network(c) for c in HOSTING.split()]
@@ -189,6 +168,12 @@ for n, line in enumerate((REPO / "files/usr/share/lobbyfence/servers.txt").read_
     if not any(a in net for net in nets):
         problems.append(f"servers.txt:{n}: {t[0]} is not in a data-centre network listed in safety_static.py"
                         " - a player's home address must never be published")
+
+# the map page's copy (Send to LobbyFence sends only servers in these networks)
+_js = (REPO / "luci-app-lobbyfence/htdocs/luci-static/resources/view/lobbyfence/map.js").read_text()
+_m = re.search(r"var SERVER_NETWORKS = '([^']*)'", _js)
+if not _m or _m.group(1).split() != HOSTING.split():
+    problems.append("map.js SERVER_NETWORKS is not the same list as tools/server-networks.txt")
 
 if problems:
     for p in problems:

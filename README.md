@@ -90,6 +90,22 @@ and they are restored after a reboot.
 * The gaming device needs a fixed address (a static DHCP lease) - or pick it
   by its MAC address
 
+### Tested on real routers
+
+Besides the test suite's emulated routers (see [Tests](#tests)), LobbyFence
+runs on these routers:
+
+| Router | Firmware | Lag simulator |
+|---|---|---|
+| ASUS RT-AX88U (Wi-Fi 6) | Asuswrt-Merlin | netem works |
+| ASUS GT-AXE16000 (Wi-Fi 6E) | Asuswrt-Merlin | netem works |
+| ASUS GT-BE98 Pro (Wi-Fi 7) | Asuswrt-Merlin | netem works |
+| GL.iNet GL-MT6000 (Flint 2) | OpenWrt | |
+| Netgear R7000 | OpenWrt | |
+
+Running it on another model? A debug report (**Debug…** on the map page)
+shows what it uses there - reports are welcome as a GitHub issue.
+
 ## Install
 
 Download the package for your router's firmware from the
@@ -806,6 +822,16 @@ games.
   and imported locations, and the servers learned by zones set to that game
   (they are learned and looked up again as you play). It asks once more
   first. Whitelists, blacklists and regions are not touched.
+* **Send to LobbyFence…** sends the game servers your router found to the
+  list LobbyFence comes with, so everyone gets them in the next version. It
+  first says how many servers, for which games, will go. Then it downloads
+  `lobbyfence-share-YYYYMMDD.txt` (and copies it) and opens a new report on
+  GitHub: drag the file into the box there and press *Create* (you need a
+  GitHub account; the report is public). Only game servers in the data-centre
+  networks LobbyFence knows (`tools/server-networks.txt`) go, for the listed
+  client-server games, under the game's own name: nothing from peer-to-peer
+  games (the fighting games, GTA Online), *Any game* or *Custom* zones, no
+  zone labels - so no player's own address and nothing about you.
 * **Import a servers file…** adds those locations to the router. When one of
   those servers shows up later, its location is taken from the file - no
   lookup - and the log says *located N server address(es) from known
@@ -839,6 +865,16 @@ The locations come from the geolocation service (by default ip-api.com, whose
 free tier is for non-commercial use). Sharing a file with friends or between
 your own routers is fine; check the service's terms before publishing a large
 list publicly.
+
+**Adding the shared servers (maintainer).** `tools/sync-servers.py` reads the
+open *Servers:* reports on GitHub (with `gh`), checks every line again - a
+listed client-server game, an address in `tools/server-networks.txt`, a sane
+location and time - and adds the servers not listed yet to
+`files/usr/share/lobbyfence/servers.txt`, each once. `--dry-run` only shows
+what it would add, files can be given instead of reading GitHub
+(`tools/sync-servers.py lobbyfence-share-*.txt`), and `--close` thanks and
+closes the reports afterwards. Then run `python3 tests/safety_static.py` and
+commit; the servers go out with the next release.
 
 From the command line: `lobbyfence export > servers.txt` and
 `lobbyfence import-servers servers.txt` (or `-` for standard input), and
@@ -1040,8 +1076,9 @@ hooks with a hung command, the firewall lock, a full flash, and that an
 install from the release package followed by `purge` leaves nvram, JFFS,
 hooks, firewall and web folders exactly as before (see [Tests](#tests)). They
 run in emulated routers - each firmware's own BusyBox, iptables / ipset or
-nftables in Linux network namespaces - not on real hardware, so they make
-problems unlikely, not impossible.
+nftables in Linux network namespaces - so they make problems unlikely, not
+impossible. LobbyFence also runs on the real routers listed under
+[Tested on real routers](#tested-on-real-routers).
 
 ## Tests
 
@@ -1052,6 +1089,12 @@ problems unlikely, not impossible.
   nvram writes other than LobbyFence's two small ones, writes to devices,
   `rm -rf` outside LobbyFence's own folders, kernel modules other than
   ipset's and LobbyFence's netem.
+* `sync_servers_test.py` — `tools/sync-servers.py`, which adds shared servers
+  files to the built-in list: only data-centre servers of listed client-server
+  games go in, each once; home addresses, peer-to-peer games, Custom zones and
+  bad lines are left out, and a second run adds nothing. `safety_static.py`
+  also checks that the map page's copy of `tools/server-networks.txt` (what
+  *Send to LobbyFence* may send) is the same list.
 * `openwrt_install_test.sh <workdir> <busybox>` — the OpenWrt installer from
   the release package, in a private mount namespace with stand-in `/etc`,
   `/usr`, `/www`: files where LuCI and procd expect them, an update keeps the

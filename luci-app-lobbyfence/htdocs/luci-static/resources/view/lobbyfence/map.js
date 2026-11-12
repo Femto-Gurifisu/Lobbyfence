@@ -1704,6 +1704,84 @@ function newerVersion(a, b) {
 
 var RELEASES_URL = 'https://github.com/Femto-Gurifisu/Lobbyfence/releases/latest';
 
+/* Servers file -> Send to LobbyFence: the game servers this router found go to a
+ * public GitHub report, and from there into the list LobbyFence comes with. Only
+ * servers in these data-centre networks are sent - never a player's own address,
+ * which peer-to-peer games show too - and only for the games below. A copy of
+ * tools/server-networks.txt (tests/safety_static.py checks that they match). */
+var SERVER_NETWORKS = '45.32.0.0/16 45.63.0.0/16 45.76.0.0/15 64.176.0.0/15 64.237.32.0/19 65.20.96.0/19 66.42.32.0/19 66.42.64.0/18 66.135.0.0/19 78.141.192.0/18 80.240.16.0/20 95.179.128.0/17 104.156.224.0/19 104.207.128.0/19 104.238.128.0/18 107.191.32.0/19 108.61.0.0/16 136.244.64.0/18 137.220.32.0/19 139.84.128.0/17 139.180.128.0/18 140.82.0.0/18 144.202.0.0/17 149.28.0.0/16 149.248.0.0/18 155.138.128.0/17 158.247.192.0/18 167.179.64.0/18 173.199.64.0/18 192.248.144.0/20 198.13.32.0/19 199.247.0.0/19 202.182.96.0/19 207.148.0.0/17 207.246.64.0/18 208.167.224.0/19 208.85.16.0/21 209.222.0.0/19 216.128.128.0/19 216.238.64.0/18 217.69.0.0/20 96.30.192.0/20 34.0.0.0/15 34.18.0.0/16 34.48.0.0/16 34.51.0.0/16 34.64.0.0/10 34.128.0.0/10 35.184.0.0/13 35.192.0.0/11 35.224.0.0/12 35.240.0.0/13 3.0.0.0/8 13.32.0.0/11 13.112.0.0/12 13.200.0.0/13 13.208.0.0/12 13.224.0.0/11 15.128.0.0/10 15.220.0.0/14 15.228.0.0/15 15.236.0.0/15 16.24.0.0/16 16.162.0.0/15 16.170.0.0/15 18.88.0.0/16 18.128.0.0/9 35.42.0.0/16 35.72.0.0/13 35.80.0.0/12 35.152.0.0/13 35.160.0.0/13 43.192.0.0/10 44.192.0.0/10 51.84.0.0/16 52.0.0.0/10 52.88.0.0/13 52.192.0.0/11 54.0.0.0/8 63.176.0.0/15 78.12.0.0/15 107.20.0.0/14 184.32.0.0/14 216.244.0.0/18 155.133.224.0/19 162.254.192.0/21 146.66.152.0/21 185.25.180.0/22 103.10.124.0/23 103.28.54.0/23 205.196.6.0/24 45.121.184.0/22 103.43.72.0/24 189.1.164.0/24 95.141.40.0/24 185.34.107.0/24 212.102.63.0/24 89.222.108.0/24 89.222.117.0/24 152.233.52.0/24 216.198.196.0/24 216.198.246.0/24 208.76.222.0/24';
+var P2P_GAMES = [ 'gta' ];      /* peer-to-peer, like the fighting games: nothing to share */
+var SHARE_URL = 'https://github.com/Femto-Gurifisu/Lobbyfence/issues/new?template=share-servers.yml';
+
+function ip4num(s) {
+	var m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(String(s)), n = 0;
+	if (!m) return -1;
+	for (var i = 1; i <= 4; i++) {
+		if (+m[i] > 255) return -1;
+		n = n * 256 + (+m[i]);
+	}
+	return n;
+}
+
+var serverNets = null;
+function inServerNetwork(ip) {
+	var a = ip4num(ip);
+	if (a < 0) return false;
+	if (!serverNets)
+		serverNets = SERVER_NETWORKS.split(/\s+/).map(function(c) {
+			var p = c.split('/'), size = Math.pow(2, 32 - (+p[1])), base = ip4num(p[0]);
+			return [ base - base % size, size ];
+		});
+	return serverNets.some(function(n) { return a >= n[0] && a < n[0] + n[1]; });
+}
+
+/* a game whose servers can be shared: a listed client-server game (not "Any game",
+   Custom or a peer-to-peer one) */
+function shareableGame(id) {
+	if (P2P_GAMES.indexOf(id) >= 0) return null;
+	for (var i = 0; i < PRESETS.length; i++)
+		if (PRESETS[i].id === id)
+			return (PRESETS[i].group === 'pc' || PRESETS[i].group === 'mobile') ? PRESETS[i] : null;
+	return null;
+}
+
+/* the part of an export that may be shared: the games' own names (not the zones'
+   labels), and per game each data-centre server once - with its location */
+function shareServers(text) {
+	var games = [], byId = {}, cur = null, n = 0, left = 0, ver = '';
+	String(text || '').split(/\r?\n/).forEach(function(line) {
+		var m = /^# exported .* - (LobbyFence [0-9][0-9.]*)\s*$/.exec(line), t;
+		if (m) ver = m[1];
+		t = line.trim().split(/\s+/);
+		if (!t[0] || t[0].charAt(0) === '#' || t[0] === 'lobbyfence-servers')
+			return;
+		if (t[0] === 'game') {
+			var p = shareableGame(t[1]);
+			cur = p ? (byId[p.id] || (byId[p.id] = { id: p.id, label: String(p.label), seen: {}, rows: [] })) : false;
+			if (cur && games.indexOf(cur) < 0) games.push(cur);
+			return;
+		}
+		if (cur === null)
+			return;
+		if (!cur || t.length < 5 || !inServerNetwork(t[0]) || !/^-?\d{1,3}(\.\d+)?$/.test(t[1]) ||
+		    !/^-?\d{1,3}(\.\d+)?$/.test(t[2]) || Math.abs(+t[1]) > 90 || Math.abs(+t[2]) > 180 ||
+		    !/^([A-Z]{2}|--)$/.test(t[3]) || !/^\d{1,12}$/.test(t[4])) {
+			left++;
+			return;
+		}
+		if (cur.seen[t[0]]) return;
+		cur.seen[t[0]] = true;
+		cur.rows.push(t.slice(0, 5).join(' '));
+		n++;
+	});
+	games = games.filter(function(g) { return g.rows.length; });
+	var out = [ 'lobbyfence-servers 1',
+		'# sent with Send to LobbyFence' + (ver ? ' - ' + ver : '') + ' - game servers in data-centre networks only' ];
+	games.forEach(function(g) { out.push('game ' + g.id + ' ' + g.label); out = out.concat(g.rows); });
+	return { text: out.join('\n') + '\n', n: n, left: left,
+		games: games.map(function(g) { return { label: g.label, n: g.rows.length }; }) };
+}
+
 /* LobbyFence was called RegionGate before: what this browser remembered under
  * the old name (theme, view, panel, ...) moves over once */
 (function() {
@@ -4280,7 +4358,46 @@ return view.extend({
 			if (pasteBox.style.display === 'none') { pasteBox.style.display = ''; ps.textContent = _('Import pasted text'); paste.focus(); return; }
 			sendFile(String(paste.value || ''));
 		} }, _('Paste…'));
-		buttons = [ dl, cp, im, ps ];
+		/* Send to LobbyFence: what may be shared (see shareServers) is downloaded and a
+		   GitHub report opens to drop it in - after showing what goes */
+		var shareInfo = E('p', { 'class': 'lf-servers-shareinfo', 'style': 'margin:6px 0' }, '');
+		var shareGo = E('button', { 'class': 'cbi-button cbi-button-action lf-servers-sendgh', 'click': function() {
+			var s = shareServers(current);
+			if (!s.n) return;
+			self.download(self.shareFileName(), s.text);
+			self.copyText(s.text);
+			self.openWindow(SHARE_URL + '&title=' + encodeURIComponent('Servers: ' + s.games.map(function(g) {
+				return g.label + ' (' + g.n + ')';
+			}).join(', ')).slice(0, 600));
+			shareBox.style.display = 'none';
+			stateNode.textContent = _('Downloaded %s and opened GitHub: drag the file into the box there (or paste - it is copied too) and press Create. Thank you!').format(self.shareFileName());
+		} }, _('Download and open GitHub'));
+		var shareBox = E('div', { 'class': 'lf-servers-sharebox', 'style': 'display:none;border:1px solid rgba(128,128,128,.4);border-radius:6px;padding:8px 10px;margin:6px 0' }, [
+			shareInfo,
+			E('p', { 'class': 'lf-muted', 'style': 'font-size:90%;margin:6px 0' }, _('It goes in a public report on GitHub (you need a GitHub account). Only the game servers\' addresses and locations go - nothing about you, your devices or your regions. Peer-to-peer games and addresses outside the game-server networks LobbyFence knows are left out, so no player\'s own address is sent.')),
+			E('div', { 'class': 'right' }, [
+				E('button', { 'class': 'cbi-button', 'click': function() { shareBox.style.display = 'none'; } }, _('Cancel')), ' ',
+				shareGo
+			])
+		]);
+		var share = E('button', { 'class': 'cbi-button lf-servers-share', 'click': function() {
+			var s = shareServers(current);
+			if (!current) { stateNode.textContent = _('Still reading the servers on the router - try again in a moment.'); return; }
+			if (!s.n) {
+				shareBox.style.display = 'none';
+				stateNode.textContent = _('Nothing to send yet: no located game servers for the listed games (peer-to-peer games have none). Play a little first.');
+				return;
+			}
+			shareInfo.textContent = _('%d server(s) for %s will be sent.').format(s.n, s.games.map(function(g) {
+				return g.label + ' (' + g.n + ')';
+			}).join(', ')) + (s.left ? ' ' + _('%d address(es) are left out.').format(s.left) : '');
+			shareBox.style.display = '';
+		} }, _('Send to LobbyFence…'));
+		var shareRow = E('div', { 'class': 'lf-servers-sharerow', 'style': 'margin:8px 0 4px' }, [
+			share, ' ',
+			E('span', { 'class': 'lf-muted', 'style': 'font-size:90%' }, _('Send the game servers you found, so everyone gets them in the next version.'))
+		]);
+		buttons = [ dl, cp, im, ps, share, shareGo ];
 		input.addEventListener('change', function() {
 			var f = input.files && input.files[0];
 			if (!f) return;
@@ -4295,6 +4412,8 @@ return view.extend({
 			listNode,
 			liveNode,
 			builtinNode,
+			shareRow,
+			shareBox,
 			E('p', { 'style': 'font-size:90%;opacity:.8' }, _('Holds the game servers\' addresses and locations only - nothing about your devices, your address or your regions. Importing adds locations; it does not change your zones or what they block.')),
 			pasteBox,
 			stateNode,
@@ -4313,6 +4432,15 @@ return view.extend({
 	serversFileName: function() {
 		var d = new Date(), p = function(n) { return (n < 10 ? '0' : '') + n; };
 		return 'lobbyfence-servers-' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '.txt';
+	},
+
+	shareFileName: function() {
+		var d = new Date(), p = function(n) { return (n < 10 ? '0' : '') + n; };
+		return 'lobbyfence-share-' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '.txt';
+	},
+
+	openWindow: function(url) {
+		window.open(url, '_blank', 'noopener');
 	},
 
 	debugFileName: function() {

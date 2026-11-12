@@ -1,0 +1,19 @@
+name: Share game servers
+description: Send the game servers your router found, so they go into the list LobbyFence comes with.
+title: "Servers: "
+labels: ["servers"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for sharing! On the map page, **Servers file → Send to LobbyFence…** downloads a file called `lobbyfence-share-<date>.txt` and opens this page.
+
+        This report is **public**. The file holds game servers' addresses and locations only - nothing about you, your devices or your regions - and LobbyFence leaves out peer-to-peer games and any address outside the game-server networks it knows, so no player's own address is in it.
+  - type: textarea
+    id: servers
+    attributes:
+      label: Servers file
+      description: Drag the lobbyfence-share-….txt file into this box, or paste its text (it was copied for you too).
+      placeholder: "lobbyfence-servers 1"
+    validations:
+      required: true
