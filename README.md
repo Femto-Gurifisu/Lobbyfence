@@ -100,8 +100,8 @@ runs on these routers:
 | ASUS RT-AX88U (Wi-Fi 6) | Asuswrt-Merlin | netem works |
 | ASUS GT-AXE16000 (Wi-Fi 6E) | Asuswrt-Merlin | netem works |
 | ASUS GT-BE98 Pro (Wi-Fi 7) | Asuswrt-Merlin | netem works |
-| GL.iNet GL-MT6000 (Flint 2) | OpenWrt | |
-| Netgear R7000 | OpenWrt | |
+| GL.iNet GL-MT6000 (Flint 2) | OpenWrt | netem works |
+| Netgear R7000 | OpenWrt | netem works |
 
 Running it on another model? A debug report (**Debug…** on the map page)
 shows what it uses there - reports are welcome as a GitHub issue.
