@@ -1515,6 +1515,24 @@ def main():
         shown = page.locator("body").inner_text()
         check("hostile text from the router is shown as text, nothing in it runs",
               not page.evaluate("window.__pwned || []") and shown.count("onerror") >= 3, [page.evaluate("window.__pwned || []"), shown.count("onerror")])
+        # the page's own drop-down lists and the New zone device list too: a zone's
+        # label and a device's name (it comes from the device itself, over DHCP)
+        page.evaluate("ui.hideModal()")
+        page.locator(".lf-bar select").first.click()
+        page.wait_for_timeout(300)
+        zl = page.evaluate("[...document.querySelectorAll('.lf-pagelist .lf-pl-opt')].map(e => e.textContent).join('|')")
+        page.keyboard.press("Escape")
+        page.evaluate("n => { window.__hints = [{ mac: 'aa:bb:cc:dd:ee:ff', name: n, ip: '192.168.1.23' }]; }", pay % "device_name")
+        page.get_by_role("button", name="New zone…").click()
+        page.wait_for_function("document.querySelectorAll('#modal select').length > 2 && document.querySelectorAll('#modal select')[2].options.length > 1")
+        dl = page.evaluate("[...document.querySelectorAll('#modal select')[2].options].map(o => o.textContent).join('|')")
+        imgs = page.evaluate("document.querySelectorAll('select img, .lf-pagelist img, #modal img').length")
+        page.evaluate("ui.hideModal()")
+        page.wait_for_timeout(300)
+        check("hostile zone label and device name in the drop-down lists are text too",
+              not page.evaluate("window.__pwned || []") and "onerror" in zl and "onerror" in dl
+              and imgs == 0,
+              [page.evaluate("window.__pwned || []"), zl[:80], dl[:80]])
 
         # ---- the panel with real scrollbars: this test's browser hides them,
         # but a Mac with a mouse, Windows and Linux desktops show them, and
