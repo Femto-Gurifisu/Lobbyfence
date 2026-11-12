@@ -224,22 +224,6 @@ day; nothing else is sent. From the command line: `lobbyfence version`.
 four packages and their checksums to `dist/`. The `Makefile`s build proper
 `lobbyfence` and `luci-app-lobbyfence` packages with the OpenWrt SDK.
 
-### Coming from RegionGate
-
-LobbyFence was called RegionGate before. Install LobbyFence the usual way
-(on any of the four firmwares, the same commands as an update) and the
-installer switches RegionGate off and removes it, and moves its settings and
-learned servers over - on DD-WRT also the web page's port and sign-in, so the
-page keeps working without signing in again. Changes made in LuCI or on the
-page and not applied yet come along too. If LobbyFence already has settings
-of its own, RegionGate's are left where they were and the installer says
-where.
-
-Some addresses changed with the name: LuCI's page is now Services →
-LobbyFence, FreshTomato's `/ext/lobbyfence.asp`, the command `lobbyfence`. A
-home-screen icon added for RegionGate on FreshTomato or Asuswrt-Merlin needs
-to be added again (DD-WRT's keeps working).
-
 ## FreshTomato
 
 LobbyFence also runs on **FreshTomato** routers with an ARM CPU (for example

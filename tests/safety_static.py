@@ -44,8 +44,8 @@ NVRAM_KEYS = {"mypage_scripts", "jffs2_scripts", "script_init"}
 RM_VARS = {"LF_RUN", "LF_STATE", "RUN", "DEST", "OLD", "STAGE", "WWWEXT", "G_DATA", "HOOKS", "WEB",
            "W", "WORK", "SP", "in", "d", "k", "key", "dir", "tmp", "f"}
 RM_VAR_PREFIX_ONLY = {"d", "k", "key", "dir", "tmp", "f", "in"}   # only as "$x/..." or a file inside a LobbyFence folder
-RM_LITERAL = re.compile(r"^/(tmp|var/run|jffs|etc/lobbyfence|etc/config/lobbyfence|etc/regiongate|etc/config/regiongate|"
-                        r"usr/share/lobbyfence|usr/share/regiongate|www/luci-static|www/user|tmp/var/wwwext|"
+RM_LITERAL = re.compile(r"^/(tmp|var/run|jffs|etc/lobbyfence|etc/config/lobbyfence|"
+                        r"usr/share/lobbyfence|www/luci-static|www/user|tmp/var/wwwext|"
                         r"/?tmp/luci-modulecache)\b")
 
 MODULES = re.compile(r"^(ip_set|ip_set_hash_ip|ip_set_hash_net|xt_set|sch_netem|nfnetlink_queue|\"?\$LF_NETEM_KO\"?|\"?\$k(o)?\"?)$")

@@ -167,18 +167,6 @@ def main():
             ok = False
         check("opened again later (bookmark / home-screen icon): no sign-in needed", ok and page.locator("#lf-signin").count() == 0)
 
-        # signed in back when LobbyFence was called RegionGate: still signed in
-        page.evaluate("([t]) => { localStorage.removeItem('lf-token'); localStorage.setItem('rg-token', t); }", [token])
-        page.goto(LF + "/?renamed=1")
-        try:
-            page.wait_for_function("document.querySelector('.lf-panel') && document.querySelector('.lf-panel').innerText.includes('Running')", timeout=30000)
-            ok = True
-        except Exception:
-            ok = False
-        check("signed in under the old name (RegionGate): still signed in, the token kept under the new name",
-              ok and page.locator("#lf-signin").count() == 0 and page.evaluate("localStorage.getItem('lf-token')") == token
-              and page.evaluate("localStorage.getItem('rg-token')") is None)
-
         # Settings tab
         page.locator("a.lft-tab[data-tab=settings]").click()
         page.wait_for_selector(".lfs", timeout=15000)

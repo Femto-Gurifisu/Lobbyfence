@@ -226,8 +226,7 @@ def main():
         check("a new circle waits in the browser, the router's settings unchanged",
               (HOME / "lobbyfence.conf").read_text().count("list circle") == 1 and "circle" in (frame.evaluate("localStorage.getItem('lobbyfence.pending')") or ""))
         check("the page shows that changes wait to be applied", frame.locator("#lf-changes").is_visible())
-        # a change waiting since before the rename (kept under the old name, RegionGate): still there after a reload
-        frame.evaluate("localStorage.setItem('regiongate.pending', localStorage.getItem('lobbyfence.pending')); localStorage.removeItem('lobbyfence.pending')")
+        # a change waiting in the browser is still there after a reload
         page.reload()
         try:
             page.wait_for_function("""() => { const f = document.getElementById('lf-frame'); const d = f && f.contentDocument;
@@ -237,9 +236,8 @@ def main():
             ok = True
         except Exception:
             ok = False
-        check("a change waiting under the old name (RegionGate) is still waiting after the rename",
-              ok and "circle" in (frame.evaluate("localStorage.getItem('lobbyfence.pending')") or "")
-              and frame.evaluate("localStorage.getItem('regiongate.pending')") is None)
+        check("a change waiting in the browser is still waiting after a reload",
+              ok and "circle" in (frame.evaluate("localStorage.getItem('lobbyfence.pending')") or ""))
         frame.locator("#lf-apply").click()
         try:
             frame.wait_for_function("document.body.innerText.includes('Configuration changes applied')", timeout=60000)

@@ -70,76 +70,6 @@ reset_unmark() {
 	rm -f "$DEST/.reset-mark" "$DEST/.fresh-start"
 }
 
-# ---------------------------------------------- RegionGate, LobbyFence's old name
-# An install under the old name is switched off and removed. Its settings and
-# learned servers move over - unless LobbyFence already has settings of its
-# own: then the old ones stay where they are.
-OLD="$JFFS/regiongate"
-
-# option data_dir '<old>[/...]' -> '<new>[/...]' (a folder chosen elsewhere stays)
-move_data_dir() { # config-file old new
-	cp -p "$1" "$1.new" && awk -v o="$2" -v n="$3" '
-		$1 == "option" && $2 == "data_dir" {
-			v = $0; sub(/^[ \t]*option[ \t]+data_dir[ \t]+/, "", v); sub(/[ \t]+$/, "", v)
-			q = substr(v, 1, 1)
-			if ((q == "\047" || q == "\"") && length(v) > 1 && substr(v, length(v)) == q) v = substr(v, 2, length(v) - 2)
-			if (v == o || index(v, o "/") == 1) {
-				match($0, /^[ \t]*/)
-				print substr($0, 1, RLENGTH) "option data_dir \047" n substr(v, length(o) + 1) "\047"
-				next
-			}
-		}
-		{ print }' "$1" > "$1.new" && mv "$1.new" "$1" || { rm -f "$1.new"; return 1; }
-}
-
-# the old folder's settings and data into $DEST; its programs are removed
-# (the new ones are copied in next)
-migrate_files() {
-	local f
-	rm -rf "$OLD/bin" "$OLD/share" "$OLD/www" "$OLD/regiongate" "$OLD/mypage.sh"
-	if [ -f "$DEST/lobbyfence.conf" ]; then
-		rm -rf "$OLD/modules" "$OLD/netem"
-		say "LobbyFence already has settings of its own - RegionGate's were left in $OLD (delete them when you no longer need them: rm -rf $OLD)"
-		return 0
-	fi
-	if [ -f /tmp/regiongate/staged.conf ] && [ ! -f "$RUN/staged.conf" ]; then
-		# (changes saved on the web page, not applied yet)
-		mkdir -p "$RUN" && mv /tmp/regiongate/staged.conf "$RUN/staged.conf"
-	fi
-	if [ ! -e "$DEST" ]; then
-		mv "$OLD" "$DEST" || die "could not move $OLD to $DEST"
-	else
-		# a LobbyFence folder without settings (an install that did not finish)
-		rmdir "$DEST/data" 2>/dev/null
-		for f in "$OLD"/* "$OLD"/.[!.]*; do
-			[ -e "$f" ] && [ ! -e "$DEST/${f##*/}" ] && mv "$f" "$DEST/"
-		done
-		rmdir "$OLD" 2>/dev/null || say "some of RegionGate's files were left in $OLD"
-	fi
-	if [ -f "$DEST/regiongate.conf" ]; then
-		mv "$DEST/regiongate.conf" "$DEST/lobbyfence.conf" || die "could not rename $DEST/regiongate.conf"
-		move_data_dir "$DEST/lobbyfence.conf" "$OLD" "$DEST" || say "warning: could not update data_dir in $DEST/lobbyfence.conf"
-	fi
-	say "settings and learned servers moved to $DEST"
-}
-
-migrate_regiongate() {
-	[ -d "$OLD" ] || return 0
-	[ -f "$DEST/lobbyfence.conf" ] && [ ! -e "$OLD/regiongate" ] && return 0   # (told on an earlier run)
-	say "found RegionGate (LobbyFence's old name) in $OLD - moving it over to LobbyFence"
-	have cru && cru d regiongate
-	if [ -x "$OLD/regiongate" ]; then
-		# (it saves its learned servers and takes its rules and menu entry out)
-		RG_HOME="$OLD" "$OLD/regiongate" stop >/dev/null 2>&1
-		RG_HOME="$OLD" "$OLD/regiongate" menu-off >/dev/null 2>&1
-	fi
-	rm -f "$HOOKS/regiongate.init" "$HOOKS/regiongate.fire" "$HOOKS/regiongate.shut"
-	rm -f "$WWWEXT/regiongate.asp" "$WWWEXT/cgi-bin/regiongate.cgi"
-	rm -rf "$WWWEXT/regiongate"
-	migrate_files
-	rm -rf /tmp/regiongate
-}
-
 # Anything of LobbyFence's still running is stopped before its files go - a
 # start or firewall hook waiting for its turn would otherwise put the filter
 # back after the uninstall (until the next reboot).
@@ -235,8 +165,6 @@ if ! ipset list -n >/dev/null 2>&1; then
 fi
 
 # ---------------------------------------------------------------- install
-
-migrate_regiongate
 
 # a running copy saves its learned servers and steps aside first
 if [ -x "$DEST/lobbyfence" ]; then

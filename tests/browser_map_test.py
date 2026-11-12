@@ -1450,15 +1450,6 @@ def main():
         if SHOTS:
             page.screenshot(path=str(SHOTS / "satellite.png"))
 
-        # ---- 6b. what this browser remembered under LobbyFence's old name (RegionGate) moves over
-        boot(page, cfg, files, services, storage={"regiongate.theme": '"light"', "regiongate.nopanel": "true",
-                                                 "lobbyfence.nopanel": "false", "regiongate.view": '{"fit":true}'})
-        check("old name: the theme chosen before the rename is used", page.locator(".lf-app.lf-dark").count() == 0 and
-              page.evaluate("localStorage.getItem('lobbyfence.theme')") == '"light"')
-        check("old name: a setting already made under the new name wins", page.evaluate("localStorage.getItem('lobbyfence.nopanel')") == "false")
-        check("old name: nothing left under it", page.evaluate("Object.keys(localStorage).filter(k => k.startsWith('regiongate')).length") == 0,
-              page.evaluate("Object.keys(localStorage)"))
-
         # ---- 7a. lag simulator panel
         boot(page, cfg, files, services)
         lag = page.locator(".lf-lag")

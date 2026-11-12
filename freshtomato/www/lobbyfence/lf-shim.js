@@ -11,25 +11,6 @@
 window.LF_PLATFORM = window.LF_PLATFORM || 'tomato';
 var CGI = window.LF_CGI || '/ext/cgi-bin/lobbyfence.cgi';
 
-/* LobbyFence was called RegionGate before: what this browser remembered under
- * the old name (settings of the page, changes not applied yet, the install
- * tip) moves over once - before anything reads it */
-(function() {
-	try {
-		var ls = window.localStorage, keys = [], i, k;
-		for (i = 0; i < ls.length; i++)
-			if ((k = ls.key(i)) && k.indexOf('regiongate.') === 0)
-				keys.push(k);
-		for (i = 0; i < keys.length; i++) {
-			k = 'lobbyfence.' + keys[i].slice(11);
-			if (ls.getItem(k) === null)
-				ls.setItem(k, ls.getItem(keys[i]));
-			ls.removeItem(keys[i]);
-		}
-	}
-	catch (e) {}
-})();
-
 /* ------------------------------------------------------------- router link */
 
 function call(cmdline, data) {

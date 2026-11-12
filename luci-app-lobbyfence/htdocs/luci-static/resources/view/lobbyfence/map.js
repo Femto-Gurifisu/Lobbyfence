@@ -1803,24 +1803,6 @@ function shareServers(text) {
 		games: games.map(function(g) { return { label: g.label, n: g.rows.length }; }) };
 }
 
-/* LobbyFence was called RegionGate before: what this browser remembered under
- * the old name (theme, view, panel, ...) moves over once */
-(function() {
-	try {
-		var ls = window.localStorage, keys = [], i, k;
-		for (i = 0; i < ls.length; i++)
-			if ((k = ls.key(i)) && k.indexOf('regiongate.') === 0)
-				keys.push(k);
-		for (i = 0; i < keys.length; i++) {
-			k = 'lobbyfence.' + keys[i].slice(11);
-			if (ls.getItem(k) === null)
-				ls.setItem(k, ls.getItem(keys[i]));
-			ls.removeItem(keys[i]);
-		}
-	}
-	catch (e) {}
-})();
-
 /* ------------------------------------------------------------- view */
 
 /* OpenWrt: LobbyFence as a home-screen app, like on the other firmwares (its

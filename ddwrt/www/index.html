@@ -26,11 +26,6 @@
 (function() {
 	var m = /(?:^#|&)t=([0-9a-f]{16,64})/.exec(location.hash || ''), t = '';
 	var r = /(?:^#|&)r=([^&]+)/.exec(location.hash || '');      /* (read before the address is tidied up below) */
-	/* (kept under LobbyFence's old name, RegionGate, before) */
-	try {
-		var o = localStorage.getItem('rg-token');
-		if (o !== null) { if (localStorage.getItem('lf-token') === null) localStorage.setItem('lf-token', o); localStorage.removeItem('rg-token'); }
-	} catch (e) {}
 	try { if (m) localStorage.setItem('lf-token', m[1]); t = localStorage.getItem('lf-token') || ''; } catch (e) {}
 	if (m) {
 		t = t || m[1];

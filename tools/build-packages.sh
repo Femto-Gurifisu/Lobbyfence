@@ -44,7 +44,6 @@ list() { # platform -> the package's files, one per line
 			for d in freshtomato/modules/*/; do
 				[ -f "$d/sch_netem.ko" ] || continue
 				echo "${d}sch_netem.ko"
-				[ ! -f "${d}Module.symvers.netem" ] || echo "${d}Module.symvers.netem"
 			done;;
 		asuswrt-merlin)
 			echo asuswrt-merlin/install.sh

@@ -62,82 +62,6 @@ get() { # repo-relative path, destination
 	fi
 }
 
-# ---------------------------------------------- RegionGate, LobbyFence's old name
-# An install under the old name is switched off and removed. Its settings,
-# learned servers and changes waiting in LuCI move over - unless LobbyFence
-# already has settings of its own: then the old ones stay where they are.
-OLD_CONF=/etc/config/regiongate
-OLD_DATA=/etc/regiongate
-
-# option data_dir '<old>[/...]' -> '<new>[/...]' (a folder chosen elsewhere stays)
-move_data_dir() { # config-file old new
-	cp -p "$1" "$1.new" && awk -v o="$2" -v n="$3" '
-		$1 == "option" && $2 == "data_dir" {
-			v = $0; sub(/^[ \t]*option[ \t]+data_dir[ \t]+/, "", v); sub(/[ \t]+$/, "", v)
-			q = substr(v, 1, 1)
-			if ((q == "\047" || q == "\"") && length(v) > 1 && substr(v, length(v)) == q) v = substr(v, 2, length(v) - 2)
-			if (v == o || index(v, o "/") == 1) {
-				match($0, /^[ \t]*/)
-				print substr($0, 1, RLENGTH) "option data_dir \047" n substr(v, length(o) + 1) "\047"
-				next
-			}
-		}
-		{ print }' "$1" > "$1.new" && mv "$1.new" "$1" || { rm -f "$1.new"; return 1; }
-}
-
-migrate_regiongate() {
-	local f d p
-	# (old settings left next to LobbyFence's own on an earlier run: nothing to do)
-	if [ ! -e /etc/init.d/regiongate ] && [ ! -e /usr/sbin/regiongate ]; then
-		[ -f /etc/config/lobbyfence ] && return 0
-		[ -f "$OLD_CONF" ] || [ -d "$OLD_DATA" ] || return 0
-	fi
-	say "found RegionGate (LobbyFence's old name) - moving it over to LobbyFence"
-	if [ -x /etc/init.d/regiongate ]; then
-		# (it saves its learned servers and takes its rules out)
-		/etc/init.d/regiongate stop >/dev/null 2>&1 || true
-		/etc/init.d/regiongate disable >/dev/null 2>&1 || true
-	fi
-	rm -f /etc/rc.d/[SK][0-9][0-9]regiongate
-	nft delete table inet regiongate >/dev/null 2>&1 || true
-	if [ -f /etc/config/lobbyfence ]; then
-		if [ -f "$OLD_CONF" ] || [ -d "$OLD_DATA" ]; then
-			say "LobbyFence already has settings of its own - RegionGate's were left in $OLD_CONF and $OLD_DATA (delete them when you no longer need them)"
-		fi
-	else
-		if [ -f "$OLD_CONF" ]; then
-			mv "$OLD_CONF" /etc/config/lobbyfence
-			move_data_dir /etc/config/lobbyfence "$OLD_DATA" /etc/lobbyfence || say "warning: could not update data_dir in /etc/config/lobbyfence"
-			# changes made in LuCI and not applied yet (rpcd keeps them per session)
-			for f in /var/run/rpcd/uci-*/regiongate /tmp/.uci/regiongate; do
-				[ -f "$f" ] || continue
-				d="${f%/*}"
-				if [ ! -e "$d/lobbyfence" ]; then
-					sed 's/^\([-+@^|~]\{0,1\}\)regiongate\./\1lobbyfence./' "$f" > "$d/lobbyfence" || true
-				fi
-				rm -f "$f"
-			done
-		fi
-		if [ -d "$OLD_DATA" ] && [ ! -e /etc/lobbyfence ]; then
-			mv "$OLD_DATA" /etc/lobbyfence
-		fi
-		say "settings and learned servers moved to /etc/config/lobbyfence and /etc/lobbyfence"
-	fi
-	# installed as packages: the package manager takes them out (the settings are moved already)
-	for p in luci-app-regiongate regiongate; do
-		if command -v opkg >/dev/null 2>&1 && opkg status "$p" 2>/dev/null | grep -q '^Status:.* installed'; then
-			opkg remove "$p" >/dev/null 2>&1 || true
-		fi
-		if command -v apk >/dev/null 2>&1 && apk info -e "$p" >/dev/null 2>&1; then
-			apk del "$p" >/dev/null 2>&1 || true
-		fi
-	done
-	rm -f /etc/init.d/regiongate /usr/sbin/regiongate /lib/upgrade/keep.d/regiongate \
-		/usr/share/luci/menu.d/luci-app-regiongate.json /usr/share/rpcd/acl.d/luci-app-regiongate.json
-	rm -rf /usr/share/regiongate /www/luci-static/resources/view/regiongate /www/luci-static/resources/regiongate /tmp/regiongate
-	return 0
-}
-
 refresh_luci() {
 	rm -f /tmp/luci-indexcache* 2>/dev/null || true
 	rm -rf /tmp/luci-modulecache 2>/dev/null || true
@@ -231,9 +155,7 @@ echo "$FILES" | while IFS=: read -r src dest mode; do
 	case "$src" in */*) mkdir -p "$STAGE/${src%/*}";; esac
 	get "$src" "$STAGE/$src"
 done
-[ -f /etc/config/lobbyfence ] || [ -f "$OLD_CONF" ] || { mkdir -p "$STAGE/${CONFIG_SRC%/*}"; get "$CONFIG_SRC" "$STAGE/$CONFIG_SRC"; }
-
-migrate_regiongate
+[ -f /etc/config/lobbyfence ] || { mkdir -p "$STAGE/${CONFIG_SRC%/*}"; get "$CONFIG_SRC" "$STAGE/$CONFIG_SRC"; }
 
 echo "$FILES" | while IFS=: read -r src dest mode; do
 	[ -n "$src" ] || continue
