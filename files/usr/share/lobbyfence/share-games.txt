@@ -1,0 +1,29 @@
+# The games whose servers LobbyFence may send (Servers file -> Send to
+# LobbyFence, and once a day when that is on): the listed client-server games -
+# not peer-to-peer ones (the fighting games, GTA Online), "Any game" or Custom,
+# where players' own addresses show up. <id> <name>; the same as the map page's
+# list (tests/safety_static.py checks that they match).
+apex Apex Legends
+arcraiders ARC Raiders
+battlefield Battlefield 6
+cod Call of Duty (Black Ops 7/6, Warzone, MW III)
+valve Counter-Strike 2 / Dota 2
+dbd Dead by Daylight
+eafc EA SPORTS FC 26
+fortnite Fortnite
+lol League of Legends
+marvelrivals Marvel Rivals
+overwatch Overwatch 2
+pubg PUBG: BATTLEGROUNDS
+r6 Rainbow Six Siege X
+roblox Roblox
+rocketleague Rocket League
+valorant VALORANT
+aov Arena of Valor
+codm Call of Duty: Mobile
+supercell Clash Royale / Clash of Clans
+fortnite_m Fortnite (mobile)
+freefire Free Fire
+mlbb Mobile Legends: Bang Bang
+pubgm PUBG Mobile
+roblox_m Roblox (mobile)

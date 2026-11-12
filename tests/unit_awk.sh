@@ -230,6 +230,26 @@ t "shared_hit: the router's own / imported locations first, then the ones LobbyF
 	"13.113.128.68 1 1 JP 5|45.32.7.134 40.4993 -74.399 US 1794182174|" \
 	"$(ra shared_hit /tmp/lf_w.$$ /tmp/lf_sc.$$ /tmp/lf_bi.$$ | tr '\n' '|')"
 
+# share-servers: only this router's own finds, listed client-server games, data-centre
+# networks, not built in or sent before; newest first under the size limit; form-encoded
+SH="$(dirname "$AWKF")"
+printf 'lobbyfence-servers 1\ngame apex My zone\n155.133.248.200 52.3 4.9 NL 1794416900\n155.133.248.36 52.3 4.9 NL 1794416900\n73.1.1.1 1 1 US 1794416900\n3.120.9.77 50.1 8.6 DE 1794416000 imported\n155.133.248.201 52.3 4.9 NL 1794416950\n3.120.9.78 50.1 8.6 DE 1794410000\n3.120.9.79 95 8.6 DE 1794416000\ngame sf6 x\n3.4.5.6 1 1 US 1794416900\ngame fortnite F\n3.120.9.80 50.1 8.6 DE 1794416990\n' > /tmp/lf_ex.$$
+printf 'apex 155.133.248.201\n' > /tmp/lf_sent.$$
+t "share_pick: own finds of listed games in data-centre networks, not built in or sent before" \
+	"1794416990 fortnite 3.120.9.80|1794416900 apex 155.133.248.200|1794410000 apex 3.120.9.78|" \
+	"$(ra share_pick "$SH/server-networks.txt" "$SH/share-games.txt" "$SH/servers.txt" /tmp/lf_sent.$$ /tmp/lf_ex.$$ | sort -rn | awk '{ print $1, $2, $3 }' | tr '\n' '|')"
+ra share_pick "$SH/server-networks.txt" "$SH/share-games.txt" "$SH/servers.txt" /tmp/lf_sent.$$ /tmp/lf_ex.$$ | sort -rn |
+	ra share_text -v max=40000 -v pairs=/tmp/lf_pairs.$$ -v statf=/tmp/lf_st.$$ -v ver="LobbyFence 9" "$SH/share-games.txt" - > /tmp/lf_txt.$$
+t "share_text: a servers file by game (the games' own names), counts and what was sent" \
+	"lobbyfence-servers 1|# sent by LobbyFence 9 (share-servers) - game servers in data-centre networks only|game apex Apex Legends|155.133.248.200 52.3 4.9 NL 1794416900|3.120.9.78 50.1 8.6 DE 1794410000|game fortnite Fortnite|3.120.9.80 50.1 8.6 DE 1794416990|/3 0/fortnite 3.120.9.80 apex 155.133.248.200 apex 3.120.9.78" \
+	"$(tr '\n' '|' < /tmp/lf_txt.$$)/$(cat /tmp/lf_st.$$)/$(tr '\n' ' ' < /tmp/lf_pairs.$$ | sed 's/ $//')"
+ra share_pick "$SH/server-networks.txt" "$SH/share-games.txt" "$SH/servers.txt" /tmp/lf_sent.$$ /tmp/lf_ex.$$ | sort -rn |
+	ra share_text -v max=390 -v pairs=/tmp/lf_pairs.$$ -v statf=/tmp/lf_st.$$ "$SH/share-games.txt" - > /tmp/lf_txt.$$
+t "share_text: too much for one answer - the newest go, the rest is counted for next time" "1 2|fortnite 3.120.9.80" \
+	"$(cat /tmp/lf_st.$$)|$(cat /tmp/lf_pairs.$$)"
+t "share_enc: one form field, everything but letters, digits and -_.~ encoded" "entry.1=lobbyfence-servers%201%0Agame%20apex%20A%26B%3D1%2B%C3%A9%0A" \
+	"$(printf 'lobbyfence-servers 1\ngame apex A&B=1+\303\251\n' | ra share_enc -v field=entry.1)"
+
 rm -f /tmp/lf_*.$$
 [ "$FAIL" = 0 ] && echo "ALL UNIT TESTS PASSED"
 exit $FAIL

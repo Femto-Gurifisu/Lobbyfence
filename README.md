@@ -215,7 +215,7 @@ above the map, with the steps for your browser); the icon opens straight to
 the map.
 
 **Which version do I have?** The map page's Status section shows it next to
-its heading - *LobbyFence 1.3.3 · up to date*, or *version 1.4.0 is out -
+its heading - *LobbyFence 1.3.4 · up to date*, or *version 1.4.0 is out -
 update* with a link to the latest release. To know that, your
 browser (not the router) asks GitHub for the newest release, at most twice a
 day; nothing else is sent. From the command line: `lobbyfence version`.
@@ -830,10 +830,24 @@ games.
   Where the browser can't copy, it downloads `lobbyfence-share-YYYYMMDD.txt`
   instead. What you send is **private**: only the maintainer sees it, and it
   is deleted once its servers are added. Only game servers in the data-centre
-  networks LobbyFence knows (`tools/server-networks.txt`) go, for the listed
+  networks LobbyFence knows (`files/usr/share/lobbyfence/server-networks.txt`) go, for the listed
   client-server games, under the game's own name: nothing from peer-to-peer
   games (the fighting games, GTA Online), *Any game* or *Custom* zones, no
   zone labels - so no player's own address and nothing about you.
+* **Send new ones by itself, once a day** (under the button, off until you
+  tick it): the router sends what it found since the last time to the same
+  form, by itself - the first time within the hour, then once a day around
+  that time (a failed send is tried again two hours later). It sends only
+  what this router found itself (not imported servers), with the same limits
+  as the button, and leaves out servers already in the list LobbyFence comes
+  with or sent before - on a day with nothing new it sends nothing. The line
+  next to the box says when it last sent and when it sends next; the log has a
+  line for each send. From the command line: `lobbyfence share-servers
+  auto on|off`, `status`, `preview` (what would go now) and `now` (send now).
+  It needs curl (or wget / uclient-fetch with HTTPS) on the router; without
+  one the line says it could not send, and the log says why. Like any visit
+  to the form, Google sees the router's internet address; LobbyFence's
+  maintainer doesn't.
 * **Import a servers file…** adds those locations to the router. When one of
   those servers shows up later, its location is taken from the file - no
   lookup - and the log says *located N server address(es) from known
@@ -872,7 +886,7 @@ list publicly.
 Download responses (.csv)*, then `tools/sync-servers.py responses.csv`
 (`--dry-run` first to only see what it would add; servers files work too). It
 checks every line again - a listed client-server game, an address in
-`tools/server-networks.txt`, a sane location and time - and adds the servers
+`files/usr/share/lobbyfence/server-networks.txt`, a sane location and time - and adds the servers
 not listed yet to `files/usr/share/lobbyfence/servers.txt`, each once per
 game; running it twice adds nothing. Then run `python3 tests/safety_static.py`
 and commit - the servers go out with the next release - and delete what was
@@ -901,6 +915,7 @@ lobbyfence import <zone> <file|->   add known server addresses
 lobbyfence export                   located servers by game (the Servers file)
 lobbyfence import-servers <file|->  add the locations from a Servers file (no lookups)
 lobbyfence remove-servers <game|all> [addr...]  delete a game's servers list, or just those servers
+lobbyfence share-servers [status|preview|now|auto on|off]  send new found game servers to LobbyFence (once a day: auto on)
 lobbyfence ports <zone> [clear]     the server ports the zone's device used while playing
 lobbyfence forget <zone> [addr...]  drop learned addresses
 lobbyfence cycle                    run a learning pass now
@@ -1098,7 +1113,7 @@ impossible. LobbyFence also runs on the real routers listed under
   files to the built-in list: only data-centre servers of listed client-server
   games go in, each once; home addresses, peer-to-peer games, Custom zones and
   bad lines are left out, and a second run adds nothing. `safety_static.py`
-  also checks that the map page's copy of `tools/server-networks.txt` (what
+  also checks that the map page's copy of `files/usr/share/lobbyfence/server-networks.txt` (what
   *Send to LobbyFence* may send) is the same list.
 * `openwrt_install_test.sh <workdir> <busybox>` — the OpenWrt installer from
   the release package, in a private mount namespace with stand-in `/etc`,

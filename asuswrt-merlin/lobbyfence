@@ -312,6 +312,11 @@ web_run() { # id file
 		# (8>&-: what they start must not keep the request lock)
 		live|devices|cycle|apitest|export|builtin-servers)
 			"$MAIN" "$cmd" > "$out" 2> "$err" < /dev/null 8>&-; rc=$?;;
+		share-servers)
+			# the Servers file window: whether the found servers go to LobbyFence once a day
+			case "$1 $2" in 'status '|'auto on'|'auto off') [ $# -le 2 ] || { answer_err "$id" "bad argument"; return; };;
+			*) answer_err "$id" "not allowed"; return;; esac
+			"$MAIN" share-servers "$@" > "$out" 2> "$err" < /dev/null 8>&-; rc=$?;;
 		import-servers)
 			# the rest of the request: another router's servers file
 			sed 1d "$in" | "$MAIN" import-servers - > "$out" 2> "$err" 8>&-; rc=$?;;

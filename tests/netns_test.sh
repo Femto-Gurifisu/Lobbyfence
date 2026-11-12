@@ -46,7 +46,7 @@ inw $IP route add 192.168.1.0/24 via 10.99.0.1
 inw python3 "$HERE/udp.py" serve 3074 & SRV=$!
 inw python3 "$HERE/udp.py" serve 5555 & SRV2=$!
 inr python3 "$HERE/fake_geo.py" 8080 "$W/geo_calls.log" & GEO=$!
-trap 'kill $LAN $RTR $WAN $SRV $SRV2 $GEO 2>/dev/null; pkill -f "^python3 .*(udp|fake_geo).py" 2>/dev/null' EXIT INT TERM
+trap 'kill $LAN $RTR $WAN $SRV $SRV2 $GEO 2>/dev/null; pkill -f "^python3 .*(udp|fake_geo|fake_form).py" 2>/dev/null' EXIT INT TERM
 sleep 0.5
 
 probe() { inl python3 "$HERE/udp.py" probe 3074 "$@" | tr '\n' ' ' | sed 's/ $//'; }
@@ -530,6 +530,73 @@ lf export > "$W/servers.txt"
 grep -qx 'lobbyfence-servers 1' "$W/servers.txt" && grep -q '^game fortnite Test game$' "$W/servers.txt" \
 	&& grep -q '^80\.20\.0\.1 -\?[0-9.]* -\?[0-9.]* [A-Z][A-Z] [0-9]*$' "$W/servers.txt" && grep -q '^45\.10\.0\.1 ' "$W/servers.txt" \
 	&& pass "export: the located servers under the zone's game" || fail "export: $(head -12 "$W/servers.txt")"
+
+# --- 13c. Send to LobbyFence (share-servers): only this router's own finds for the listed
+# client-server games, in data-centre networks, not built in or sent before - to the form
+# (here a stand-in on 127.0.0.1:8090; the test addresses count as data centres in a copy
+# of the network list, the real list leaves them out)
+inr python3 "$HERE/fake_form.py" 8090 "$W/form.log" & FORM=$!
+mkdir -p "$W/share"; cp "$LF_SHARE"/* "$W/share/"
+echo "45.10.0.0/16 80.20.0.0/16" > "$W/share/server-networks.txt"
+shf() { inr env LF_SHARE="$W/share" LF_SHARE_URL="http://127.0.0.1:8090/forms/d/e/x/formResponse" $LF share-servers "$@" 2>>"$W/share.err"; }
+sleep 0.4
+st="$(shf status)"
+python3 -c "import json,sys; d=json.loads(sys.argv[1]); assert d['auto']==0 and d['pending']==2 and d['last']==0 and d['sent']==0, d" "$st" \
+	&& pass "share-servers status: off, 2 found servers waiting to be sent" || fail "share status: $st"
+pv="$(shf preview)"
+echo "$pv" | head -1 | grep -qx 'lobbyfence-servers 1' && echo "$pv" | grep -qx 'game fortnite Fortnite' \
+	&& echo "$pv" | grep -q '^45\.10\.0\.1 ' && echo "$pv" | grep -q '^80\.20\.0\.1 ' && ! echo "$pv" | grep -q 'Test' \
+	&& pass "preview: a servers file under the game's own name, not the zone's label" || fail "share preview: $pv"
+st="$(inr env LF_SHARE_URL=http://127.0.0.1:8090/x $LF share-servers status)"
+python3 -c "import json,sys; d=json.loads(sys.argv[1]); assert d['pending']==0, d" "$st" \
+	&& pass "with the real network list these addresses (not data centres) would not be sent" || fail "real network list: $st"
+out="$(shf now)"; rc=$?
+python3 - "$W/form.log" <<'PY' && pass "sent: one answer to the form, in its field, with just the two servers ($out)" || fail "share now: rc=$rc $out $(cat "$W/form.log" "$W/share.err" 2>/dev/null | head -5)"
+import json, sys
+a = [json.loads(l) for l in open(sys.argv[1])]
+assert len(a) == 1 and a[0]["fields"] == ["entry.902986460"] and a[0]["path"].endswith("/formResponse"), a
+assert "x-www-form-urlencoded" in a[0]["type"], a
+t = a[0]["text"].splitlines()
+assert t[0] == "lobbyfence-servers 1" and "game fortnite Fortnite" in t, t
+assert sorted(l.split()[0] for l in t if l[:1].isdigit()) == ["45.10.0.1", "80.20.0.1"], t
+assert all(len(l.split()) == 5 for l in t if l[:1].isdigit()), t
+PY
+st="$(shf status)"
+python3 -c "import json,sys; d=json.loads(sys.argv[1]); assert d['last_ok']==1 and d['last_n']==2 and d['pending']==0 and d['sent']==2 and d['last']>0, d" "$st" \
+	&& pass "after sending: remembered as sent, nothing waiting" || fail "share status after send: $st"
+grep -q "sent 2 new game server(s) to LobbyFence" "$W/run.log" 2>/dev/null || grep -rq "sent 2 new game server" "$W/run" 2>/dev/null \
+	&& pass "the log says what was sent" || fail "no log line for the send"
+out="$(shf now)"
+[ "$out" = "nothing new to send" ] && [ "$(wc -l < "$W/form.log")" = 1 ] \
+	&& pass "sending again: nothing new, nothing sent" || fail "second send: $out / $(wc -l < "$W/form.log")"
+# the form down: nothing marked as sent, the failure is told
+rm -f "$W/data/share.sent"; touch "$W/form.log.down"
+out="$(shf now 2>&1)"; rc=$?
+st="$(shf status)"
+[ $rc -ne 0 ] && python3 -c "import json,sys; d=json.loads(sys.argv[1]); assert d['last_ok']==0 and d['sent']==0 and d['pending']==2, d" "$st" \
+	&& pass "form not answering: an error, nothing counted as sent" || fail "form down: rc=$rc $out $st"
+rm -f "$W/form.log.down"
+# an answer the form refuses (400, with its confirmation text in the page) is not taken as sent
+inr env LF_SHARE="$W/share" LF_SHARE_URL="http://127.0.0.1:8090/forms/d/e/x/notaform" $LF share-servers now >/dev/null 2>&1; rc=$?
+[ $rc -ne 0 ] && [ ! -s "$W/data/share.sent" ] && pass "an answer the form refuses (400) is not counted as sent" || fail "400 counted as sent"
+# once a day: on -> the first time within the hour; the learning loop sends when it is time
+st="$(shf auto on)"; js="$(shf status)"
+python3 -c "import json,sys; d=json.loads(sys.argv[1]); assert d['auto']==1 and d['now']+300 <= d['next'] <= d['now']+3600, d" "$js" \
+	&& [ "$st" = on ] && pass "auto on: the first send is within the hour" || fail "auto on: $st $js"
+echo 1 > "$W/data/share.next"; : > "$W/form.log"
+inr env LF_SHARE="$W/share" LF_SHARE_URL="http://127.0.0.1:8090/forms/d/e/x/formResponse" $LF daemon >/dev/null 2>&1 & DAEMON=$!
+n=0; while [ ! -s "$W/form.log" ] && [ $n -lt 60 ]; do sleep 0.5; n=$((n + 1)); done
+sleep 1
+kill "$(cat "$W/run/daemon.pid" 2>/dev/null)" $DAEMON 2>/dev/null; wait $DAEMON 2>/dev/null
+js="$(shf status)"
+[ "$(wc -l < "$W/form.log")" = 1 ] && python3 -c "import json,sys; d=json.loads(sys.argv[1]); assert d['last_ok']==1 and d['sent']==2 and abs(d['next'] - d['now'] - 86400) <= 960, d" "$js" \
+	&& pass "the learning loop sends by itself when it is time, then again in about a day" || fail "daemon send: $(wc -l < "$W/form.log") $js"
+st="$(shf auto off)"; js="$(shf status)"
+python3 -c "import json,sys; d=json.loads(sys.argv[1]); assert d['auto']==0 and d['next']==0, d" "$js" && [ "$st" = off ] && [ ! -f "$W/data/share.next" ] \
+	&& pass "auto off: nothing scheduled any more" || fail "auto off: $st $js"
+lf share-servers auto maybe >/dev/null 2>&1 && fail "share-servers accepted a bad argument" || pass "share-servers refuses bad arguments"
+kill $FORM 2>/dev/null; wait $FORM 2>/dev/null
+rm -f "$W/data/share.sent" "$W/data/share.last"
 # the "new router": nothing learned or located yet - and the geolocation service is down (13)
 lf teardown
 rm -rf "$W/data/geo.cache" "$W/data/zones" "$W/run/state"

@@ -20,6 +20,8 @@ files/usr/sbin/lobbyfence:/usr/sbin/lobbyfence:755
 files/usr/share/lobbyfence/lobbyfence.awk:/usr/share/lobbyfence/lobbyfence.awk:644
 files/usr/share/lobbyfence/fw-nft.sh:/usr/share/lobbyfence/fw-nft.sh:644
 files/usr/share/lobbyfence/servers.txt:/usr/share/lobbyfence/servers.txt:644
+files/usr/share/lobbyfence/server-networks.txt:/usr/share/lobbyfence/server-networks.txt:644
+files/usr/share/lobbyfence/share-games.txt:/usr/share/lobbyfence/share-games.txt:644
 files/lib/upgrade/keep.d/lobbyfence:/lib/upgrade/keep.d/lobbyfence:644
 luci-app-lobbyfence/htdocs/luci-static/resources/view/lobbyfence/zones.js:/www/luci-static/resources/view/lobbyfence/zones.js:644
 luci-app-lobbyfence/htdocs/luci-static/resources/view/lobbyfence/map.js:/www/luci-static/resources/view/lobbyfence/map.js:644

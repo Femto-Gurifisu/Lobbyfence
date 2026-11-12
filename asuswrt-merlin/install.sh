@@ -29,6 +29,8 @@ FILES="
 files/usr/sbin/lobbyfence:bin/lobbyfence-main:755
 files/usr/share/lobbyfence/lobbyfence.awk:share/lobbyfence.awk:644
 files/usr/share/lobbyfence/servers.txt:share/servers.txt:644
+files/usr/share/lobbyfence/server-networks.txt:share/server-networks.txt:644
+files/usr/share/lobbyfence/share-games.txt:share/share-games.txt:644
 files/usr/share/lobbyfence/fw-ipt.sh:share/fw-ipt.sh:644
 files/usr/share/lobbyfence/fw-merlin.sh:share/fw-merlin.sh:644
 freshtomato/functions.sh:share/functions.sh:644

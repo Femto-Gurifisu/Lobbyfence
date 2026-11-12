@@ -150,7 +150,7 @@ for n, line in code_lines(main):
 # Peer-to-peer traffic (party chat, some lobbies) shows players' home addresses too - those
 # must never be added. Every address must be in a hosting network listed here.
 import ipaddress
-HOSTING = " ".join(l.split("#")[0] for l in (REPO / "tools/server-networks.txt").read_text().splitlines())
+HOSTING = " ".join(l.split("#")[0] for l in (REPO / "files/usr/share/lobbyfence/server-networks.txt").read_text().splitlines())
       # games' data-centre ping rounds, next to the ones above (never a home connection). Kept narrow on
       # purpose: Google Fiber, AT&T and the like share first numbers with some of these.
 nets =[ipaddress.ip_network(c) for c in HOSTING.split()]
@@ -173,7 +173,20 @@ for n, line in enumerate((REPO / "files/usr/share/lobbyfence/servers.txt").read_
 _js = (REPO / "luci-app-lobbyfence/htdocs/luci-static/resources/view/lobbyfence/map.js").read_text()
 _m = re.search(r"var SERVER_NETWORKS = '([^']*)'", _js)
 if not _m or _m.group(1).split() != HOSTING.split():
-    problems.append("map.js SERVER_NETWORKS is not the same list as tools/server-networks.txt")
+    problems.append("map.js SERVER_NETWORKS is not the same list as files/usr/share/lobbyfence/server-networks.txt")
+
+# the router sends the same games' servers as the page (share-servers), to the same form
+_p2p = set(re.findall(r"'([a-z0-9_]+)'", re.search(r"var P2P_GAMES = \[([^\]]*)\]", _js).group(1)))
+_page_games = [f"{m.group(1)} {m.group(3)}" for m in re.finditer(
+    r"\{ id: '([a-z0-9_]+)', group: '([a-z]+)', label: (?:_\()?'((?:[^'\\]|\\.)*)'", _js)
+    if m.group(2) in ("pc", "mobile") and m.group(1) not in _p2p]
+_router_games = [l for l in (REPO / "files/usr/share/lobbyfence/share-games.txt").read_text().splitlines() if l and not l.startswith("#")]
+if [g.replace("\\'", "'") for g in _page_games] != _router_games:
+    problems.append("files/usr/share/lobbyfence/share-games.txt is not the map page's list of games that may be shared")
+_main = (REPO / "files/usr/sbin/lobbyfence").read_text()
+_form = re.search(r"var SHARE_URL = 'https://docs\.google\.com/forms/d/e/([\w-]+)/viewform'", _js)
+if not _form or f"https://docs.google.com/forms/d/e/{_form.group(1)}/formResponse" not in _main:
+    problems.append("the router (SHARE_URL in files/usr/sbin/lobbyfence) does not send to the map page's form")
 
 if "var SHARE_URL = 'https://docs.google.com/forms/d/e/" not in _js or "FORM_ID_HERE" in _js:
     problems.append("map.js SHARE_URL is not LobbyFence's Google Form yet (Send to LobbyFence)")

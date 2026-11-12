@@ -13,7 +13,7 @@ def check(what, ok, detail=""):
 
 with tempfile.TemporaryDirectory() as d:
     d = pathlib.Path(d)
-    for f in ("tools/sync-servers.py", "tools/server-networks.txt", "files/usr/share/lobbyfence/servers.txt",
+    for f in ("tools/sync-servers.py", "files/usr/share/lobbyfence/server-networks.txt", "files/usr/share/lobbyfence/servers.txt",
               "luci-app-lobbyfence/htdocs/luci-static/resources/view/lobbyfence/map.js", "tests/safety_static.py"):
         (d / f).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(REPO / f, d / f)
@@ -79,7 +79,7 @@ game valorant VALORANT
     r = run()
     check("without files it explains how to use it", r.returncode == 2 and "responses.csv" in r.stdout, r.stdout[-300:])
     import ipaddress
-    nets = [ipaddress.ip_network(c) for c in " ".join(l.split("#")[0] for l in (d / "tools/server-networks.txt").read_text().splitlines()).split()]
+    nets = [ipaddress.ip_network(c) for c in " ".join(l.split("#")[0] for l in (d / "files/usr/share/lobbyfence/server-networks.txt").read_text().splitlines()).split()]
     check("every address in the merged list is in a data-centre network",
           all(any(ipaddress.ip_address(l.split()[0]) in n for n in nets) for l in after2.splitlines()
               if l and l[0].isdigit()))

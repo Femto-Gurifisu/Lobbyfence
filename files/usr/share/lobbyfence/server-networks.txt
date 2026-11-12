@@ -3,8 +3,9 @@
 # is in one of these: peer-to-peer traffic shows players' home addresses too,
 # and those must never be published.
 # Kept narrow on purpose: Google Fiber, AT&T and the like share first numbers
-# with some of these. Used by tests/safety_static.py, tools/sync-servers.py
-# and (a copy) the map page, map.js SERVER_NETWORKS - the test checks they match.
+# with some of these. Used by the router (sending servers once a day),
+# tests/safety_static.py, tools/sync-servers.py and (a copy) the map page,
+# map.js SERVER_NETWORKS - the test checks they match.
 
 # Vultr / Choopa (game-server hosts for many games)
 45.32.0.0/16 45.63.0.0/16 45.76.0.0/15 64.176.0.0/15 64.237.32.0/19 65.20.96.0/19 66.42.32.0/19 66.42.64.0/18

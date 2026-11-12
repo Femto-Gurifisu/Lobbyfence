@@ -64,7 +64,7 @@ cgi() { printf '%s\n' "$@" | inr env PATH="$TPATH" LF_HOME="$LF_HOME" LF_RUN="$L
 TOKEN="$(cat "$W/nvram/http_id")"
 
 # --- 0. installed like on the router
-for f in lobbyfence bin/lobbyfence-main share/fw-ipt.sh share/functions.sh share/conf.awk share/lobbyfence.awk share/servers.txt www/lobbyfence.cgi www/lobbyfence/map.js; do
+for f in lobbyfence bin/lobbyfence-main share/fw-ipt.sh share/functions.sh share/conf.awk share/lobbyfence.awk share/servers.txt share/server-networks.txt share/share-games.txt www/lobbyfence.cgi www/lobbyfence/map.js; do
 	[ -f "$LF_HOME/$f" ] || fail "installer did not copy $f"
 done
 [ -x "$W/jffs/etc/config/lobbyfence.fire" ] && [ -x "$W/jffs/etc/config/lobbyfence.init" ] && [ -x "$W/jffs/etc/config/lobbyfence.shut" ] \
@@ -517,6 +517,20 @@ python3 -c "import json,sys; d=json.loads(sys.argv[1]); assert d['code']==0 and 
 out="$(cgi "$TOKEN" "exec builtin-servers")"
 python3 -c "import json,sys; d=json.loads(sys.argv[1]); o=d['stdout']; assert d['code']==0 and o.startswith('lobbyfence-servers 1') and '\ngame apex Apex Legends\n' in o and '\ngame cod Call of Duty\n' in o and sum(1 for l in o.splitlines() if l[:1].isdigit()) > 100, d" "$out" \
 	&& pass "CGI: the servers LobbyFence comes with (for the Servers file window)" || fail "CGI builtin-servers: $(echo "$out" | head -c 300)"
+# sending found servers once a day: the page may see the state and switch it, nothing more
+out="$(cgi "$TOKEN" "exec share-servers status")"
+python3 -c "import json,sys; d=json.loads(sys.argv[1]); s=json.loads(d['stdout']); assert d['code']==0 and s['auto']==0 and 'pending' in s, d" "$out" \
+	&& pass "CGI: share-servers status (Servers file window)" || fail "CGI share-servers status: $(echo "$out" | head -c 300)"
+out="$(cgi "$TOKEN" "exec share-servers auto on")"; out2="$(cgi "$TOKEN" "exec share-servers status")"
+python3 -c "import json,sys; d=json.loads(sys.argv[1]); s=json.loads(json.loads(sys.argv[2])['stdout']); assert d['code']==0 and s['auto']==1 and s['next']>0, (d, s)" "$out" "$out2" \
+	&& pass "CGI: share-servers auto on" || fail "CGI share-servers auto on: $out $out2"
+out="$(cgi "$TOKEN" "exec share-servers auto off")"
+python3 -c "import json,sys; d=json.loads(sys.argv[1]); assert d['code']==0 and d['stdout'].strip()=='off', d" "$out" && pass "CGI: share-servers auto off" || fail "CGI share-servers auto off: $out"
+for a in "share-servers now" "share-servers preview" "share-servers auto on x" "share-servers"; do
+	out="$(cgi "$TOKEN" "exec $a")"
+	echo "$out" | grep -q '"error":"not allowed"\|"error":"bad argument"' || { fail "CGI allowed: $a ($out)"; a=; break; }
+done
+[ -n "$a" ] && pass "CGI: share-servers can't send or take other arguments from the page"
 sf="$(printf 'lobbyfence-servers 1\ngame fortnite Fortnite\n45.77.0.9 51.5 -0.1 GB 1700000000\n10.0.0.1 1 1 GB 1700000000\n')"
 out="$(cgi "$TOKEN" "import-servers" "$sf")"
 python3 -c "import json,sys; d=json.loads(sys.argv[1]); assert d['code']==0 and 'imported 1 new' in d['stdout'], d" "$out" \

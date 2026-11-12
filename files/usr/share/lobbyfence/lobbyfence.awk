@@ -903,6 +903,79 @@ op == "shared_hit" {
 	next
 }
 
+# ---- sending found servers to LobbyFence (share-servers): only this router's own
+# finds, for the listed client-server games, in data-centre networks, and not
+# already in the built-in list or sent before - so no player's own address
+function ip4n(s,   sh_a) {
+	if (s !~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) return -1
+	split(s, sh_a, ".")
+	if (sh_a[1] > 255 || sh_a[2] > 255 || sh_a[3] > 255 || sh_a[4] > 255) return -1
+	return ((sh_a[1] * 256 + sh_a[2]) * 256 + sh_a[3]) * 256 + sh_a[4]
+}
+# share_pick: networks, games, built-in list, sent list, export -> "seen game address lat lon cc"
+op == "share_pick" && FILENAME == ARGV[1] {
+	sub(/#.*/, "")
+	for (i = 1; i <= NF; i++) {
+		if (split($i, sh_c, "/") != 2 || sh_c[2] !~ /^[0-9]+$/ || sh_c[2] + 0 > 32 || (sh_b = ip4n(sh_c[1])) < 0) continue
+		sh_sz = 2 ^ (32 - sh_c[2])
+		sh_nb[++sh_nn] = sh_b - sh_b % sh_sz; sh_ns[sh_nn] = sh_sz
+	}
+	next
+}
+op == "share_pick" && FILENAME == ARGV[2] { if ($1 ~ /^[a-z0-9_]+$/) sh_okg[$1] = 1; next }
+op == "share_pick" && FILENAME == ARGV[4] { if (NF >= 2) sh_have[$1 SUBSEP $2] = 1; next }
+op == "share_pick" && FILENAME == ARGV[3] {
+	sub(/\r$/, "")
+	if ($1 == "game") sh_kg = $2
+	else if ($1 ~ /^[0-9]/ && sh_kg != "") sh_have[sh_kg SUBSEP $1] = 1
+	next
+}
+op == "share_pick" {
+	sub(/\r$/, "")
+	if ($1 == "game") { sh_pg = ($2 in sh_okg) ? $2 : ""; next }
+	if (sh_pg == "" || NF != 5) next          # (a sixth field: imported from elsewhere - not this router's find)
+	if (!is_num($2) || !is_num($3) || $2 + 0 < -90 || $2 + 0 > 90 || $3 + 0 < -180 || $3 + 0 > 180 ||
+	    $4 !~ /^([A-Z][A-Z]|--)$/ || $5 !~ /^[0-9]+$/) next
+	if ((sh_pg SUBSEP $1) in sh_have || (sh_pg SUBSEP $1) in sh_picked) next
+	if ((sh_a = ip4n($1)) < 0) next
+	for (i = 1; i <= sh_nn; i++) if (sh_a >= sh_nb[i] && sh_a < sh_nb[i] + sh_ns[i]) break
+	if (i > sh_nn) next
+	sh_picked[sh_pg SUBSEP $1] = 1
+	print $5, sh_pg, $1, $2, $3, $4
+	next
+}
+# share_text: games file, then the picked lines (newest first) -> the servers file to send
+# (at most max characters - the rest goes next time); "game address" of each sent to pairs
+op == "share_text" && FILENAME == ARGV[1] {
+	if ($1 ~ /^[a-z0-9_]+$/) { sh_lab = $0; sub(/^[^ ]+ +/, "", sh_lab); sh_glabel[$1] = sh_lab; sh_gorder[++sh_ngo] = $1 }
+	next
+}
+op == "share_text" {
+	if (NF != 6 || !($2 in sh_glabel)) next
+	sh_l = $3 " " $4 " " $5 " " $6 " " $1
+	sh_h = ($2 in sh_cnt) ? 0 : length($2) + length(sh_glabel[$2]) + 7     # (its "game" line, the first time)
+	if (sh_size + sh_h + length(sh_l) + 1 > max - 300) { sh_more++; next }
+	sh_size += sh_h + length(sh_l) + 1
+	sh_srow[$2] = sh_srow[$2] sh_l "\n"; sh_cnt[$2]++; sh_sn++
+	print $2, $3 > pairs
+	next
+}
+# share_enc: text -> one application/x-www-form-urlencoded field (name=value)
+function urlenc(s,   i, ch, o) {
+	if (!sh_encinit) { for (i = 1; i < 256; i++) sh_ordc[sprintf("%c", i)] = i; sh_encinit = 1 }
+	o = ""
+	for (i = 1; i <= length(s); i++) {
+		ch = substr(s, i, 1)
+		o = o (ch ~ /[A-Za-z0-9_.~-]/ ? ch : sprintf("%%%02X", sh_ordc[ch]))
+	}
+	return o
+}
+op == "share_enc" {
+	if (!sh_started) { printf "%s=", field; sh_started = 1 }
+	printf "%s%%0A", urlenc($0)
+	next
+}
+
 END {
 	if (op == "classify" && countf != "")
 		printf "%d %d %d %d %d\n", ccount["all"], ccount["in"], ccount["out"], ccount["pending"], ccount["unloc"] > countf
@@ -995,5 +1068,12 @@ END {
 	} else if (op == "shared_merge") {
 		for (i = 1; i <= nsm; i++) print sm[smo[i]] (smown[smo[i]] ? " own" : "")
 		if (statf != "") print (smadd + 0) > statf
+	} else if (op == "share_text") {
+		if (sh_sn) {
+			print "lobbyfence-servers 1"
+			print "# sent by " (ver != "" ? ver : "LobbyFence") " (share-servers) - game servers in data-centre networks only"
+			for (i = 1; i <= sh_ngo; i++) if (sh_gorder[i] in sh_cnt) { print "game " sh_gorder[i] " " sh_glabel[sh_gorder[i]]; printf "%s", sh_srow[sh_gorder[i]] }
+		}
+		if (statf != "") print (sh_sn + 0), (sh_more + 0) > statf
 	}
 }

@@ -90,6 +90,10 @@ case "$cmd" in
 			apitest) run "$LF" apitest;;
 			restart) run "$LF" restart;;
 			restore) run "$LF" restore;;
+			share-servers)
+				# the Servers file window: whether the found servers go to LobbyFence once a day
+				case "$1 $2" in 'status '|'auto on'|'auto off') [ $# -le 2 ] || fail "bad argument"; run "$LF" share-servers "$@";;
+				*) fail "not allowed";; esac;;
 			debug)
 				# the debug report, or "debug clear" (forget the crash records)
 				case "$1" in ''|clear) run "$LF" debug $1;; *) fail "not allowed";; esac;;

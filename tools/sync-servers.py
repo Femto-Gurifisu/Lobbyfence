@@ -14,7 +14,7 @@ nothing that was sent is kept anywhere.
   tools/sync-servers.py --dry-run ...   only report what would be added
 
 Only servers for listed client-server games (not peer-to-peer ones, "Any game" or
-Custom), inside the data-centre networks of tools/server-networks.txt, with a
+Custom), inside the data-centre networks of files/usr/share/lobbyfence/server-networks.txt, with a
 sane location, are taken - so no player's own address gets into the list. An
 address already listed for that game is left as it is. Run
 python3 tests/safety_static.py afterwards, then commit.
@@ -30,7 +30,7 @@ import time
 REPO = pathlib.Path(__file__).resolve().parent.parent
 LIST = REPO / "files/usr/share/lobbyfence/servers.txt"
 MAPJS = REPO / "luci-app-lobbyfence/htdocs/luci-static/resources/view/lobbyfence/map.js"
-NETS = REPO / "tools/server-networks.txt"
+NETS = REPO / "files/usr/share/lobbyfence/server-networks.txt"
 
 
 def networks():

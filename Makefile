@@ -4,7 +4,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=lobbyfence
-PKG_VERSION:=1.3.3
+PKG_VERSION:=1.3.4
 PKG_RELEASE:=1
 
 PKG_LICENSE:=GPL-3.0-or-later
@@ -43,6 +43,8 @@ define Package/lobbyfence/install
 	$(INSTALL_DATA) ./files/usr/share/lobbyfence/lobbyfence.awk $(1)/usr/share/lobbyfence/lobbyfence.awk
 	$(INSTALL_DATA) ./files/usr/share/lobbyfence/fw-nft.sh $(1)/usr/share/lobbyfence/fw-nft.sh
 	$(INSTALL_DATA) ./files/usr/share/lobbyfence/servers.txt $(1)/usr/share/lobbyfence/servers.txt
+	$(INSTALL_DATA) ./files/usr/share/lobbyfence/server-networks.txt $(1)/usr/share/lobbyfence/server-networks.txt
+	$(INSTALL_DATA) ./files/usr/share/lobbyfence/share-games.txt $(1)/usr/share/lobbyfence/share-games.txt
 	$(INSTALL_DIR) $(1)/lib/upgrade/keep.d
 	$(INSTALL_DATA) ./files/lib/upgrade/keep.d/lobbyfence $(1)/lib/upgrade/keep.d/lobbyfence
 endef

@@ -54,6 +54,15 @@
 				"/usr/sbin/lobbyfence builtin-servers": [
 					"exec"
 				],
+				"/usr/sbin/lobbyfence share-servers status": [
+					"exec"
+				],
+				"/usr/sbin/lobbyfence share-servers auto on": [
+					"exec"
+				],
+				"/usr/sbin/lobbyfence share-servers auto off": [
+					"exec"
+				],
 				"/usr/sbin/lobbyfence forget *": [
 					"exec"
 				],

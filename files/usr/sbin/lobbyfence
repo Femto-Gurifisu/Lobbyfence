@@ -7,7 +7,7 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-LF_VERSION="1.3.3"
+LF_VERSION="1.3.4"
 LF_TABLE="lobbyfence"
 LF_SHARE="${LF_SHARE:-/usr/share/lobbyfence}"
 LF_RUN="${LF_RUN:-/tmp/lobbyfence}"
@@ -28,6 +28,15 @@ GEO_RATE_LIMIT=14
 GEO_FIELDS="status,message,countryCode,lat,lon,query"
 # unlocatable addresses are retried after a week
 GEO_RETRY=604800
+# Send to LobbyFence (share-servers): LobbyFence's form - only the maintainer
+# sees what is sent. It answers 200 and its confirmation message when it took
+# the answer (400 when not). At most once a day, when switched on.
+SHARE_URL="${LF_SHARE_URL:-https://docs.google.com/forms/d/e/1FAIpQLSfS_Y-UVb1mTGAK3Gpme3-W1SPbgNqtq7cOawbBT69QMiEoUw/formResponse}"
+SHARE_FIELD="entry.902986460"
+SHARE_OK="LobbyFence received"
+SHARE_MAX=40000
+SHARE_EVERY=86400
+SHARE_RETRY=7200
 # seconds without packets from the device after which a server is no longer "active now"
 LF_NOW_TIMEOUT=15
 
@@ -1150,6 +1159,7 @@ do_daemon() {
 		lock_release
 		lf_phase "waiting for the next pass"
 		log_trim
+		share_maybe
 		# check every 2 s for servers never seen before and handle them at once,
 		# so a new server outside the region is blocked within seconds
 		waited=0
@@ -1239,6 +1249,147 @@ do_export() {
 	lfawk export -v when="$(date '+%Y-%m-%d %H:%M' 2>/dev/null) - LobbyFence $LF_VERSION" \
 		"$cache" "$LF_RUN/export.names" "$LF_RUN/export.pairs" "$shared"
 	rm -f "$LF_RUN/export.names" "$LF_RUN/export.pairs" "$LF_RUN/export.cache" "$LF_RUN/export.shared"
+}
+
+# ------------------------------------------------- sending found servers to LobbyFence
+# share-servers: what this router found that may help everyone - only its own
+# finds for the listed client-server games ($LF_SHARE/share-games.txt), in the
+# data-centre networks LobbyFence knows ($LF_SHARE/server-networks.txt), not in
+# the built-in list and not sent before - goes to LobbyFence's form (SHARE_URL).
+# "auto on" does that by itself once a day (the learning loop looks at
+# $G_DATA/share.next); nothing is sent until it is switched on.
+share_paths() {
+	SH_AUTO="$G_DATA/share.auto"; SH_SENT="$G_DATA/share.sent"
+	SH_LAST="$G_DATA/share.last"; SH_NEXT="$G_DATA/share.next"
+}
+
+share_rand() { # n -> a number from 0 to n-1
+	awk -v n="$1" -v s="$$$(date +%s)" 'BEGIN { srand(s % 2147483647); printf "%d", rand() * n }'
+}
+
+# share_build out-file pairs-file -> "<servers> <left for next time>"
+share_build() {
+	local stat="$LF_RUN/share.stat" sent="$SH_SENT"
+	do_export > "$LF_RUN/share.export" 2>/dev/null || : > "$LF_RUN/share.export"
+	[ -f "$sent" ] || { sent="$LF_RUN/share.none"; : > "$sent"; }
+	: > "$2"; : > "$stat"
+	lfawk share_pick "$LF_SHARE/server-networks.txt" "$LF_SHARE/share-games.txt" "$LF_SHARE/servers.txt" \
+		"$sent" "$LF_RUN/share.export" 2>/dev/null |
+		sort -rn | lfawk share_text -v max="$SHARE_MAX" -v pairs="$2" -v statf="$stat" -v ver="LobbyFence $LF_VERSION" \
+		"$LF_SHARE/share-games.txt" - > "$1" 2>/dev/null
+	rm -f "$LF_RUN/share.export" "$LF_RUN/share.none"
+	cat "$stat" 2>/dev/null || echo "0 0"
+	rm -f "$stat"
+}
+
+# share_post body-file -> 0 when the form took it
+share_post() {
+	local resp="$LF_RUN/share.resp" code rc
+	rm -f "$resp"
+	if have curl; then
+		code="$(curl -sS -m 40 --max-filesize 2097152 -o "$resp" -w '%{http_code}' \
+			-H 'Content-Type: application/x-www-form-urlencoded' --data-binary @"$1" "$SHARE_URL" 2>"$LF_RUN/share.err")"
+		rc=$?; [ "$rc" = 0 ] && [ "$code" = 200 ] || rc=1
+	elif have uclient-fetch; then
+		uclient-fetch -q -T 40 -O "$resp" --post-file="$1" "$SHARE_URL" 2>"$LF_RUN/share.err"; rc=$?
+	else
+		wget -q -T 40 -O "$resp" --header='Content-Type: application/x-www-form-urlencoded' \
+			--post-data="$(cat "$1")" "$SHARE_URL" 2>"$LF_RUN/share.err"; rc=$?
+	fi
+	[ "$rc" = 0 ] && grep -q "$SHARE_OK" "$resp" 2>/dev/null; rc=$?
+	rm -f "$resp"
+	return $rc
+}
+
+# share_send why (auto|now) -> sends what is new; schedules the next time
+share_send() {
+	local why="$1" t text="$LF_RUN/share.txt" pairs="$LF_RUN/share.pairs" body="$LF_RUN/share.body" n more rc=0
+	share_paths
+	mkdir "$LF_RUN/share.lock" 2>/dev/null || { echo "already sending" >&2; return 1; }
+	t="$(now)"
+	set -- $(share_build "$text" "$pairs")
+	n="${1:-0}"; more="${2:-0}"
+	is_uint "$n" || n=0; is_uint "$more" || more=0
+	if [ "$n" = 0 ]; then
+		echo "$t 1 0" > "$SH_LAST"
+		[ "$why" = auto ] && echo $((t + SHARE_EVERY)) > "$SH_NEXT"
+		log info "send to LobbyFence: no new game servers to send"
+		echo "nothing new to send"
+	else
+		lfawk share_enc -v field="$SHARE_FIELD" "$text" > "$body"
+		if share_post "$body"; then
+			cat "$pairs" >> "$SH_SENT"
+			# the newest 20000 are remembered (an older one would only be sent once more)
+			[ "$(lines "$SH_SENT")" -gt 20000 ] && { tail -n 20000 "$SH_SENT" > "$SH_SENT.new" && mv "$SH_SENT.new" "$SH_SENT"; }
+			echo "$t 1 $n" > "$SH_LAST"
+			[ "$why" = auto ] && echo $((t + SHARE_EVERY + $(share_rand 1800) - 900)) > "$SH_NEXT"
+			log notice "sent $n new game server(s) to LobbyFence$([ "$more" -gt 0 ] && echo " ($more more next time)")"
+			echo "sent $n new game server(s)$([ "$more" -gt 0 ] && echo " - $more more next time")"
+		else
+			echo "$t 0 $n" > "$SH_LAST"
+			[ "$why" = auto ] && echo $((t + SHARE_RETRY)) > "$SH_NEXT"
+			log warning "could not send the found game servers to LobbyFence ($(head -c 200 "$LF_RUN/share.err" 2>/dev/null | tr '\n' ' ')) - $([ "$why" = auto ] && echo "trying again in 2 hours" || echo "nothing was sent")"
+			echo "could not send them (no answer from LobbyFence's form)" >&2
+			rc=1
+		fi
+	fi
+	rm -f "$text" "$pairs" "$body" "$LF_RUN/share.err"
+	rmdir "$LF_RUN/share.lock"
+	return $rc
+}
+
+# from the learning loop: send in the background when it is time (a cheap check)
+share_maybe() {
+	local next
+	[ -f "$G_DATA/share.auto" ] || return 0
+	clock_ok || return 0
+	next=0
+	read -r next < "$G_DATA/share.next" 2>/dev/null
+	is_uint "$next" || next=0
+	[ "$(now)" -ge "$next" ] || return 0
+	[ -d "$LF_RUN/share.lock" ] && return 0
+	( share_send auto >/dev/null 2>&1 ) &
+}
+
+do_share() {
+	local t ok n next pending
+	load_config
+	ensure_dirs
+	share_paths
+	case "$1" in
+		auto)
+			case "$2" in
+				on)
+					mkdir -p "$G_DATA" || die "cannot write $G_DATA"
+					touch "$SH_AUTO"
+					# the first time within the hour, then once a day around then
+					[ -f "$SH_NEXT" ] || echo $(( $(now) + 300 + $(share_rand 3300) )) > "$SH_NEXT"
+					log notice "send to LobbyFence: switched on (once a day)"
+					echo "on";;
+				off)
+					rm -f "$SH_AUTO" "$SH_NEXT"
+					log notice "send to LobbyFence: switched off"
+					echo "off";;
+				*) die "usage: lobbyfence share-servers auto on|off";;
+			esac;;
+		now) share_send now;;
+		preview)
+			share_build "$LF_RUN/share.preview" "$LF_RUN/share.ppairs" > /dev/null
+			cat "$LF_RUN/share.preview"
+			rm -f "$LF_RUN/share.preview" "$LF_RUN/share.ppairs";;
+		status|'')
+			t=0; ok=0; n=0; next=0
+			[ -f "$SH_LAST" ] && read -r t ok n < "$SH_LAST"
+			[ -f "$SH_NEXT" ] && read -r next < "$SH_NEXT"
+			is_uint "$t" || t=0; is_uint "$ok" || ok=0; is_uint "$n" || n=0; is_uint "$next" || next=0
+			set -- $(share_build "$LF_RUN/share.preview" "$LF_RUN/share.ppairs")
+			pending="${1:-0}"; is_uint "$pending" || pending=0
+			rm -f "$LF_RUN/share.preview" "$LF_RUN/share.ppairs"
+			printf '{"auto":%d,"last":%d,"last_ok":%d,"last_n":%d,"next":%d,"pending":%d,"sent":%d,"now":%d}\n' \
+				"$([ -f "$SH_AUTO" ] && echo 1 || echo 0)" "$t" "$ok" "$n" "$([ -f "$SH_AUTO" ] && echo "$next" || echo 0)" \
+				"$pending" "$(lines "$SH_SENT")" "$(now)";;
+		*) die "usage: lobbyfence share-servers status|preview|now|auto on|off";;
+	esac
 }
 
 # builtin-servers: the game servers LobbyFence comes with ($LF_SHARE/servers.txt, read
@@ -1714,6 +1865,7 @@ debug_data() {
 		echo "zone $z: $(lines "$f") server address(es) learned, server list revision $(cat "$LF_RUN/$z.rev" 2>/dev/null || echo 0)"
 	done
 	echo "locations known: $(lines "$LF_STATE/geo.cache")"
+	echo "send to LobbyFence once a day: $([ -f "$G_DATA/share.auto" ] && echo on || echo off); last: $(cat "$G_DATA/share.last" 2>/dev/null || echo never) (time ok servers); next: $(cat "$G_DATA/share.next" 2>/dev/null || echo -); $(lines "$G_DATA/share.sent") sent so far"
 	echo "lookups in the last minute: $(awk -v t="$(geo_now)" '$1 > t - 61' "$LF_RUN/geo.calls" 2>/dev/null | wc -l) of $GEO_RATE_LIMIT allowed$(b="$(cat "$LF_RUN/geo.backoff" 2>/dev/null)"; is_uint "$b" && [ "$b" -gt "$(geo_now)" ] && echo ", waiting $((b - $(geo_now))) s (the service asked)")"
 	echo "last saved to flash: $(p="$(cat "$LF_RUN/persisted_at" 2>/dev/null)"; is_uint "$p" && echo "$(( $(now) - p )) s ago" || echo never)$([ -f "$LF_RUN/persist.err" ] && echo ' - SAVING FAILED (see the log)')"
 	echo
@@ -1784,6 +1936,11 @@ usage() {
 	                           before asking the geolocation service
 	  builtin-servers          the game servers LobbyFence comes with, as a servers
 	                           file (they are placed with no lookup either)
+	  share-servers [status|preview|now|auto on|off]
+	                           send the game servers this router found to LobbyFence
+	                           (its private form), for the list it comes with: only
+	                           new data-centre servers of client-server games;
+	                           "auto on" sends what is new once a day
 	  remove-servers <game|all> [addr...]
 	                           delete a game's servers list (kept, imported and
 	                           learned by zones set to that game), or just those
@@ -1820,6 +1977,7 @@ case "$cmd" in
 	export) do_export;;
 	import-servers) do_import_servers "$@";;
 	builtin-servers) do_builtin_servers;;
+	share-servers) do_share "$@";;
 	remove-servers) do_remove_servers "$@";;
 	ports) do_ports "$@";;
 	forget) do_forget "$@";;

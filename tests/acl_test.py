@@ -38,7 +38,7 @@ for f in ("map.js", "zones.js"):
 check("found the commands the pages run", len(calls) >= 7, calls)
 samples = {"forget": ["game", "80.20.0.1"], "allow": ["game", "80.20.0.1", "2a00::/32"], "block": ["game", "1.2.3.4"],
            "unlist": ["game", "1.2.3.4"], "ports": ["game"], "remove-servers": ["apex", "1.2.3.4"],
-           "import-servers": ["/tmp/lobbyfence/servers-import.txt"]}
+           "import-servers": ["/tmp/lobbyfence/servers-import.txt"], "share-servers": ["status"]}
 for f, path, first in calls:
     argv = [path] + ([first] if first else [])
     argv_full = argv + samples.get(first, [])
@@ -46,13 +46,17 @@ for f, path, first in calls:
 check("map page may run: allow/block with a dynamic action word",
       all(allowed(["/usr/sbin/lobbyfence", a, "game", "1.2.3.4"]) for a in ("allow", "block", "unlist")))
 check("forget everything in a zone (no addresses)", allowed(["/usr/sbin/lobbyfence", "forget", "game"]))
+check("map page may switch sending found servers once a day on and off",
+      all(allowed(["/usr/sbin/lobbyfence", "share-servers"] + x) for x in (["status"], ["auto", "on"], ["auto", "off"])))
 check("map page may make the debug report and clear the crash records",
       allowed(["/usr/sbin/lobbyfence", "debug"]) and allowed(["/usr/sbin/lobbyfence", "debug", "clear"]))
 
 for bad in (["/usr/sbin/lobbyfence", "import", "game", "/etc/shadow"], ["/usr/sbin/lobbyfence", "teardown"],
             ["/usr/sbin/lobbyfence"], ["/etc/init.d/lobbyfence", "stop"], ["/etc/init.d/lobbyfence", "disable"],
             ["/bin/sh", "-c", "id"], ["/usr/sbin/lobbyfence", "persist"],
-            ["/usr/sbin/lobbyfence", "debug", "/etc/shadow"], ["/usr/sbin/lobbyfence", "debug", "clear", "x"]):
+            ["/usr/sbin/lobbyfence", "debug", "/etc/shadow"], ["/usr/sbin/lobbyfence", "debug", "clear", "x"],
+            ["/usr/sbin/lobbyfence", "share-servers", "now"], ["/usr/sbin/lobbyfence", "share-servers", "preview"],
+            ["/usr/sbin/lobbyfence", "share-servers", "auto", "on", "x"]):
     check("not allowed: " + " ".join(bad), not allowed(bad))
 check("status files readable", any(fnmatch.fnmatchcase("/tmp/lobbyfence/status.json", p) for p in ACL["read"]["file"]))
 check("nothing outside /tmp/lobbyfence is readable", all(p.startswith("/tmp/lobbyfence/") for p in ACL["read"]["file"]))

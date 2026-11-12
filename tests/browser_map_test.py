@@ -125,6 +125,13 @@ window.fs = {
   exec: (cmd, args) => {
     if (args && args[0] === 'devices') return Promise.resolve({ code: 0, stdout: JSON.stringify(window.__devices || []) });
     if (args && args[0] === 'live') return Promise.resolve(window.__live ? { code: 0, stdout: JSON.stringify(window.__live) } : { code: 1, stdout: '' });
+    if (args && args[0] === 'share-servers') {
+      (window.__shareCalls = window.__shareCalls || []).push(args.join(' '));
+      const s = window.__share;
+      if (!s) return Promise.resolve({ code: 1, stdout: '', stderr: 'unknown command' });
+      if (args[1] === 'auto') { s.auto = args[2] === 'on' ? 1 : 0; s.next = s.auto ? s.now + 1800 : 0; return Promise.resolve({ code: 0, stdout: args[2] + '\n' }); }
+      return Promise.resolve({ code: 0, stdout: JSON.stringify(s) });
+    }
     if (args && args[0] === 'builtin-servers') return Promise.resolve(window.__builtin != null ? { code: 0, stdout: window.__builtin } : { code: 1, stdout: '', stderr: 'unknown command' });
     (window.__execs = window.__execs || []).push([cmd].concat(args)); return Promise.resolve(window.__execResult || { code: 0, stdout: '' }); }
 };
@@ -1317,6 +1324,39 @@ def main():
               and not sm.locator(".lf-servers-sharebox").is_visible(), sm.locator(".lf-servers-state").inner_text())
         sm.get_by_role("button", name="Close").click()
         page.evaluate("window.__execResult = null")
+
+        # ---- 6b3. ...or by itself once a day: the router's share-servers, shown and switched here
+        page.evaluate("t => { window.__execResult = { code: 0, stdout: t }; window.__share = null; }", share_src)
+        page.get_by_role("button", name="Servers file…").click()
+        sm = page.locator("#modal")
+        page.wait_for_function("document.querySelectorAll('.lf-servers-game').length >= 1")
+        page.wait_for_timeout(300)
+        check("an older router: no once-a-day choice", not sm.locator(".lf-servers-autorow").is_visible())
+        sm.get_by_role("button", name="Close").click()
+        page.evaluate("""() => { const now = Math.floor(Date.now() / 1000);
+            window.__share = { auto: 0, last: now - 3600, last_ok: 1, last_n: 7, next: 0, pending: 4, sent: 7, now: now }; window.__shareCalls = []; }""")
+        page.get_by_role("button", name="Servers file…").click()
+        page.wait_for_function("document.querySelector('.lf-servers-autorow') && document.querySelector('.lf-servers-autorow').style.display !== 'none'")
+        row = sm.locator(".lf-servers-autorow")
+        check("the once-a-day choice shows what was sent and what is waiting, off",
+              not sm.locator(".lf-servers-auto").is_checked() and "sent 7 server(s)" in row.inner_text()
+              and "4 new server(s) found" in row.inner_text(), row.inner_text())
+        sm.locator(".lf-servers-auto").check()
+        page.wait_for_function("document.querySelector('.lf-servers-autostate').innerText.includes('next around')")
+        check("switching it on asks the router and shows when it sends next",
+              "share-servers auto on" in page.evaluate("window.__shareCalls") and sm.locator(".lf-servers-auto").is_checked()
+              and "once a day" in sm.locator(".lf-servers-state").inner_text(), page.evaluate("window.__shareCalls"))
+        sm.locator(".lf-servers-auto").uncheck()
+        page.wait_for_function("!document.querySelector('.lf-servers-autostate').innerText.includes('next around')")
+        check("switching it off asks the router too", page.evaluate("window.__shareCalls").count("share-servers auto off") == 1
+              and "no longer sends" in sm.locator(".lf-servers-state").inner_text())
+        page.evaluate("() => { window.__share.last_ok = 0; }")
+        sm.get_by_role("button", name="Close").click()
+        page.get_by_role("button", name="Servers file…").click()
+        page.wait_for_function("document.querySelector('.lf-servers-autostate') && document.querySelector('.lf-servers-autostate').innerText.includes('could not send')")
+        check("a failed send is shown", "tries again later" in sm.locator(".lf-servers-autorow").inner_text())
+        sm.get_by_role("button", name="Close").click()
+        page.evaluate("window.__execResult = null; window.__share = null")
 
         # ---- 6c. the lists follow the router by themselves
         page.evaluate("window.__live = null")
