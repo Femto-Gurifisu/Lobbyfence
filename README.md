@@ -822,12 +822,14 @@ games.
   and imported locations, and the servers learned by zones set to that game
   (they are learned and looked up again as you play). It asks once more
   first. Whitelists, blacklists and regions are not touched.
-* **Send to LobbyFence…** sends the game servers your router found to the
-  list LobbyFence comes with, so everyone gets them in the next version. It
-  first says how many servers, for which games, will go. Then it downloads
-  `lobbyfence-share-YYYYMMDD.txt` (and copies it) and opens a new report on
-  GitHub: drag the file into the box there and press *Create* (you need a
-  GitHub account; the report is public). Only game servers in the data-centre
+* **Send to LobbyFence…** sends the game servers your router found to
+  LobbyFence's maintainer, for the list LobbyFence comes with - so everyone
+  gets them in the next version. It first says how many servers, for which
+  games, will go. Then it copies them and opens LobbyFence's form (a Google
+  Form - no account needed): paste them into the box and press *Submit*.
+  Where the browser can't copy, it downloads `lobbyfence-share-YYYYMMDD.txt`
+  instead. What you send is **private**: only the maintainer sees it, and it
+  is deleted once its servers are added. Only game servers in the data-centre
   networks LobbyFence knows (`tools/server-networks.txt`) go, for the listed
   client-server games, under the game's own name: nothing from peer-to-peer
   games (the fighting games, GTA Online), *Any game* or *Custom* zones, no
@@ -866,15 +868,18 @@ free tier is for non-commercial use). Sharing a file with friends or between
 your own routers is fine; check the service's terms before publishing a large
 list publicly.
 
-**Adding the shared servers (maintainer).** `tools/sync-servers.py` reads the
-open *Servers:* reports on GitHub (with `gh`), checks every line again - a
-listed client-server game, an address in `tools/server-networks.txt`, a sane
-location and time - and adds the servers not listed yet to
-`files/usr/share/lobbyfence/servers.txt`, each once. `--dry-run` only shows
-what it would add, files can be given instead of reading GitHub
-(`tools/sync-servers.py lobbyfence-share-*.txt`), and `--close` thanks and
-closes the reports afterwards. Then run `python3 tests/safety_static.py` and
-commit; the servers go out with the next release.
+**Adding the shared servers (maintainer).** In the form, *Responses →
+Download responses (.csv)*, then `tools/sync-servers.py responses.csv`
+(`--dry-run` first to only see what it would add; servers files work too). It
+checks every line again - a listed client-server game, an address in
+`tools/server-networks.txt`, a sane location and time - and adds the servers
+not listed yet to `files/usr/share/lobbyfence/servers.txt`, each once per
+game; running it twice adds nothing. Then run `python3 tests/safety_static.py`
+and commit - the servers go out with the next release - and delete what was
+sent: *Responses → ⋮ → Delete all responses* in the form, and the `.csv`.
+Keep the form unlinked from a spreadsheet (or delete the sheet's rows too),
+and leave *View results summary* off so people who send can't see each
+other's answers.
 
 From the command line: `lobbyfence export > servers.txt` and
 `lobbyfence import-servers servers.txt` (or `-` for standard input), and

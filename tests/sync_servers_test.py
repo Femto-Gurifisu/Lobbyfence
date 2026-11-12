@@ -56,10 +56,32 @@ game valorant VALORANT
           "game valorant VALORANT", "3.120.9.9 50.11 8.68 DE 1794416301"]), added)
     r = run(str(share))
     check("running it again adds nothing", (d / "files/usr/share/lobbyfence/servers.txt").read_text() == after, r.stdout)
+    # the private form's answers, downloaded as .csv: each answer that holds a servers file
+    import csv
+    resp = d / "responses.csv"
+    with open(resp, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["Timestamp", "Servers"])
+        w.writerow(["2026/11/12 1:00:00 AM GMT-5", "lobbyfence-servers 1\ngame apex Apex Legends\n155.133.248.120 52.2961 4.9549 NL 1794416301\n73.12.44.9 1 1 US 1794416301\n"])
+        w.writerow(["2026/11/12 1:05:00 AM GMT-5", "hello, not a file"])
+        w.writerow(["2026/11/12 1:09:00 AM GMT-5", "lobbyfence-servers 1\r\ngame fortnite Fortnite\r\n3.120.9.10 50.11 8.68 DE 1794416301\r\n155.133.248.120 52.2961 4.9549 NL 1794416301\r\n"])
+    r = run(str(resp))
+    after2 = (d / "files/usr/share/lobbyfence/servers.txt").read_text()
+    new2 = [l for l in after2.splitlines() if l not in after.splitlines()]
+    check("a form's answers file: every answer holding a servers file is read, other answers skipped",
+          r.returncode == 0 and "responses.csv answer 1:" in r.stdout and "responses.csv answer 3:" in r.stdout
+          and "answer 2" not in r.stdout, r.stdout)
+    check("from the answers only the new data-centre servers go in, under their game",
+          sorted(new2) == sorted(["155.133.248.120 52.2961 4.9549 NL 1794416301", "3.120.9.10 50.11 8.68 DE 1794416301",
+                                  "155.133.248.120 52.2961 4.9549 NL 1794416301"])   # once per game: Apex and Fortnite
+          and "73.12.44.9" not in after2, new2)
+    check("it says to delete the answers afterwards", "Delete all responses" in r.stdout, r.stdout)
+    r = run()
+    check("without files it explains how to use it", r.returncode == 2 and "responses.csv" in r.stdout, r.stdout[-300:])
     import ipaddress
     nets = [ipaddress.ip_network(c) for c in " ".join(l.split("#")[0] for l in (d / "tools/server-networks.txt").read_text().splitlines()).split()]
     check("every address in the merged list is in a data-centre network",
-          all(any(ipaddress.ip_address(l.split()[0]) in n for n in nets) for l in after.splitlines()
+          all(any(ipaddress.ip_address(l.split()[0]) in n for n in nets) for l in after2.splitlines()
               if l and l[0].isdigit()))
 
 print("ALL TESTS PASSED" if not fails else f"{fails} FAILED")

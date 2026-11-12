@@ -175,6 +175,9 @@ _m = re.search(r"var SERVER_NETWORKS = '([^']*)'", _js)
 if not _m or _m.group(1).split() != HOSTING.split():
     problems.append("map.js SERVER_NETWORKS is not the same list as tools/server-networks.txt")
 
+if "var SHARE_URL = 'https://docs.google.com/forms/d/e/" not in _js or "FORM_ID_HERE" in _js:
+    problems.append("map.js SHARE_URL is not LobbyFence's Google Form yet (Send to LobbyFence)")
+
 if problems:
     for p in problems:
         print("FAIL:", p)

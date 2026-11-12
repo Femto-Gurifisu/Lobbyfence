@@ -2,14 +2,16 @@
 """Merge shared servers files into the list LobbyFence comes with.
 
 People send their routers' game servers with Servers file -> Send to LobbyFence
-on the map page: a GitHub report ("Servers: ...", label "servers") with the file
-attached or pasted. This reads those reports (or files you give it), checks every
-line and adds the new servers to files/usr/share/lobbyfence/servers.txt.
+on the map page: the page copies them and opens LobbyFence's private Google Form,
+where they paste them in. Download the form's answers (Responses -> Download
+responses (.csv)) and give that file to this tool; it checks every line and adds
+the new servers to files/usr/share/lobbyfence/servers.txt. Then delete the
+answers in the form (Responses -> More -> Delete all responses) and the .csv, so
+nothing that was sent is kept anywhere.
 
-  tools/sync-servers.py                 open "Servers:" reports on GitHub (needs gh)
-  tools/sync-servers.py FILE...         files you downloaded yourself ("-" = stdin)
+  tools/sync-servers.py responses.csv   the form's answers (every answer in it)
+  tools/sync-servers.py FILE...         servers files too (.txt), "-" = stdin
   tools/sync-servers.py --dry-run ...   only report what would be added
-  tools/sync-servers.py --close ...     afterwards, thank and close the reports read
 
 Only servers for listed client-server games (not peer-to-peer ones, "Any game" or
 Custom), inside the data-centre networks of tools/server-networks.txt, with a
@@ -17,21 +19,18 @@ sane location, are taken - so no player's own address gets into the list. An
 address already listed for that game is left as it is. Run
 python3 tests/safety_static.py afterwards, then commit.
 """
+import csv
+import io
 import ipaddress
-import json
 import pathlib
 import re
-import subprocess
 import sys
 import time
-import urllib.request
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 LIST = REPO / "files/usr/share/lobbyfence/servers.txt"
 MAPJS = REPO / "luci-app-lobbyfence/htdocs/luci-static/resources/view/lobbyfence/map.js"
 NETS = REPO / "tools/server-networks.txt"
-GH_REPO = "Femto-Gurifisu/Lobbyfence"
-ATTACH = re.compile(r"https://github\.com/(?:user-attachments/files|[\w.-]+/[\w.-]+/files)/[\w./%-]+")
 
 
 def networks():
@@ -106,44 +105,32 @@ def parse(text, ok_games, nets, now):
     return rows, skipped
 
 
-def gh(*args):
-    return subprocess.run(["gh", *args], check=True, capture_output=True, text=True).stdout
-
-
-def reports():
-    """open reports titled "Servers:" (or labelled servers): [(number, text of their files)]"""
-    out = []
-    data = json.loads(gh("issue", "list", "-R", GH_REPO, "--state", "open", "--limit", "200",
-                         "--json", "number,title,body,labels"))
-    for it in data:
-        if not (it["title"].startswith("Servers:") or any(l["name"] == "servers" for l in it["labels"])):
-            continue
-        texts = [it["body"] or ""]
-        for url in ATTACH.findall(it["body"] or ""):
-            try:
-                with urllib.request.urlopen(url, timeout=30) as r:
-                    texts.append(r.read(2_000_000).decode("utf-8", "replace"))
-            except Exception as e:
-                print(f"#{it['number']}: could not download {url}: {e}", file=sys.stderr)
-        # a pasted file sits in the body, maybe inside a ``` block
-        out.append((it["number"], "\n".join(t.replace("```", "") for t in texts)))
-    return out
+def answers(name, text):
+    """[(label, text)]: a form's answers file gives one entry per answer that holds a
+    servers file; anything else is one servers file"""
+    if "lobbyfence-servers 1" not in text.split("\n", 1)[0] and name.lower().endswith(".csv"):
+        out = []
+        for n, row in enumerate(csv.reader(io.StringIO(text)), 1):
+            for cell in row:
+                if re.search(r"^lobbyfence-servers 1\r?$", cell, re.M):
+                    out.append((f"{name} answer {n - 1}", cell))
+        return out
+    return [(name, text)]
 
 
 def main(argv):
     dry = "--dry-run" in argv
-    close = "--close" in argv
     files = [a for a in argv if not a.startswith("--")]
+    if not files:
+        print(__doc__.strip())
+        return 2
     ok_games, nets, now = games(), networks(), int(time.time())
     sources = []
-    if files:
-        for f in files:
-            sources.append((f, sys.stdin.read() if f == "-" else pathlib.Path(f).read_text(errors="replace")))
-    else:
-        sources = [(f"#{n}", t) for n, t in reports()]
-        if not sources:
-            print("no open Servers: reports")
-            return 0
+    for f in files:
+        sources += answers(f, sys.stdin.read() if f == "-" else pathlib.Path(f).read_text(encoding="utf-8-sig", errors="replace"))
+    if not sources:
+        print("no servers files in " + ", ".join(files))
+        return 0
 
     lines, have, end = read_list()
     new = {}            # game -> [lines]
@@ -180,11 +167,8 @@ def main(argv):
                 lines += [f"game {g} {ok_games[g]}"] + new[g] + [""]
         LIST.write_text("\n".join(lines))
         print(f"{total} new server(s) written to {LIST.relative_to(REPO)} - now run python3 tests/safety_static.py and commit")
-    if close and not files and not dry:
-        for name, _ in sources:
-            gh("issue", "close", name.lstrip("#"), "-R", GH_REPO, "--comment",
-               "Thanks! The new servers in this report are in the list LobbyFence comes with from the next version on.")
-            print(f"closed {name}")
+    if not dry:
+        print("then delete the answers in the form (Responses -> More -> Delete all responses) and the file(s) given here")
     return 0
 
 

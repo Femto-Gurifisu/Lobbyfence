@@ -1257,7 +1257,8 @@ def main():
         page.evaluate("window.__execResult = null")
 
         # ---- 6b2. Send to LobbyFence: only data-centre servers of listed client-server games go,
-        # under the games' own names - no zone labels, no players' addresses - into a GitHub report
+        # under the games' own names - no zone labels, no players' addresses - copied, and the
+        # maintainer's private form opens to paste them into
         share_src = ("lobbyfence-servers 1\n# exported 2026-11-12 01:00 - LobbyFence 1.3.3\n"
                      "game apex Victor's PS5 zone\n155.133.248.36 52.2961 4.9549 NL 1794416301\n"
                      "73.12.44.5 40.7 -74.0 US 1794416301\n155.133.248.36 52.2961 4.9549 NL 1794416301\n"
@@ -1265,7 +1266,9 @@ def main():
                      "game sf6 My fighting zone\n3.4.5.6 40 -70 US 1794416301\n"
                      "game gta GTA\n3.4.5.7 40 -70 US 1794416301\n"
                      "game other Custom thing\n3.4.5.8 40 -70 US 1794416301\n")
-        page.evaluate("t => { window.__execResult = { code: 0, stdout: t }; window.__opened = []; window.view.openWindow = u => window.__opened.push(u); }", share_src)
+        page.evaluate("""t => { window.__execResult = { code: 0, stdout: t }; window.__opened = []; window.__copied = [];
+            window.view.openWindow = u => window.__opened.push(u);
+            window.__copyOk = true; window.view.copyText = x => { window.__copied.push(x); return Promise.resolve(window.__copyOk); }; }""", share_src)
         page.get_by_role("button", name="Servers file…").click()
         sm = page.locator("#modal")
         page.wait_for_function("document.querySelectorAll('.lf-servers-game').length >= 1")
@@ -1274,25 +1277,35 @@ def main():
         info = sm.locator(".lf-servers-shareinfo").inner_text()
         check("first it says what will be sent and what is left out, nothing sent yet",
               "2 server(s) for Apex Legends (2) will be sent" in info and "4 address(es) are left out" in info
-              and page.evaluate("window.__opened.length") == 0 and "public" in sm.locator(".lf-servers-sharebox").inner_text(), info)
+              and page.evaluate("window.__opened.length") == 0 and "privately" in sm.locator(".lf-servers-sharebox").inner_text()
+              and "nobody else sees it" in sm.locator(".lf-servers-sharebox").inner_text(), info)
         if SHOTS:
             sm.locator(".lf-servers-sharebox").scroll_into_view_if_needed()
             page.screenshot(path=str(SHOTS / "servers-send.png"))
-        with page.expect_download() as dl:
-            sm.locator(".lf-servers-sendgh").click()
-        sent = open(dl.value.path()).read()
+        sm.locator(".lf-servers-sendgh").click()
+        page.wait_for_function("document.querySelector('.lf-servers-state').innerText.includes('Copied')")
+        sent = page.evaluate("window.__copied.slice(-1)[0]")
         check("the file sent has only the data-centre servers, each once, under the game's own name",
               sent == "lobbyfence-servers 1\n# sent with Send to LobbyFence - LobbyFence 1.3.3 - game servers in data-centre networks only\n"
                       "game apex Apex Legends\n155.133.248.36 52.2961 4.9549 NL 1794416301\n3.120.9.9 50.11 8.68 DE 1794416301\n"
-              and dl.value.suggested_filename.startswith("lobbyfence-share-"), sent)
+              , sent)
         check("no zone label, home address or peer-to-peer game's server goes",
               not any(x in sent for x in ("Victor", "73.12.44.5", "3.4.5.6", "3.4.5.7", "3.4.5.8", "imported")), sent)
         op = page.evaluate("window.__opened")
-        check("GitHub's report form opens with a title naming the games",
-              len(op) == 1 and op[0].startswith("https://github.com/Femto-Gurifisu/Lobbyfence/issues/new?template=share-servers.yml&title=")
-              and "Servers%3A%20Apex%20Legends%20(2)" in op[0], op)
-        check("then it says what to do there", "drag the file into the box" in sm.locator(".lf-servers-state").inner_text(),
-              sm.locator(".lf-servers-state").inner_text())
+        check("the form opens - nothing about the servers in its address",
+              len(op) == 1 and re.match(r"https://docs\.google\.com/forms/d/e/[\w-]+/viewform$", op[0]) and "155.133" not in op[0] and "apex" not in op[0].lower(), op)
+        check("then it says to paste it into the form and submit", "paste it into the box" in sm.locator(".lf-servers-state").inner_text()
+              and "Submit" in sm.locator(".lf-servers-state").inner_text(), sm.locator(".lf-servers-state").inner_text())
+        # where copying doesn't work, the file is downloaded instead
+        page.evaluate("window.__copyOk = false")
+        sm.locator(".lf-servers-share").click()
+        with page.expect_download() as dl:
+            sm.locator(".lf-servers-sendgh").click()
+        check("copy not possible: the same text is downloaded, and the form still opens",
+              open(dl.value.path()).read() == sent and dl.value.suggested_filename.startswith("lobbyfence-share-")
+              and page.evaluate("window.__opened.length") == 2, dl.value.suggested_filename)
+        page.wait_for_function("document.querySelector('.lf-servers-state').innerText.includes('downloaded')")
+        check("and it says how to paste from the file", "select all, copy" in sm.locator(".lf-servers-state").inner_text())
         sm.get_by_role("button", name="Close").click()
         page.evaluate("t => { window.__execResult = { code: 0, stdout: t }; }",
                       "lobbyfence-servers 1\ngame sf6 SF\n3.4.5.6 40 -70 US 1794416301\ngame apex A\n73.12.44.5 40.7 -74.0 US 1794416301\n")
@@ -1300,7 +1313,7 @@ def main():
         page.wait_for_function("document.querySelectorAll('.lf-servers-game').length >= 1")
         sm.locator(".lf-servers-share").click()
         check("nothing that may be shared: it says so and opens nothing",
-              "Nothing to send yet" in sm.locator(".lf-servers-state").inner_text() and page.evaluate("window.__opened.length") == 1
+              "Nothing to send yet" in sm.locator(".lf-servers-state").inner_text() and page.evaluate("window.__opened.length") == 2
               and not sm.locator(".lf-servers-sharebox").is_visible(), sm.locator(".lf-servers-state").inner_text())
         sm.get_by_role("button", name="Close").click()
         page.evaluate("window.__execResult = null")
