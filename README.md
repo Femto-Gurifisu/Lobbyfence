@@ -839,7 +839,7 @@ games.
   locations (no lookup)*.
 
 LobbyFence also comes with a list of known **Apex Legends**, **Call of
-Duty** and **Fortnite** servers and where they are (`/usr/share/lobbyfence/servers.txt`, the
+Duty**, **Battlefield** and **Fortnite** servers and where they are (`/usr/share/lobbyfence/servers.txt`, the
 same format as a servers file). The Servers file window lists them under
 **Comes with LobbyFence**, by game (read-only: they are part of LobbyFence);
 from the command line, `lobbyfence builtin-servers`. A router that sees one
