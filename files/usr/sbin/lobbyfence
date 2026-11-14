@@ -7,7 +7,7 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-LF_VERSION="1.3.6"
+LF_VERSION="1.3.7"
 LF_TABLE="lobbyfence"
 LF_SHARE="${LF_SHARE:-/usr/share/lobbyfence}"
 LF_RUN="${LF_RUN:-/tmp/lobbyfence}"
