@@ -1230,8 +1230,8 @@ do_import() {
 
 # export: the servers this router has located, by game (with locations imported
 # earlier) - a file another router reads with import-servers, skipping those lookups.
-# Each says where it came from: a servers file imported here ("imported"), the
-# list LobbyFence comes with ("builtin"), or else this router (nothing).
+# Each says where it came from: a servers file imported here ("imported") or else
+# this router. The ones in the list LobbyFence comes with are left out.
 do_export() {
 	local z g label f cache shared builtin
 	load_config
@@ -1261,7 +1261,8 @@ do_export() {
 # share-servers: what this router found that may help everyone - only its own
 # finds for the listed client-server games ($LF_SHARE/share-games.txt), in the
 # data-centre networks LobbyFence knows ($LF_SHARE/server-networks.txt), not in
-# the built-in list and not sent before - goes to LobbyFence's form (SHARE_URL).
+# the built-in list (the export leaves those out) and not sent before - goes to
+# LobbyFence's form (SHARE_URL).
 # "auto on" does that by itself once a day (the learning loop looks at
 # $G_DATA/share.next); nothing is sent until it is switched on.
 share_paths() {
@@ -1279,7 +1280,7 @@ share_build() {
 	do_export > "$LF_RUN/share.export" 2>/dev/null || : > "$LF_RUN/share.export"
 	[ -f "$sent" ] || { sent="$LF_RUN/share.none"; : > "$sent"; }
 	: > "$2"; : > "$stat"
-	lfawk share_pick "$LF_SHARE/server-networks.txt" "$LF_SHARE/share-games.txt" "$LF_SHARE/servers.txt" \
+	lfawk share_pick "$LF_SHARE/server-networks.txt" "$LF_SHARE/share-games.txt" \
 		"$sent" "$LF_RUN/share.export" 2>/dev/null |
 		sort -rn | lfawk share_text -v max="$SHARE_MAX" -v pairs="$2" -v statf="$stat" -v ver="LobbyFence $LF_VERSION" \
 		"$LF_SHARE/share-games.txt" - > "$1" 2>/dev/null

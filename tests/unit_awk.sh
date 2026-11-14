@@ -178,11 +178,15 @@ t "export: located servers by game (first zone's name), unlocated left out, impo
 	"lobbyfence-servers 1|game fortnite Fortnite EU|8.8.8.8 37.75 -97.82 US 500 imported|game apex Apex|9.9.9.9 47.1 8.5 CH 600|game cod|4.4.4.4 10 20 FR 50 imported|" \
 	"$(ra export /tmp/lf_gc.$$ /tmp/lf_gn.$$ /tmp/lf_gp.$$ /tmp/lf_gs.$$ | grep -v '^#' | tr '\n' '|')"
 printf '# the list LobbyFence comes with\nlobbyfence-servers 1\ngame apex Apex Legends\n9.9.9.9 47.1 8.5 CH 1\ngame cod Call of Duty\n8.8.8.8 1 1 US 1\n' > /tmp/lf_gb.$$
-t "export: a zone's server from the list LobbyFence comes with is marked builtin (that game's list only)" \
-	"lobbyfence-servers 1|game fortnite Fortnite EU|8.8.8.8 37.75 -97.82 US 500 imported|game apex Apex|9.9.9.9 47.1 8.5 CH 600 builtin|game cod|4.4.4.4 10 20 FR 50 imported|" \
+t "export: a zone's server in the list LobbyFence comes with is left out (that game's list only)" \
+	"lobbyfence-servers 1|game fortnite Fortnite EU|8.8.8.8 37.75 -97.82 US 500 imported|game cod|4.4.4.4 10 20 FR 50 imported|" \
 	"$(ra export /tmp/lf_gc.$$ /tmp/lf_gn.$$ /tmp/lf_gp.$$ /tmp/lf_gs.$$ /tmp/lf_gb.$$ | grep -v '^#' | tr '\n' '|')"
+printf 'lobbyfence-servers 1\ngame cod Call of Duty\n4.4.4.4 10 20 FR 1\n' > /tmp/lf_gb2.$$
+t "export: ...and so is a kept or imported one" \
+	"lobbyfence-servers 1|game fortnite Fortnite EU|8.8.8.8 37.75 -97.82 US 500 imported|game apex Apex|9.9.9.9 47.1 8.5 CH 600|" \
+	"$(ra export /tmp/lf_gc.$$ /tmp/lf_gn.$$ /tmp/lf_gp.$$ /tmp/lf_gs.$$ /tmp/lf_gb2.$$ | grep -v '^#' | tr '\n' '|')"
 t "export: each game and address once, whatever it came from" "" \
-	"$(ra export /tmp/lf_gc.$$ /tmp/lf_gn.$$ /tmp/lf_gp.$$ /tmp/lf_gs.$$ /tmp/lf_gb.$$ | awk '$1 == "game" { g = $2; next } /^[0-9]/ { print g, $1 }' | sort | uniq -d)"
+	"$(ra export /tmp/lf_gc.$$ /tmp/lf_gn.$$ /tmp/lf_gp.$$ /tmp/lf_gs.$$ /tmp/lf_gb2.$$ | awk '$1 == "game" { g = $2; next } /^[0-9]/ { print g, $1 }' | sort | uniq -d)"
 t "export: says what the file is (comments for whoever opens it)" "yes" \
 	"$(ra export -v when=today /tmp/lf_gc.$$ /tmp/lf_gn.$$ /tmp/lf_gp.$$ /tmp/lf_gs.$$ | grep -q '^# exported today' && echo yes)"
 t "shared_in: checked line by line - private, off-globe, broken and future-dated entries" \
@@ -241,19 +245,20 @@ t "shared_hit: the router's own / imported locations first, then the ones LobbyF
 	"$(ra shared_hit /tmp/lf_w.$$ /tmp/lf_sc.$$ /tmp/lf_bi.$$ | tr '\n' '|')"
 
 # share-servers: only this router's own finds, listed client-server games, data-centre
-# networks, not built in or sent before; newest first under the size limit; form-encoded
+# networks, not sent before (the export has none LobbyFence comes with); newest first
+# under the size limit; form-encoded
 SH="$(dirname "$AWKF")"
-printf 'lobbyfence-servers 1\ngame apex My zone\n155.133.248.200 52.3 4.9 NL 1794416900\n155.133.248.36 52.3 4.9 NL 1794416900\n73.1.1.1 1 1 US 1794416900\n3.120.9.77 50.1 8.6 DE 1794416000 imported\n155.133.248.201 52.3 4.9 NL 1794416950\n3.120.9.78 50.1 8.6 DE 1794410000\n3.120.9.79 95 8.6 DE 1794416000\ngame sf6 x\n3.4.5.6 1 1 US 1794416900\ngame fortnite F\n3.120.9.80 50.1 8.6 DE 1794416990\n' > /tmp/lf_ex.$$
+printf 'lobbyfence-servers 1\ngame apex My zone\n155.133.248.200 52.3 4.9 NL 1794416900\n73.1.1.1 1 1 US 1794416900\n3.120.9.77 50.1 8.6 DE 1794416000 imported\n155.133.248.201 52.3 4.9 NL 1794416950\n3.120.9.78 50.1 8.6 DE 1794410000\n3.120.9.79 95 8.6 DE 1794416000\ngame sf6 x\n3.4.5.6 1 1 US 1794416900\ngame fortnite F\n3.120.9.80 50.1 8.6 DE 1794416990\n' > /tmp/lf_ex.$$
 printf 'apex 155.133.248.201\n' > /tmp/lf_sent.$$
-t "share_pick: own finds of listed games in data-centre networks, not built in or sent before" \
+t "share_pick: own finds of listed games in data-centre networks, not sent before" \
 	"1794416990 fortnite 3.120.9.80|1794416900 apex 155.133.248.200|1794410000 apex 3.120.9.78|" \
-	"$(ra share_pick "$SH/server-networks.txt" "$SH/share-games.txt" "$SH/servers.txt" /tmp/lf_sent.$$ /tmp/lf_ex.$$ | sort -rn | awk '{ print $1, $2, $3 }' | tr '\n' '|')"
-ra share_pick "$SH/server-networks.txt" "$SH/share-games.txt" "$SH/servers.txt" /tmp/lf_sent.$$ /tmp/lf_ex.$$ | sort -rn |
+	"$(ra share_pick "$SH/server-networks.txt" "$SH/share-games.txt" /tmp/lf_sent.$$ /tmp/lf_ex.$$ | sort -rn | awk '{ print $1, $2, $3 }' | tr '\n' '|')"
+ra share_pick "$SH/server-networks.txt" "$SH/share-games.txt" /tmp/lf_sent.$$ /tmp/lf_ex.$$ | sort -rn |
 	ra share_text -v max=40000 -v pairs=/tmp/lf_pairs.$$ -v statf=/tmp/lf_st.$$ -v ver="LobbyFence 9" "$SH/share-games.txt" - > /tmp/lf_txt.$$
 t "share_text: a servers file by game (the games' own names), counts and what was sent" \
 	"lobbyfence-servers 1|# sent by LobbyFence 9 (share-servers) - game servers in data-centre networks only|game apex Apex Legends|155.133.248.200 52.3 4.9 NL 1794416900|3.120.9.78 50.1 8.6 DE 1794410000|game fortnite Fortnite|3.120.9.80 50.1 8.6 DE 1794416990|/3 0/fortnite 3.120.9.80 apex 155.133.248.200 apex 3.120.9.78" \
 	"$(tr '\n' '|' < /tmp/lf_txt.$$)/$(cat /tmp/lf_st.$$)/$(tr '\n' ' ' < /tmp/lf_pairs.$$ | sed 's/ $//')"
-ra share_pick "$SH/server-networks.txt" "$SH/share-games.txt" "$SH/servers.txt" /tmp/lf_sent.$$ /tmp/lf_ex.$$ | sort -rn |
+ra share_pick "$SH/server-networks.txt" "$SH/share-games.txt" /tmp/lf_sent.$$ /tmp/lf_ex.$$ | sort -rn |
 	ra share_text -v max=390 -v pairs=/tmp/lf_pairs.$$ -v statf=/tmp/lf_st.$$ "$SH/share-games.txt" - > /tmp/lf_txt.$$
 t "share_text: too much for one answer - the newest go, the rest is counted for next time" "1 2|fortnite 3.120.9.80" \
 	"$(cat /tmp/lf_st.$$)|$(cat /tmp/lf_pairs.$$)"

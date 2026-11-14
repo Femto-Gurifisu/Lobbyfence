@@ -1749,8 +1749,8 @@ function shareableGame(id) {
 
 /* the part of an export that may be shared: the games' own names (not the zones'
    labels), and per game each data-centre server this router found once - with its
-   location. Imported ones and the ones LobbyFence comes with are not sent back
-   (the router's once-a-day send leaves them out too). */
+   location. Imported ones are not sent back (the router's once-a-day send leaves them
+   out too); the ones LobbyFence comes with are not in an export at all. */
 function shareServers(text) {
 	var games = [], byId = {}, cur = null, n = 0, left = 0, known = 0, ver = '';
 	String(text || '').split(/\r?\n/).forEach(function(line) {
@@ -1767,7 +1767,7 @@ function shareServers(text) {
 		}
 		if (cur === null)
 			return;
-		if (cur && t.length > 5 && (t[5] === 'imported' || t[5] === 'builtin')) {
+		if (cur && t.length > 5 && t[5] === 'imported') {
 			known++;
 			return;
 		}
@@ -4132,7 +4132,8 @@ return view.extend({
 		function isFile(text) { return /^lobbyfence-servers 1\r?$/m.test(text); }
 
 		/* the router's export, read into games -> servers (where each came from: a
-		   servers file imported here, the list LobbyFence comes with, or this router) */
+		   servers file imported here, or this router - the ones LobbyFence comes with
+		   are not in it) */
 		function parse(text) {
 			var games = [], cur = null;
 			String(text).split(/\r?\n/).forEach(function(l) {
@@ -4142,21 +4143,20 @@ return view.extend({
 					cur = { id: m[1], name: m[2] || (p && (p.name || p.label)) || m[1], rows: [] };
 					games.push(cur);
 				}
-				else if (cur && (m = l.match(/^([0-9a-fA-F:.]+) (-?[0-9.]+) (-?[0-9.]+) ([A-Z][A-Z]|--) ([0-9]+)( imported| builtin)?$/)))
-					cur.rows.push({ ip: m[1], cc: m[4], ts: +m[5], imported: m[6] === ' imported', builtin: m[6] === ' builtin' });
+				else if (cur && (m = l.match(/^([0-9a-fA-F:.]+) (-?[0-9.]+) (-?[0-9.]+) ([A-Z][A-Z]|--) ([0-9]+)( imported)?$/)))
+					cur.rows.push({ ip: m[1], cc: m[4], ts: +m[5], imported: !!m[6] });
 			});
 			return games.filter(function(g) { return g.rows.length; });
 		}
 		function render(games) {
 			listNode.innerHTML = '';
 			if (!games.length) {
-				listNode.appendChild(E('p', { 'class': 'lf-servers-empty' }, _('No located servers saved yet. Play a little (or import a file), and they show up here.')));
+				listNode.appendChild(E('p', { 'class': 'lf-servers-empty' }, _('No located servers saved yet. Play a little (or import a file), and the servers LobbyFence does not come with already show up here.')));
 				return;
 			}
 			var now = self.routerNow(), MAX = 300;
 			games.forEach(function(g) {
-				var imp = g.rows.filter(function(r) { return r.imported; }).length, cc = {}, top,
-					bi = g.rows.filter(function(r) { return r.builtin; }).length;
+				var imp = g.rows.filter(function(r) { return r.imported; }).length, cc = {}, top;
 				g.rows.forEach(function(r) { cc[r.cc] = (cc[r.cc] || 0) + 1; });
 				top = Object.keys(cc).sort(function(a, b) { return cc[b] - cc[a]; }).slice(0, 4)
 					.map(function(c) { return (c === '--' ? '?' : c) + ' ' + cc[c]; }).join(', ');
@@ -4179,11 +4179,11 @@ return view.extend({
 				].concat(rows.slice(0, MAX).map(function(r) {
 					var c = E('input', { 'type': 'checkbox', 'class': 'lf-servers-pick', 'value': r.ip, 'change': updatePicked });
 					picks.push(c);
-					return E('tr', { 'class': r.imported ? 'lf-imp' : r.builtin ? 'lf-imp lf-bi' : '' }, [
+					return E('tr', { 'class': r.imported ? 'lf-imp' : '' }, [
 						E('td', {}, c),
 						E('td', { 'class': 'lf-mono' }, E('label', { 'style': 'cursor:pointer', 'click': function(ev) { if (ev.target.tagName !== 'INPUT') { c.checked = !c.checked; updatePicked(); } } }, r.ip)),
 						E('td', {}, r.cc === '--' ? '?' : r.cc),
-						E('td', {}, ago(r.ts, now)), E('td', {}, r.imported ? _('imported') : r.builtin ? _('built in') : _('this router'))
+						E('td', {}, ago(r.ts, now)), E('td', {}, r.imported ? _('imported') : _('this router'))
 					]);
 				})));
 				delSel = confirmButton('lf-servers-delsel', _('Delete selected'), function() {
@@ -4197,8 +4197,7 @@ return view.extend({
 					E('summary', {}, [
 						E('strong', {}, g.name), ' - ',
 						E('span', { 'class': 'lf-servers-count' }, _('%d server(s)').format(g.rows.length)),
-						E('span', { 'class': 'lf-muted' }, ' (' + _('%d from this router, %d imported').format(g.rows.length - imp - bi, imp)
-							+ (bi ? ', ' + _('%d built in').format(bi) : '') + (top ? ' · ' + top : '') + ')')
+						E('span', { 'class': 'lf-muted' }, ' (' + _('%d from this router, %d imported').format(g.rows.length - imp, imp) + (top ? ' · ' + top : '') + ')')
 					]),
 					table,
 					rows.length > MAX ? E('p', { 'class': 'lf-muted' }, _('…and %d more - Download or Copy to get them all.').format(rows.length - MAX)) : '',
@@ -4255,7 +4254,7 @@ return view.extend({
 			if (!games.length)
 				return;
 			builtinNode.appendChild(E('h5', {}, _('Comes with LobbyFence')));
-			builtinNode.appendChild(E('p', { 'class': 'lf-muted', 'style': 'font-size:90%;margin:0 0 6px' }, _('Game servers every LobbyFence knows from the start. When your device plays on one, it is placed on the map straight away, with no lookup - and then it is in the list above too, marked built in, with when it was last seen. They are part of LobbyFence, so there is nothing to delete here.')));
+			builtinNode.appendChild(E('p', { 'class': 'lf-muted', 'style': 'font-size:90%;margin:0 0 6px' }, _('Game servers every LobbyFence knows from the start. When your device plays on one, it is placed on the map straight away, with no lookup. They are part of LobbyFence, so they are not added to the lists above, not saved or sent with them, and there is nothing to delete here.')));
 			games.forEach(function(g) {
 				var cc = {};
 				g.rows.forEach(function(r) { cc[r.cc] = (cc[r.cc] || 0) + 1; });
@@ -4399,14 +4398,14 @@ return view.extend({
 			if (!s.n) {
 				shareBox.style.display = 'none';
 				stateNode.textContent = s.known
-					? _('Nothing new to send: the game servers here were imported or come with LobbyFence already. Play a little more, and the new ones your router finds can be sent.')
-					: _('Nothing to send yet: no located game servers for the listed games (peer-to-peer games have none). Play a little first.');
+					? _('Nothing new to send: the game servers here were imported. The ones your router finds itself can be sent.')
+					: _('Nothing to send yet: your router has found no game servers for the listed games that LobbyFence does not come with already (peer-to-peer games have none).');
 				return;
 			}
 			shareInfo.textContent = _('%d server(s) for %s will be sent.').format(s.n, s.games.map(function(g) {
 				return g.label + ' (' + g.n + ')';
 			}).join(', ')) + (s.left ? ' ' + _('%d address(es) are left out.').format(s.left) : '') +
-				(s.known ? ' ' + _('%d imported or built-in server(s) are left out too.').format(s.known) : '') +
+				(s.known ? ' ' + _('%d imported server(s) are left out too.').format(s.known) : '') +
 				(s.more ? ' ' + _('%d more than fit in one go - send again later for those.').format(s.more) : '');
 			shareBox.style.display = '';
 		} }, _('Send to LobbyFence…'));

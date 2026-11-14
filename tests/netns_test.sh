@@ -764,9 +764,11 @@ sed -i '/usage: lobbyfence remove-servers/d' "$W/stderr.log" 2>/dev/null
 lf remove-servers all > /dev/null
 [ "$(lf export | grep -vc '^#')" = 1 ] && pass "remove-servers all: empty file left (header only)" || fail "remove all: $(lf export)"
 
-# --- 13f. with the lookup service working: servers known from a servers file or from the list
-# LobbyFence comes with are never looked up, and each is listed once, saying where it came from -
-# also after the device has played on it, and when this router had looked it up before the import
+# --- 13f. starting from nothing (as after a reset), with the lookup service working: servers
+# known from a servers file or from the list LobbyFence comes with are never looked up; the
+# Servers file lists each other one once, saying where it came from - also after the device has
+# played on it, and when this router had looked it up before the import - and leaves out the
+# ones LobbyFence comes with
 inr python3 "$HERE/fake_geo.py" 8080 "$W/geo_calls3.log" & GEO3=$!
 sleep 0.5
 printf '51.50.0.1\n' | lf import game - >/dev/null
@@ -775,16 +777,20 @@ expect "a server new to the router is looked up once" 1 "$(grep -c '"51\.50\.0\.
 printf 'lobbyfence-servers 1\ngame fortnite Fortnite\n51.50.0.1 48.8566 2.3522 FR 1794400000\n62.0.0.1 41.8781 -87.6298 US 1794400000\n' > "$W/friend.txt"
 lf import-servers "$W/friend.txt" >/dev/null
 FB="$(awk '$1 == "game" { g = $2; next } g == "fortnite" && /^[0-9]/ { print $1; exit }' "$LF_SHARE/servers.txt")"
-printf '62.0.0.1\n%s\n' "$FB" | lf import game - >/dev/null
+printf '62.0.0.1\n%s\n8.8.8.8\n' "$FB" | lf import game - >/dev/null
 lf cycle; lf cycle
 expect "the imported and the built-in server are not looked up at all, nor the first one again" "1 0 0" \
 	"$(grep -c '"51\.50\.0\.1"' "$W/geo_calls3.log") $(grep -c '"62\.0\.0\.1"' "$W/geo_calls3.log") $(grep -cF "\"$FB\"" "$W/geo_calls3.log")"
+expect "...a new one is (once)" 1 "$(grep -c '"8\.8\.8\.8"' "$W/geo_calls3.log")"
 expect "...one location each, no second one" "1 1 1" \
 	"$(grep -c '^51\.50\.0\.1 ' "$W/run/state/geo.cache") $(grep -c '^62\.0\.0\.1 ' "$W/run/state/geo.cache") $(grep -c "^$FB " "$W/run/state/geo.cache")"
 ex3="$(lf export | awk '$1 == "game" { g = $2; next } /^[0-9]/ { print g, $1, ($6 == "" ? "router" : $6) }')"
-echo "$ex3" | grep -qx "fortnite 51.50.0.1 imported" && echo "$ex3" | grep -qx "fortnite 62.0.0.1 imported" && echo "$ex3" | grep -qx "fortnite $FB builtin" \
+echo "$ex3" | grep -qx "fortnite 51.50.0.1 imported" && echo "$ex3" | grep -qx "fortnite 62.0.0.1 imported" && echo "$ex3" | grep -qx "fortnite 8.8.8.8 router" \
 	&& [ -z "$(echo "$ex3" | awk '{ print $1, $2 }' | sort | uniq -d)" ] \
-	&& pass "the Servers file lists each once: imported (also the one this router had found first), built in" || fail "labels: $ex3"
+	&& pass "the Servers file lists each once: imported (also the one this router had found first), found here" || fail "labels: $ex3"
+echo "$ex3" | grep -q " $FB " && fail "built-in server listed: $ex3" || pass "...and not the one LobbyFence comes with, though the device played on it"
+{ inr nft list set inet lobbyfence z_game_in4; inr nft list set inet lobbyfence z_game_out4; } 2>/dev/null | grep -qF "$FB" \
+	&& pass "...while the zone still has it, filtered like any other" || fail "built-in server not in the zone's sets: $(grep -F "$FB" "$W/run/state/game.ips" 2>&1)"
 kill $GEO3 2>/dev/null; wait $GEO3 2>/dev/null
 lf remove-servers all > /dev/null
 

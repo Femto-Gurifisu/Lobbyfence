@@ -1261,21 +1261,24 @@ def main():
         page.wait_for_function("document.querySelector('.lf-servers-empty')")
         check("nothing saved yet says so", "No located servers saved yet" in page.locator("#modal").inner_text())
         page.locator("#modal").get_by_role("button", name="Close").click()
-        # where each server came from: a server from the list LobbyFence comes with or from an
-        # imported file keeps that label after the device has played on it - not "this router"
+        # where each server came from: one from an imported file keeps that label after the device
+        # has played on it - not "this router" (the ones LobbyFence comes with are not in the file)
         page.evaluate("t => { window.__execResult = { code: 0, stdout: t }; }",
-                      "lobbyfence-servers 1\ngame apex Apex Legends\n3.67.124.64 50.1 8.7 DE 1794184212 builtin\n"
+                      "lobbyfence-servers 1\ngame apex Apex Legends\n"
                       "45.77.0.9 51.5 -0.1 GB 1794184300\n3.120.9.9 50.11 8.68 DE 1794184000 imported\n")
         page.get_by_role("button", name="Servers file…").click()
         sm = page.locator("#modal")
         page.wait_for_function("document.querySelectorAll('.lf-servers-game').length === 1")
         s1 = sm.locator(".lf-servers-game").nth(0).locator("summary").inner_text()
-        check("built-in and imported servers are counted apart from this router's finds",
-              "3 server(s)" in s1 and "1 from this router, 1 imported, 1 built in" in s1, s1)
+        check("imported servers are counted apart from this router's finds",
+              "2 server(s)" in s1 and "1 from this router, 1 imported" in s1, s1)
         sm.locator(".lf-servers-game").nth(0).locator("summary").click()
         trs = sm.locator(".lf-servers-game").nth(0).locator("tr")
         froms = {trs.nth(k).locator("td").nth(1).inner_text(): trs.nth(k).locator("td").nth(4).inner_text() for k in range(1, trs.count())}
-        check("...and each one says where it came from", froms == {"3.67.124.64": "built in", "45.77.0.9": "this router", "3.120.9.9": "imported"}, froms)
+        check("...and each one says where it came from", froms == {"45.77.0.9": "this router", "3.120.9.9": "imported"}, froms)
+        page.wait_for_function("document.querySelectorAll('.lf-builtin-game').length >= 1")
+        check("...the list LobbyFence comes with says its servers are not added to the lists",
+              "not added to the lists above" in sm.locator(".lf-servers-builtin").inner_text(), sm.locator(".lf-servers-builtin").inner_text()[:300])
         sm.get_by_role("button", name="Close").click()
         page.evaluate("window.__execResult = null")
 
@@ -1285,8 +1288,7 @@ def main():
         share_src = ("lobbyfence-servers 1\n# exported 2026-11-12 01:00 - LobbyFence 1.3.3\n"
                      "game apex Victor's PS5 zone\n155.133.248.36 52.2961 4.9549 NL 1794416301\n"
                      "73.12.44.5 40.7 -74.0 US 1794416301\n155.133.248.36 52.2961 4.9549 NL 1794416301\n"
-                     "3.120.9.9 50.11 8.68 DE 1794416301 imported\n3.67.124.64 50.1 8.7 DE 1794416301 builtin\n"
-                     "45.77.0.9 51.5 -0.1 GB 1794416200\n"
+                     "3.120.9.9 50.11 8.68 DE 1794416301 imported\n45.77.0.9 51.5 -0.1 GB 1794416200\n"
                      "game sf6 My fighting zone\n3.4.5.6 40 -70 US 1794416301\n"
                      "game gta GTA\n3.4.5.7 40 -70 US 1794416301\n"
                      "game other Custom thing\n3.4.5.8 40 -70 US 1794416301\n")
@@ -1301,7 +1303,7 @@ def main():
         info = sm.locator(".lf-servers-shareinfo").inner_text()
         check("first it says what will be sent and what is left out, nothing sent yet",
               "2 server(s) for Apex Legends (2) will be sent" in info and "4 address(es) are left out" in info
-              and "2 imported or built-in server(s) are left out too" in info
+              and "1 imported server(s) are left out too" in info
               and page.evaluate("window.__opened.length") == 0 and "privately" in sm.locator(".lf-servers-sharebox").inner_text()
               and "nobody else sees it" in sm.locator(".lf-servers-sharebox").inner_text(), info)
         if SHOTS:
@@ -1316,8 +1318,7 @@ def main():
               , sent)
         check("no zone label, home address or peer-to-peer game's server goes",
               not any(x in sent for x in ("Victor", "73.12.44.5", "3.4.5.6", "3.4.5.7", "3.4.5.8", "imported")), sent)
-        check("...and nothing imported or from the list LobbyFence comes with goes back",
-              not any(x in sent for x in ("3.120.9.9", "3.67.124.64", "builtin")), sent)
+        check("...and nothing imported goes back", "3.120.9.9" not in sent, sent)
         op = page.evaluate("window.__opened")
         check("the form opens - nothing about the servers in its address",
               len(op) == 1 and re.match(r"https://docs\.google\.com/forms/d/e/[\w-]+/viewform$", op[0]) and "155.133" not in op[0] and "apex" not in op[0].lower(), op)
@@ -1344,11 +1345,11 @@ def main():
               and not sm.locator(".lf-servers-sharebox").is_visible(), sm.locator(".lf-servers-state").inner_text())
         sm.get_by_role("button", name="Close").click()
         page.evaluate("t => { window.__execResult = { code: 0, stdout: t }; }",
-                      "lobbyfence-servers 1\ngame apex A\n3.120.9.9 50.11 8.68 DE 1794416301 imported\n3.67.124.64 50.1 8.7 DE 1794416301 builtin\n")
+                      "lobbyfence-servers 1\ngame apex A\n3.120.9.9 50.11 8.68 DE 1794416301 imported\n")
         page.get_by_role("button", name="Servers file…").click()
         page.wait_for_function("document.querySelectorAll('.lf-servers-game').length >= 1")
         sm.locator(".lf-servers-share").click()
-        check("only imported and built-in servers: nothing new to send, nothing opens",
+        check("only imported servers: nothing new to send, nothing opens",
               "Nothing new to send" in sm.locator(".lf-servers-state").inner_text() and page.evaluate("window.__opened.length") == 2
               and not sm.locator(".lf-servers-sharebox").is_visible(), sm.locator(".lf-servers-state").inner_text())
         sm.get_by_role("button", name="Close").click()

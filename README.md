@@ -790,16 +790,17 @@ cases: a new or reset router, a second router, or a friend who plays the same
 games.
 
 * The dialog lists what is saved, one line per game: how many servers, how
-  many this router found, how many were imported and how many are in the list
-  LobbyFence comes with (*built in*), and their countries. Open a game to see
-  its servers (address, country, last seen, from where). A server keeps the
-  label of where it came from: an imported one stays *imported*, and a built-in
-  one stays *built in*, also once your device has played on it, or if this
-  router had found it before - so a server is never counted twice.
+  many this router found and how many were imported, and their countries.
+  Open a game to see its servers (address, country, last seen, from where).
+  An imported server stays *imported*, also once your device has played on
+  it, or if this router had found it before - so a server is never counted
+  twice. Servers in the list LobbyFence comes with are not listed here (nor
+  downloaded, copied or sent): every LobbyFence has them already - so after a
+  reset, only the servers LobbyFence doesn't know yet show up.
   While it is open it follows the router every 10 seconds, so the servers
   found while you play show up (not while you have servers ticked).
-* **Download servers** saves every located server, grouped by the game of the
-  zone that found it, with its location: `lobbyfence-servers-YYYYMMDD.txt`.
+* **Download servers** saves every located server listed here, grouped by the
+  game of the zone that found it, with its location: `lobbyfence-servers-YYYYMMDD.txt`.
   Browsers flag downloads from `http://` router pages as insecure - choose
   *Keep*, or use **Copy** and paste the text wherever you want it.
 * **Paste…** imports a servers file someone sent you as text.
@@ -850,9 +851,10 @@ same format as a servers file). The Servers file window lists them under
 **Comes with LobbyFence**, by game (read-only: they are part of LobbyFence);
 from the command line, `lobbyfence builtin-servers`. A router that sees one
 of them places it straight away, with no lookup - even before anything has
-been imported - and it shows up on the map as soon as the device plays on it
-(and from then on in the game's list above, marked *built in*). The
-router's own and imported locations come first. The list holds game servers
+been imported - and it shows up on the map as soon as the device plays on it.
+It is not added to the game's list above (or to a downloaded file): it is
+part of LobbyFence already. The router's own and imported locations come
+first. The list holds game servers
 in data centres only: players' own addresses, which peer-to-peer traffic
 (party chat, some lobbies) also shows, are never added to it.
 
@@ -861,8 +863,8 @@ Switch a zone to another game (**Change game**) and its learned servers stay
 saved under the old game, with their locations - the zone then learns the new
 game's servers from scratch. The same happens when a zone is deleted. Servers
 kept this way count as *from this router* in the dialog - except the ones that
-came from an imported file or the list LobbyFence comes with, which keep that
-label.
+came from an imported file, which stay *imported* (and the ones LobbyFence
+comes with, which are not listed at all).
 
 Importing only adds locations. It doesn't add servers to a zone, doesn't
 change what is blocked, and doesn't touch whitelists or blacklists. The file

@@ -851,13 +851,14 @@ function ex_add(g, line,   ip) {
 	if (!(g in exn)) { exo[++nexo] = g; exn[g] = 0 }
 	exl[g, ++exn[g]] = line
 }
-# where a server of a game came from: the list LobbyFence comes with, a servers file
-# imported here - even when the device has played on it since, or this router had
-# found it before - or else this router
-function ex_from(g, ip) {
-	if ((g SUBSEP ip) in ex_bi) return " builtin"
-	if ((g SUBSEP ip) in ex_imp) return " imported"
-	return ""
+# a server of a game for the export, saying where it came from: a servers file imported
+# here ("imported" - also once the device has played on it, or when this router had found
+# it before) or else this router. The ones in the list LobbyFence comes with (for that
+# game) are left out: every LobbyFence has them.
+function ex_put(g, line,   ip) {
+	ip = line; sub(/ .*/, "", ip)
+	if ((g SUBSEP ip) in ex_bi) return
+	ex_add(g, line (((g SUBSEP ip) in ex_imp) ? " imported" : ""))
 }
 # export: geo.cache, the zones' games and names, "game address seen" of the zones'
 # servers, the kept / imported locations, the list LobbyFence comes with (optional)
@@ -932,7 +933,8 @@ function ip4n(s,   sh_a) {
 	if (sh_a[1] > 255 || sh_a[2] > 255 || sh_a[3] > 255 || sh_a[4] > 255) return -1
 	return ((sh_a[1] * 256 + sh_a[2]) * 256 + sh_a[3]) * 256 + sh_a[4]
 }
-# share_pick: networks, games, built-in list, sent list, export -> "seen game address lat lon cc"
+# share_pick: networks, games, sent list, export -> "seen game address lat lon cc"
+# (the export has no servers from the list LobbyFence comes with)
 op == "share_pick" && FILENAME == ARGV[1] {
 	sub(/#.*/, "")
 	for (i = 1; i <= NF; i++) {
@@ -943,13 +945,7 @@ op == "share_pick" && FILENAME == ARGV[1] {
 	next
 }
 op == "share_pick" && FILENAME == ARGV[2] { if ($1 ~ /^[a-z0-9_]+$/) sh_okg[$1] = 1; next }
-op == "share_pick" && FILENAME == ARGV[4] { if (NF >= 2) sh_have[$1 SUBSEP $2] = 1; next }
-op == "share_pick" && FILENAME == ARGV[3] {
-	sub(/\r$/, "")
-	if ($1 == "game") sh_kg = $2
-	else if ($1 ~ /^[0-9]/ && sh_kg != "") sh_have[sh_kg SUBSEP $1] = 1
-	next
-}
+op == "share_pick" && FILENAME == ARGV[3] { if (NF >= 2) sh_have[$1 SUBSEP $2] = 1; next }
 op == "share_pick" {
 	sub(/\r$/, "")
 	if ($1 == "game") { sh_pg = ($2 in sh_okg) ? $2 : ""; next }
@@ -1074,15 +1070,15 @@ END {
 	} else if (op == "export") {
 		# the zones' servers first (their last-seen times), then the kept / imported
 		# ones no zone has now - each game and address once
-		for (i = 1; i <= ex_zn; i++) { ip = ex_zl[i]; sub(/ .*/, "", ip); ex_add(ex_zg[i], ex_zl[i] ex_from(ex_zg[i], ip)) }
-		for (i = 1; i <= ex_sn; i++) { ip = ex_sl[i]; sub(/ .*/, "", ip); ex_add(ex_sg[i], ex_sl[i] ex_from(ex_sg[i], ip)) }
+		for (i = 1; i <= ex_zn; i++) ex_put(ex_zg[i], ex_zl[i])
+		for (i = 1; i <= ex_sn; i++) ex_put(ex_sg[i], ex_sl[i])
 		print "# LobbyFence servers - each game's servers and where they are, so another"
 		print "# router can import them and skip looking them up (LobbyFence -> Servers file)."
 		if (when != "") print "# exported " when
 		print "# game <id> <name>, then one server a line:"
-		print "#   <address> <latitude> <longitude> <country> <last seen, unix time> [imported | builtin]"
-		print "# (imported: from a servers file imported here; builtin: in the list LobbyFence"
-		print "# comes with; neither: found by this router)"
+		print "#   <address> <latitude> <longitude> <country> <last seen, unix time> [imported]"
+		print "# (imported: from a servers file imported here; else found by this router). The"
+		print "# servers in the list LobbyFence comes with are left out: every LobbyFence has them."
 		print "lobbyfence-servers 1"
 		for (i = 1; i <= nexo; i++) {
 			g = exo[i]
