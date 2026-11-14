@@ -101,7 +101,7 @@ runs on these routers:
 | ASUS GT-AXE16000 (Wi-Fi 6E) | Asuswrt-Merlin | netem works |
 | ASUS GT-BE98 Pro (Wi-Fi 7) | Asuswrt-Merlin | netem works |
 | GL.iNet GL-MT6000 (Flint 2) | OpenWrt | netem works |
-| Netgear R7000 | OpenWrt, FreshTomato, DD-WRT | netem works (OpenWrt) |
+| Netgear R7000 | OpenWrt, FreshTomato, DD-WRT | netem works on all three |
 
 Running it on another model? A debug report (**Debug…** on the map page)
 shows what it uses there - reports are welcome as a GitHub issue.
