@@ -29,8 +29,10 @@ GEO_FIELDS="status,message,countryCode,lat,lon,query"
 # unlocatable addresses are retried after a week
 GEO_RETRY=604800
 # Send to LobbyFence (share-servers): LobbyFence's form - only the maintainer
-# sees what is sent. It answers 200 and its confirmation message when it took
-# the answer (400 when not). At most once a day, when switched on.
+# sees what is sent. It answers 200 when it took the answer and 400 when not
+# (both pages carry its confirmation message somewhere, so the status decides).
+# At most once a day when switched on; a failed send is tried again after 2
+# hours, then 4, 8, 16 and at most 24.
 SHARE_URL="${LF_SHARE_URL:-https://docs.google.com/forms/d/e/1FAIpQLSfS_Y-UVb1mTGAK3Gpme3-W1SPbgNqtq7cOawbBT69QMiEoUw/formResponse}"
 SHARE_FIELD="entry.902986460"
 SHARE_OK="LobbyFence received"
@@ -1282,36 +1284,59 @@ share_build() {
 	rm -f "$stat"
 }
 
-# share_post body-file -> 0 when the form took it
+# share_post body-file -> 0 when the form took it: it answered 200 (after any
+# redirect). SH_WHY says what happened, for the log.
 share_post() {
-	local resp="$LF_RUN/share.resp" code rc
-	rm -f "$resp"
+	local resp="$LF_RUN/share.resp" code=000 rc tool ok=1
+	rm -f "$resp" "$LF_RUN/share.err"
 	if have curl; then
-		code="$(curl -sS -m 40 --max-filesize 2097152 -o "$resp" -w '%{http_code}' \
+		tool=curl
+		code="$(curl -sS -L --max-redirs 5 -m 40 --max-filesize 2097152 -o "$resp" -w '%{http_code}' \
 			-H 'Content-Type: application/x-www-form-urlencoded' --data-binary @"$1" "$SHARE_URL" 2>"$LF_RUN/share.err")"
-		rc=$?; [ "$rc" = 0 ] && [ "$code" = 200 ] || rc=1
+		rc=$?
+		is_uint "$code" || code=000
+		# a 200 means the form has the answer, even if the rest of its page didn't arrive
+		case "$code" in 2??) ok=0;; esac
 	elif have uclient-fetch; then
+		# (it follows redirects and fails on an HTTP error by itself)
+		tool=uclient-fetch
 		uclient-fetch -q -T 40 -O "$resp" --post-file="$1" "$SHARE_URL" 2>"$LF_RUN/share.err"; rc=$?
+		[ "$rc" = 0 ] && { code=200; ok=0; }
 	else
+		tool=wget
 		wget -q -T 40 -O "$resp" --header='Content-Type: application/x-www-form-urlencoded' \
 			--post-data="$(cat "$1")" "$SHARE_URL" 2>"$LF_RUN/share.err"; rc=$?
+		[ "$rc" = 0 ] && { code=200; ok=0; }
 	fi
-	[ "$rc" = 0 ] && grep -q "$SHARE_OK" "$resp" 2>/dev/null; rc=$?
+	SH_WHY="$tool: HTTP $code, exit $rc, $(grep -q "$SHARE_OK" "$resp" 2>/dev/null && echo "confirmation shown" || echo "no confirmation shown")"
+	[ -s "$LF_RUN/share.err" ] && SH_WHY="$SH_WHY; $(head -c 200 "$LF_RUN/share.err" | tr '\n' ' ')"
 	rm -f "$resp"
-	return $rc
+	return $ok
+}
+
+# share_wait failures -> seconds until the next try: 2 hours, then 4, 8, 16, at most a day
+share_wait() {
+	local w="$SHARE_RETRY" i=1
+	while [ "$i" -lt "$1" ] && [ "$w" -lt "$SHARE_EVERY" ]; do w=$((w * 2)); i=$((i + 1)); done
+	[ "$w" -gt "$SHARE_EVERY" ] && w="$SHARE_EVERY"
+	echo "$w"
 }
 
 # share_send why (auto|now) -> sends what is new; schedules the next time
 share_send() {
 	local why="$1" t text="$LF_RUN/share.txt" pairs="$LF_RUN/share.pairs" body="$LF_RUN/share.body" n more rc=0
+	local lt lok ln fails=0 wait
 	share_paths
 	mkdir "$LF_RUN/share.lock" 2>/dev/null || { echo "already sending" >&2; return 1; }
 	t="$(now)"
+	# failures in a row so far (share.last: time ok servers failures)
+	[ -f "$SH_LAST" ] && read -r lt lok ln fails < "$SH_LAST"
+	is_uint "$fails" || fails=0
 	set -- $(share_build "$text" "$pairs")
 	n="${1:-0}"; more="${2:-0}"
 	is_uint "$n" || n=0; is_uint "$more" || more=0
 	if [ "$n" = 0 ]; then
-		echo "$t 1 0" > "$SH_LAST"
+		echo "$t 1 0 0" > "$SH_LAST"
 		[ "$why" = auto ] && echo $((t + SHARE_EVERY)) > "$SH_NEXT"
 		log info "send to LobbyFence: no new game servers to send"
 		echo "nothing new to send"
@@ -1321,14 +1346,16 @@ share_send() {
 			cat "$pairs" >> "$SH_SENT"
 			# the newest 20000 are remembered (an older one would only be sent once more)
 			[ "$(lines "$SH_SENT")" -gt 20000 ] && { tail -n 20000 "$SH_SENT" > "$SH_SENT.new" && mv "$SH_SENT.new" "$SH_SENT"; }
-			echo "$t 1 $n" > "$SH_LAST"
+			echo "$t 1 $n 0" > "$SH_LAST"
 			[ "$why" = auto ] && echo $((t + SHARE_EVERY + $(share_rand 1800) - 900)) > "$SH_NEXT"
-			log notice "sent $n new game server(s) to LobbyFence$([ "$more" -gt 0 ] && echo " ($more more next time)")"
+			log notice "sent $n new game server(s) to LobbyFence$([ "$more" -gt 0 ] && echo " ($more more next time)") ($SH_WHY)"
 			echo "sent $n new game server(s)$([ "$more" -gt 0 ] && echo " - $more more next time")"
 		else
-			echo "$t 0 $n" > "$SH_LAST"
-			[ "$why" = auto ] && echo $((t + SHARE_RETRY)) > "$SH_NEXT"
-			log warning "could not send the found game servers to LobbyFence ($(head -c 200 "$LF_RUN/share.err" 2>/dev/null | tr '\n' ' ')) - $([ "$why" = auto ] && echo "trying again in 2 hours" || echo "nothing was sent")"
+			fails=$((fails + 1))
+			wait="$(share_wait "$fails")"
+			echo "$t 0 $n $fails" > "$SH_LAST"
+			[ "$why" = auto ] && echo $((t + wait)) > "$SH_NEXT"
+			log warning "could not send the found game servers to LobbyFence ($SH_WHY) - $([ "$why" = auto ] && echo "trying again in $((wait / 3600)) hours" || echo "nothing was sent")"
 			echo "could not send them (no answer from LobbyFence's form)" >&2
 			rc=1
 		fi
@@ -1379,7 +1406,7 @@ do_share() {
 			rm -f "$LF_RUN/share.preview" "$LF_RUN/share.ppairs";;
 		status|'')
 			t=0; ok=0; n=0; next=0
-			[ -f "$SH_LAST" ] && read -r t ok n < "$SH_LAST"
+			[ -f "$SH_LAST" ] && read -r t ok n sh_rest < "$SH_LAST"
 			[ -f "$SH_NEXT" ] && read -r next < "$SH_NEXT"
 			is_uint "$t" || t=0; is_uint "$ok" || ok=0; is_uint "$n" || n=0; is_uint "$next" || next=0
 			set -- $(share_build "$LF_RUN/share.preview" "$LF_RUN/share.ppairs")
@@ -1865,7 +1892,7 @@ debug_data() {
 		echo "zone $z: $(lines "$f") server address(es) learned, server list revision $(cat "$LF_RUN/$z.rev" 2>/dev/null || echo 0)"
 	done
 	echo "locations known: $(lines "$LF_STATE/geo.cache")"
-	echo "send to LobbyFence once a day: $([ -f "$G_DATA/share.auto" ] && echo on || echo off); last: $(cat "$G_DATA/share.last" 2>/dev/null || echo never) (time ok servers); next: $(cat "$G_DATA/share.next" 2>/dev/null || echo -); $(lines "$G_DATA/share.sent") sent so far"
+	echo "send to LobbyFence once a day: $([ -f "$G_DATA/share.auto" ] && echo on || echo off); last: $(cat "$G_DATA/share.last" 2>/dev/null || echo never) (time ok servers failures-in-a-row); next: $(cat "$G_DATA/share.next" 2>/dev/null || echo -); $(lines "$G_DATA/share.sent") sent so far"
 	echo "lookups in the last minute: $(awk -v t="$(geo_now)" '$1 > t - 61' "$LF_RUN/geo.calls" 2>/dev/null | wc -l) of $GEO_RATE_LIMIT allowed$(b="$(cat "$LF_RUN/geo.backoff" 2>/dev/null)"; is_uint "$b" && [ "$b" -gt "$(geo_now)" ] && echo ", waiting $((b - $(geo_now))) s (the service asked)")"
 	echo "last saved to flash: $(p="$(cat "$LF_RUN/persisted_at" 2>/dev/null)"; is_uint "$p" && echo "$(( $(now) - p )) s ago" || echo never)$([ -f "$LF_RUN/persist.err" ] && echo ' - SAVING FAILED (see the log)')"
 	echo

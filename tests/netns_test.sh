@@ -591,6 +591,35 @@ kill "$(cat "$W/run/daemon.pid" 2>/dev/null)" $DAEMON 2>/dev/null; wait $DAEMON 
 js="$(shf status)"
 [ "$(wc -l < "$W/form.log")" = 1 ] && python3 -c "import json,sys; d=json.loads(sys.argv[1]); assert d['last_ok']==1 and d['sent']==2 and abs(d['next'] - d['now'] - 86400) <= 960, d" "$js" \
 	&& pass "the learning loop sends by itself when it is time, then again in about a day" || fail "daemon send: $(wc -l < "$W/form.log") $js"
+# Google's answer is told apart by its status: after a redirect, without the confirmation text,
+# or cut off after the 200 - the form has the answer each time, so it counts as sent (and the
+# log says how it went)
+for mode in redirect nomarker cut; do
+	rm -f "$W/data/share.sent" "$W/data/share.last"; : > "$W/form.log"; echo "$mode" > "$W/form.log.mode"
+	out="$(shf now 2>&1)"; rc=$?
+	js="$(shf status)"
+	[ $rc -eq 0 ] && [ "$(wc -l < "$W/form.log")" = 1 ] \
+		&& python3 -c "import json,sys; d=json.loads(sys.argv[1]); assert d['last_ok']==1 and d['sent']==2 and d['pending']==0, d" "$js" \
+		&& pass "form answer '$mode': counted as sent, not sent again" || fail "form answer '$mode': rc=$rc $out $js"
+done
+rm -f "$W/form.log.mode"
+lg="$(cat "$W/run.log" "$W/run/log" 2>/dev/null)"
+echo "$lg" | grep -q "sent 2 new game server(s) to LobbyFence (curl: HTTP 200, exit 0, no confirmation shown" \
+	&& echo "$lg" | grep -q "sent 2 new game server(s) to LobbyFence (curl: HTTP 200, exit 18" \
+	&& pass "the log says how each answer came back" || fail "share log lines: $(echo "$lg" | grep 'to LobbyFence' | tail -4)"
+# failing again and again: it waits longer each time (2 hours, then 4) instead of every 2 hours
+rm -f "$W/data/share.sent" "$W/data/share.last"; touch "$W/form.log.down"
+for want in 7200 14400; do
+	echo 1 > "$W/data/share.next"
+	inr env LF_SHARE="$W/share" LF_SHARE_URL="http://127.0.0.1:8090/forms/d/e/x/formResponse" $LF daemon >/dev/null 2>&1 & DAEMON=$!
+	n=0; while [ "$(cat "$W/data/share.next" 2>/dev/null)" = 1 ] && [ $n -lt 60 ]; do sleep 0.5; n=$((n + 1)); done
+	sleep 0.5
+	kill "$(cat "$W/run/daemon.pid" 2>/dev/null)" $DAEMON 2>/dev/null; wait $DAEMON 2>/dev/null
+	js="$(shf status)"
+	python3 -c "import json,sys; d=json.loads(sys.argv[1]); assert d['last_ok']==0 and d['sent']==0 and abs(d['next'] - d['now'] - $want) <= 60, d" "$js" \
+		&& pass "failure $([ $want = 7200 ] && echo 1 || echo 2) in a row: next try in $((want / 3600)) hours" || fail "backoff $want: $js"
+done
+rm -f "$W/form.log.down"
 st="$(shf auto off)"; js="$(shf status)"
 python3 -c "import json,sys; d=json.loads(sys.argv[1]); assert d['auto']==0 and d['next']==0, d" "$js" && [ "$st" = off ] && [ ! -f "$W/data/share.next" ] \
 	&& pass "auto off: nothing scheduled any more" || fail "auto off: $st $js"
@@ -619,7 +648,7 @@ grep -q '^45\.32\.7\.134 40\.4993 -74\.399 US ' "$W/run/state/geo.cache" \
 	|| fail "built-in list: $(grep -c . "$W/run/state/geo.cache") located, log: $(tail -2 "$W/run/log")"
 expect "...and sorted out straight away (New Jersey: outside the region)" "45.32.7.134 blocked" "$(probe 45.32.7.134)"
 out="$(lf builtin-servers)"
-[ "$(echo "$out" | head -1)" = "lobbyfence-servers 1" ] && echo "$out" | grep -qx 'game apex Apex Legends' && echo "$out" | grep -qx 'game cod Call of Duty' \
+[ "$(echo "$out" | head -1)" = "lobbyfence-servers 1" ] && echo "$out" | grep -qx 'game apex Apex Legends' && echo "$out" | grep -qx 'game cod Call of Duty series' \
 	&& [ "$(echo "$out" | grep -c '^[0-9]')" = "$(grep -c '^[0-9]' "$LF_SHARE/servers.txt")" ] && ! echo "$out" | grep -q '^#' \
 	&& pass "builtin-servers: the list LobbyFence comes with, as a servers file (for the Servers file window)" || fail "builtin-servers: $(echo "$out" | head -3)"
 cp "$W/data/shared.cache" "$W/shared.before"

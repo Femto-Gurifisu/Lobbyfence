@@ -346,7 +346,7 @@ def main():
         names = page.evaluate("[...[...document.querySelectorAll('#modal optgroup')].find(g => g.label === 'PC & console').children].map(o => o.textContent)")
         check("PC & console games A to Z - Marvel Rivals, Roblox, GTA Online, Battlefield and more",
               names == sorted(names, key=str.lower) and all(n in names for n in ["Marvel Rivals", "Roblox", "GTA Online (GTA V) / Red Dead Online",
-                                                                              "Battlefield 6", "Rainbow Six Siege X", "EA SPORTS FC 26"]), names)
+                                                                              "Battlefield series", "Rainbow Six Siege X", "EA SPORTS FC 26"]), names)
         game.select_option("gta")
         check("GTA Online: Rockstar's ports on either side, open for server tests off, short name",
               ports.input_value() == "6672 61455-61458" and modal.get_by_text("Game ports (either side)").is_visible()
@@ -1159,7 +1159,7 @@ def main():
               page.locator(".lf-builtin-game").count() == 0 and "Could not" not in page.locator(".lf-servers-state").inner_text())
         page.locator("#modal").get_by_role("button", name="Close").click()
         page.evaluate("t => { window.__builtin = t; }", "lobbyfence-servers 1\ngame apex Apex Legends\n3.67.124.64 50.1 8.7 DE 1794184212\n"
-                      "13.113.128.68 35.7 139.7 JP 1794184212\n63.177.165.222 50.1 8.7 DE 1794184212\ngame cod Call of Duty\n45.32.7.134 40.5 -74.4 US 1794182174\n")
+                      "13.113.128.68 35.7 139.7 JP 1794184212\n63.177.165.222 50.1 8.7 DE 1794184212\ngame cod Call of Duty series\n45.32.7.134 40.5 -74.4 US 1794182174\n")
         page.get_by_role("button", name="Servers file…").click()
         sm = page.locator("#modal")
         page.wait_for_function("document.querySelectorAll('.lf-servers-game').length === 2")
@@ -1169,7 +1169,7 @@ def main():
         b1 = bi.locator(".lf-builtin-game").nth(0).locator("summary").inner_text()
         check("the servers LobbyFence comes with have their own part, one line per game",
               "Comes with LobbyFence" in bi.inner_text() and b1.startswith("Apex Legends") and "3 server(s)" in b1 and "DE 2, JP 1" in b1
-              and bi.locator(".lf-builtin-game").nth(1).locator("summary").inner_text().startswith("Call of Duty - 1 server(s)"), b1)
+              and bi.locator(".lf-builtin-game").nth(1).locator("summary").inner_text().startswith("Call of Duty series - 1 server(s)"), b1)
         bi.locator(".lf-builtin-game").nth(0).locator("summary").click()
         cells = bi.locator(".lf-builtin-game").nth(0).locator("tr").nth(1).locator("td")
         check("opening one lists its servers (address, country)", cells.count() == 2 and cells.nth(0).inner_text() == "3.67.124.64" and cells.nth(1).inner_text() == "DE",

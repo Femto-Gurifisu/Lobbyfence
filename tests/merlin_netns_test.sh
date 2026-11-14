@@ -249,7 +249,7 @@ js "assert d.get('error') == 'not allowed', d" "$out" && pass "debug takes no ot
 out="$(page send export)"
 js "assert d.get('done') and d['code']==0 and '\\nlobbyfence-servers 1\\n' in d['stdout'], d" "$out" && pass "servers file download through the add-on API" || fail "export: $(echo "$out" | head -c 300)"
 out="$(page send builtin-servers)"
-js "o=d['stdout']; assert d.get('done') and d['code']==0 and o.startswith('lobbyfence-servers 1') and '\\ngame cod Call of Duty\\n' in o and sum(1 for l in o.splitlines() if l[:1].isdigit()) > 100, d" "$out" \
+js "o=d['stdout']; assert d.get('done') and d['code']==0 and o.startswith('lobbyfence-servers 1') and '\\ngame cod Call of Duty series\\n' in o and sum(1 for l in o.splitlines() if l[:1].isdigit()) > 100, d" "$out" \
 	&& pass "the servers LobbyFence comes with, through the add-on API" || fail "builtin-servers: $(echo "$out" | head -c 300)"
 out="$(page send 'share-servers status')"
 js "import json; s=json.loads(d['stdout']); assert d.get('done') and d['code']==0 and s['auto']==0, d" "$out" && pass "share-servers status through the add-on API" || fail "share-servers status: $(echo "$out" | head -c 300)"

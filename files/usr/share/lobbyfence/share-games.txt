@@ -5,8 +5,8 @@
 # list (tests/safety_static.py checks that they match).
 apex Apex Legends
 arcraiders ARC Raiders
-battlefield Battlefield 6
-cod Call of Duty (Black Ops 7/6, Warzone, MW III)
+battlefield Battlefield series
+cod Call of Duty series
 valve Counter-Strike 2 / Dota 2
 dbd Dead by Daylight
 eafc EA SPORTS FC 26

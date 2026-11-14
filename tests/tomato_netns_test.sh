@@ -515,7 +515,7 @@ out="$(cgi "$TOKEN" "exec export")"
 python3 -c "import json,sys; d=json.loads(sys.argv[1]); assert d['code']==0 and '\nlobbyfence-servers 1\n' in d['stdout'], d" "$out" \
 	&& pass "CGI: servers file download" || fail "CGI export: $(echo "$out" | head -c 300)"
 out="$(cgi "$TOKEN" "exec builtin-servers")"
-python3 -c "import json,sys; d=json.loads(sys.argv[1]); o=d['stdout']; assert d['code']==0 and o.startswith('lobbyfence-servers 1') and '\ngame apex Apex Legends\n' in o and '\ngame cod Call of Duty\n' in o and sum(1 for l in o.splitlines() if l[:1].isdigit()) > 100, d" "$out" \
+python3 -c "import json,sys; d=json.loads(sys.argv[1]); o=d['stdout']; assert d['code']==0 and o.startswith('lobbyfence-servers 1') and '\ngame apex Apex Legends\n' in o and '\ngame cod Call of Duty series\n' in o and sum(1 for l in o.splitlines() if l[:1].isdigit()) > 100, d" "$out" \
 	&& pass "CGI: the servers LobbyFence comes with (for the Servers file window)" || fail "CGI builtin-servers: $(echo "$out" | head -c 300)"
 # sending found servers once a day: the page may see the state and switch it, nothing more
 out="$(cgi "$TOKEN" "exec share-servers status")"
