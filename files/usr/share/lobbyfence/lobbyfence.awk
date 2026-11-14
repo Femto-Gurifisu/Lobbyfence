@@ -842,7 +842,8 @@ op == "ipt_counts" {
 #   lobbyfence-servers 1
 #   game <id> <name...>
 #   <address> <latitude> <longitude> <country> <last seen, unix time>
-# Imported locations are kept as "<address> <lat> <lon> <country> <seen> <game>".
+# Imported locations are kept as "<address> <lat> <lon> <country> <seen> <game>"
+# ("... own" for the ones this router found itself, kept after a zone changed game).
 function ex_add(g, line,   ip) {
 	ip = line; sub(/ .*/, "", ip)
 	if ((g SUBSEP ip) in exs) return
@@ -850,6 +851,16 @@ function ex_add(g, line,   ip) {
 	if (!(g in exn)) { exo[++nexo] = g; exn[g] = 0 }
 	exl[g, ++exn[g]] = line
 }
+# where a server of a game came from: the list LobbyFence comes with, a servers file
+# imported here - even when the device has played on it since, or this router had
+# found it before - or else this router
+function ex_from(g, ip) {
+	if ((g SUBSEP ip) in ex_bi) return " builtin"
+	if ((g SUBSEP ip) in ex_imp) return " imported"
+	return ""
+}
+# export: geo.cache, the zones' games and names, "game address seen" of the zones'
+# servers, the kept / imported locations, the list LobbyFence comes with (optional)
 op == "export" && FILENAME == ARGV[1] {
 	if (is_public_host($1) && is_num($2) && is_num($3)) loc[$1] = $2 " " $3 " " ($4 ~ /^[A-Z][A-Z]$/ ? $4 : "--")
 	next
@@ -859,11 +870,20 @@ op == "export" && FILENAME == ARGV[2] {
 	next
 }
 op == "export" && FILENAME == ARGV[3] {
-	if ($2 in loc) ex_add($1, $2 " " loc[$2] " " ($3 ~ /^[0-9]+$/ ? $3 : 0))
+	if ($2 in loc) { ex_zg[++ex_zn] = $1; ex_zl[ex_zn] = $2 " " loc[$2] " " ($3 ~ /^[0-9]+$/ ? $3 : 0) }
+	next
+}
+op == "export" && FILENAME == ARGV[4] {
+	if (NF >= 6 && $6 ~ /^[a-z0-9_]+$/ && is_public_host($1) && is_num($2) && is_num($3)) {
+		ex_sg[++ex_sn] = $6; ex_sl[ex_sn] = $1 " " $2 " " $3 " " $4 " " $5
+		if ($7 != "own") ex_imp[$6 SUBSEP $1] = 1
+	}
 	next
 }
 op == "export" {
-	if (NF >= 6 && $6 ~ /^[a-z0-9_]+$/ && is_public_host($1) && is_num($2) && is_num($3)) ex_add($6, $1 " " $2 " " $3 " " $4 " " $5 ($7 == "own" ? "" : " imported"))
+	sub(/\r$/, "")
+	if ($1 == "game") ex_bg = $2
+	else if (ex_bg != "" && $1 ~ /^[0-9]/) ex_bi[ex_bg SUBSEP $1] = 1
 	next
 }
 op == "shared_in" {
@@ -890,7 +910,7 @@ op == "shared_merge" {
 	if (!(k in sm)) { smo[++nsm] = k; sm[k] = line; smt[k] = $5 + 0; smown[k] = own; if (FILENAME != ARGV[1]) smadd++ }
 	else {
 		if ($5 + 0 > smt[k]) { sm[k] = line; smt[k] = $5 + 0 }
-		if (own) smown[k] = 1          # found by this router once: stays "own"
+		if (!own) smown[k] = 0         # in an imported file once: counts as imported from then on
 	}
 	next
 }
@@ -1052,11 +1072,17 @@ END {
 	} else if (op == "clean_ips" || op == "clean_cache" || op == "clean_ports") {
 		if (statf != "") print (bad + 0) > statf
 	} else if (op == "export") {
+		# the zones' servers first (their last-seen times), then the kept / imported
+		# ones no zone has now - each game and address once
+		for (i = 1; i <= ex_zn; i++) { ip = ex_zl[i]; sub(/ .*/, "", ip); ex_add(ex_zg[i], ex_zl[i] ex_from(ex_zg[i], ip)) }
+		for (i = 1; i <= ex_sn; i++) { ip = ex_sl[i]; sub(/ .*/, "", ip); ex_add(ex_sg[i], ex_sl[i] ex_from(ex_sg[i], ip)) }
 		print "# LobbyFence servers - each game's servers and where they are, so another"
 		print "# router can import them and skip looking them up (LobbyFence -> Servers file)."
 		if (when != "") print "# exported " when
 		print "# game <id> <name>, then one server a line:"
-		print "#   <address> <latitude> <longitude> <country> <last seen, unix time> [imported]"
+		print "#   <address> <latitude> <longitude> <country> <last seen, unix time> [imported | builtin]"
+		print "# (imported: from a servers file imported here; builtin: in the list LobbyFence"
+		print "# comes with; neither: found by this router)"
 		print "lobbyfence-servers 1"
 		for (i = 1; i <= nexo; i++) {
 			g = exo[i]

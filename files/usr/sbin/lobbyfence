@@ -927,8 +927,8 @@ game_changes() {
 }
 
 # keep_servers <zone> <game>: the zone's located servers -> the kept
-# locations (shared.cache, marked "own": found by this router, not imported).
-# Prints how many there were.
+# locations (shared.cache, marked "own": found by this router - one that came
+# from an imported servers file stays imported). Prints how many there were.
 keep_servers() {
 	local z="$1" g="$2" f cache n
 	case "$g" in ''|*[!a-z0-9_]*) g=other;; esac
@@ -1229,9 +1229,11 @@ do_import() {
 }
 
 # export: the servers this router has located, by game (with locations imported
-# earlier) - a file another router reads with import-servers, skipping those lookups
+# earlier) - a file another router reads with import-servers, skipping those lookups.
+# Each says where it came from: a servers file imported here ("imported"), the
+# list LobbyFence comes with ("builtin"), or else this router (nothing).
 do_export() {
-	local z g label f cache shared
+	local z g label f cache shared builtin
 	load_config
 	ensure_dirs
 	: > "$LF_RUN/export.names"
@@ -1248,9 +1250,11 @@ do_export() {
 	[ -f "$cache" ] || { : > "$LF_RUN/export.cache"; cache="$LF_RUN/export.cache"; }
 	shared="$G_DATA/shared.cache"
 	[ -f "$shared" ] || { : > "$LF_RUN/export.shared"; shared="$LF_RUN/export.shared"; }
+	builtin="$LF_SHARE/servers.txt"
+	[ -f "$builtin" ] || { : > "$LF_RUN/export.builtin"; builtin="$LF_RUN/export.builtin"; }
 	lfawk export -v when="$(date '+%Y-%m-%d %H:%M' 2>/dev/null) - LobbyFence $LF_VERSION" \
-		"$cache" "$LF_RUN/export.names" "$LF_RUN/export.pairs" "$shared"
-	rm -f "$LF_RUN/export.names" "$LF_RUN/export.pairs" "$LF_RUN/export.cache" "$LF_RUN/export.shared"
+		"$cache" "$LF_RUN/export.names" "$LF_RUN/export.pairs" "$shared" "$builtin"
+	rm -f "$LF_RUN/export.names" "$LF_RUN/export.pairs" "$LF_RUN/export.cache" "$LF_RUN/export.shared" "$LF_RUN/export.builtin"
 }
 
 # ------------------------------------------------- sending found servers to LobbyFence

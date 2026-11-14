@@ -174,9 +174,15 @@ printf '8.8.8.8 37.75 -97.82 US 100\n1.1.1.1 - - -- 100\n9.9.9.9 47.1 8.5 CH 100
 printf 'fortnite Fortnite EU\nfortnite Second zone\napex Apex\n' > /tmp/lf_gn.$$
 printf 'fortnite 8.8.8.8 500\nfortnite 1.1.1.1 500\napex 9.9.9.9 600\nfortnite 8.8.8.8 500\n' > /tmp/lf_gp.$$
 printf '4.4.4.4 10 20 FR 50 cod\n8.8.8.8 37.75 -97.82 US 50 fortnite\n' > /tmp/lf_gs.$$
-t "export: located servers by game (first zone's name), unlocated left out, imported ones kept with their game" \
-	"lobbyfence-servers 1|game fortnite Fortnite EU|8.8.8.8 37.75 -97.82 US 500|game apex Apex|9.9.9.9 47.1 8.5 CH 600|game cod|4.4.4.4 10 20 FR 50 imported|" \
+t "export: located servers by game (first zone's name), unlocated left out, imported ones kept with their game - still imported once a zone has one" \
+	"lobbyfence-servers 1|game fortnite Fortnite EU|8.8.8.8 37.75 -97.82 US 500 imported|game apex Apex|9.9.9.9 47.1 8.5 CH 600|game cod|4.4.4.4 10 20 FR 50 imported|" \
 	"$(ra export /tmp/lf_gc.$$ /tmp/lf_gn.$$ /tmp/lf_gp.$$ /tmp/lf_gs.$$ | grep -v '^#' | tr '\n' '|')"
+printf '# the list LobbyFence comes with\nlobbyfence-servers 1\ngame apex Apex Legends\n9.9.9.9 47.1 8.5 CH 1\ngame cod Call of Duty\n8.8.8.8 1 1 US 1\n' > /tmp/lf_gb.$$
+t "export: a zone's server from the list LobbyFence comes with is marked builtin (that game's list only)" \
+	"lobbyfence-servers 1|game fortnite Fortnite EU|8.8.8.8 37.75 -97.82 US 500 imported|game apex Apex|9.9.9.9 47.1 8.5 CH 600 builtin|game cod|4.4.4.4 10 20 FR 50 imported|" \
+	"$(ra export /tmp/lf_gc.$$ /tmp/lf_gn.$$ /tmp/lf_gp.$$ /tmp/lf_gs.$$ /tmp/lf_gb.$$ | grep -v '^#' | tr '\n' '|')"
+t "export: each game and address once, whatever it came from" "" \
+	"$(ra export /tmp/lf_gc.$$ /tmp/lf_gn.$$ /tmp/lf_gp.$$ /tmp/lf_gs.$$ /tmp/lf_gb.$$ | awk '$1 == "game" { g = $2; next } /^[0-9]/ { print g, $1 }' | sort | uniq -d)"
 t "export: says what the file is (comments for whoever opens it)" "yes" \
 	"$(ra export -v when=today /tmp/lf_gc.$$ /tmp/lf_gn.$$ /tmp/lf_gp.$$ /tmp/lf_gs.$$ | grep -q '^# exported today' && echo yes)"
 t "shared_in: checked line by line - private, off-globe, broken and future-dated entries" \
@@ -192,8 +198,12 @@ t "shared_merge: one line per game and address, the newest wins, counts the new 
 	"8.8.8.8 2 2 US 20 fortnite|8.8.8.8 3 3 US 5 apex|1" \
 	"$(ra shared_merge -v statf=/tmp/lf_st.$$ /tmp/lf_m1.$$ /tmp/lf_m2.$$ | tr '\n' '|')$(cat /tmp/lf_st.$$)"
 printf '45.10.0.1 51 0 GB 100 apex own\n' > /tmp/lf_o1.$$; printf '45.10.0.1 51 0 GB 200 apex\n80.1.1.1 1 1 US 50 apex own\n' > /tmp/lf_o2.$$
-t "shared_merge: found by this router stays marked, even when an import is newer" "45.10.0.1 51 0 GB 200 apex own|80.1.1.1 1 1 US 50 apex own|1" \
+t "shared_merge: a server this router had found, then imported: counts as imported from then on" "45.10.0.1 51 0 GB 200 apex|80.1.1.1 1 1 US 50 apex own|1" \
 	"$(ra shared_merge -v statf=/tmp/lf_st.$$ /tmp/lf_o1.$$ /tmp/lf_o2.$$ | tr '\n' '|')$(cat /tmp/lf_st.$$)"
+printf '45.10.0.1 51 0 GB 100 apex\n' > /tmp/lf_o3.$$; printf '45.10.0.1 51 0 GB 300 apex own\n' > /tmp/lf_o4.$$
+t "shared_merge: an imported server kept again by this router (its zone changed game) stays imported" "45.10.0.1 51 0 GB 300 apex|0" \
+	"$(ra shared_merge -v statf=/tmp/lf_st.$$ /tmp/lf_o3.$$ /tmp/lf_o4.$$ | tr '\n' '|')$(cat /tmp/lf_st.$$)"
+rm -f /tmp/lf_o3.$$ /tmp/lf_o4.$$
 t "export: kept servers found by this router are not marked imported" "lobbyfence-servers 1|game apex|45.10.0.1 51 0 GB 100|" \
 	"$(: > /tmp/lf_e0.$$; ra export /tmp/lf_e0.$$ /tmp/lf_e0.$$ /tmp/lf_e0.$$ /tmp/lf_o1.$$ | grep -v '^#' | tr '\n' '|')"
 rm -f /tmp/lf_o1.$$ /tmp/lf_o2.$$ /tmp/lf_e0.$$
