@@ -2406,10 +2406,19 @@ return view.extend({
 			var els = document.elementsFromPoint ? document.elementsFromPoint(x, y) : [];
 			return els.length > 0 && els.every(function(e) { return e === de || e === document.body || e.contains(app); });
 		}
+		/* how far the page can grow to one side: up to the window's edge (or what
+		   would cut it off), and only as far as nothing else is there */
 		function side(room, dir) {
-			room = Math.min(Math.max(0, Math.floor(room - pad)), Math.max(0, Math.floor((most - r.width) / 2)));
-			var edge = dir < 0 ? r.left : r.right;
-			return room >= 30 && free(edge + dir * 8) && free(edge + dir * room / 2) && free(edge + dir * room) ? room : 0;
+			var edge = dir < 0 ? r.left : r.right, grow = Math.max(0, Math.floor((most - r.width) / 2)), step = 8;
+			var far = Math.min(Math.max(0, Math.floor(room)), grow + pad);
+			for (var d = step; d < far; d += step) {
+				if (!free(edge + dir * d)) {
+					far = d - step;
+					break;
+				}
+			}
+			room = Math.min(far - pad, grow);
+			return room >= 30 ? room : 0;
 		}
 		set(side(r.left - lo, -1) + 'px', side(hi - r.right, 1) + 'px');
 	},
