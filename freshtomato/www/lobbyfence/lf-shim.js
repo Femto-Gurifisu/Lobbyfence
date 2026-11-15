@@ -370,6 +370,10 @@ var ui = {
 		}
 		dlg = ov.firstChild;
 		dlg.innerHTML = '';
+		/* (as LuCI: any further arguments are classes for this window only) */
+		dlg.className = 'modal';
+		for (var i = 2; i < arguments.length; i++)
+			dlg.classList.add(arguments[i]);
 		if (title) dlg.appendChild(E('h4', {}, [ String(title) ]));
 		append(dlg, children);
 		document.body.classList.add('modal-overlay-active');
