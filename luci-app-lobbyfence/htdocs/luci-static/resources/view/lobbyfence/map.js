@@ -1014,14 +1014,15 @@ function samePorts(a, b) {
 	return !!a && !!b && a.either === b.either && a.list.slice().sort().join(' ') === b.list.slice().sort().join(' ');
 }
 
-/* The ports a device type is filtered on in a zone: what the zone has for it
-   (the type's own, or the zone's for the zone's type - maybe narrowed with
-   Ports…), else the game's ports on that type, or the zone's when the game
-   uses the same ports on every device type: { either, list }. first: the type
-   the zone's ports are for when the zone names none. */
+/* The ports a device type is filtered on in a zone: { either, list }. A type
+   the zone has devices of: its own ports, else the zone's - as the router
+   filters it (maybe narrowed with Ports…). A type the zone has no device of
+   yet: the game's ports on that type - or the zone's, when that is the type
+   the zone's ports are for or the game uses the same ports on every device
+   type. first: the type the zone's ports are for when the zone names none. */
 function zoneTypePorts(sec, preset, type, first) {
-	var own = typePorts(sec, type), cur = (sec || {}).platform || zoneTypes(sec)[0] || first || '';
-	if (own.own || !type || type === cur || !preset || !preset.platforms)
+	var own = typePorts(sec, type), cur = (sec || {}).platform || first || '';
+	if (own.own || !type || type === cur || !preset || !preset.platforms || zoneTypes(sec).indexOf(type) >= 0)
 		return { either: own.either, list: own.list };
 	return presetPorts(preset, type);
 }
@@ -5572,7 +5573,6 @@ return view.extend({
 
 	/* ----------------------------------------------------- new zone */
 
-	/* the preset the zone uses: stored, or recognised from its protocol and ports */
 	/* the zone's ports differ from its game preset's (narrowed with Ports seen) */
 	portsNarrowed: function(p, zone) {
 		var sec = uci.get('lobbyfence', zone || this.zone) || {};
@@ -5588,6 +5588,7 @@ return view.extend({
 		});
 	},
 
+	/* the preset the zone uses: stored, or recognised from its protocol and ports */
 	zonePreset: function(zone) {
 		var z = zone || this.zone, sec = uci.get('lobbyfence', z) || {}, p = presetById(sec.game);
 		if (p)
@@ -5896,6 +5897,8 @@ return view.extend({
 		   ports on every device type): what is typed in a field stays while its type does */
 		function portFields() {
 			var base = presetById(game.value) || old, types = base.platforms ? typesNow(base) : [ '' ], next = {};
+			/* (one field for several device types: it says whose ports these are) */
+			var shared = base.platforms ? [] : typesNow(base).filter(Boolean);
 			portsBox.innerHTML = '';
 			types.forEach(function(t) {
 				var f = fields[t];
@@ -5909,7 +5912,8 @@ return view.extend({
 				next[t] = f;
 				portsBox.appendChild(E('div', { 'class': 'lf-cg-portsrow', 'style': 'margin:.6em 0' }, [
 					E('label', { 'style': 'display:block;font-weight:bold;margin-bottom:.2em' },
-						(f.either ? _('Game ports (either side)') : _('Game server ports')) + (types.length > 1 ? ' · ' + platformName(t) : '')),
+						(f.either ? _('Game ports (either side)') : _('Game server ports')) +
+							(types.length > 1 ? ' · ' + platformName(t) : shared.length > 1 ? ' · ' + shared.map(platformName).join(' + ') : '')),
 					f.area
 				]));
 			});

@@ -24,7 +24,9 @@ https://github.com/user-attachments/assets/8853105d-9a10-4cfd-ab1b-c39192d5d10d
   service is running, and tests the geolocation API on demand.
 * Click any server on the map to **always allow** or **always block** it - the
   change takes effect on the router at once, no Save & Apply needed.
-* Full-screen map view, optionally without the side panel.
+* Full-screen map view, optionally without the side panel. On a wide screen
+  the page uses the room LuCI's themes leave empty next to their narrow column
+  (up to 1800 pixels), and the side panel grows with it.
 * Click a circle or polygon to select it, press **Delete** to remove it, or
   drag it to move it.
 * **Home:** set your location by ZIP / postal code, place name or street
@@ -215,7 +217,7 @@ above the map, with the steps for your browser); the icon opens straight to
 the map.
 
 **Which version do I have?** The map page's Status section shows it next to
-its heading - *LobbyFence 1.4.0 · up to date*, or *version 1.4.1 is out -
+its heading - *LobbyFence 1.4.1 · up to date*, or *version 1.4.2 is out -
 update* with a link to the latest release. To know that, your
 browser (not the router) asks GitHub for the newest release, at most twice a
 day; nothing else is sent. From the command line: `lobbyfence version`.
@@ -680,7 +682,7 @@ players inside your region get through. The game may check a few opponents at
 once before a match, so *Open for server tests* stays off for these as well.
 
 **Games whose match ports aren't known yet** (ARC Raiders, Battlefield series,
-Dead by Daylight, EA SPORTS FC 26, Marvel Rivals, PUBG: BATTLEGROUNDS) start
+Dead by Daylight, EA SPORTS FC 26, Marvel Rivals, PUBG: BATTLEGROUNDS, THE FINALS) start
 with every UDP port, like *Any game*. After a few matches, **Ports…** shows the
 ports the game really used: keep those, and the device's other traffic (voice
 chat, other games) is left alone. **Roblox** uses its own wide range
@@ -691,8 +693,12 @@ like) use too.
 *Change…* button. Pick another preset to switch the zone to that game's
 ports, protocol and *Open for server tests* value. You can rename the zone to
 match. The devices, the region and the learned servers stay. A zone with
-several devices shows a type for each: each type gets the new game's ports on
-it. Press Save & Apply afterwards.
+several devices shows a type for each, and a ports field for each type in use
+(*Game server ports · PC*, *Game server ports · PlayStation*): each starts with
+the ports that type is filtered on now - or, after picking another game, that
+game's ports on it - and what you type in one changes that type only. A game
+with the same ports on every device type has one field, named for the types
+it covers. Press Save & Apply afterwards.
 
 ### A PC and a console in one zone
 
@@ -704,10 +710,13 @@ what each one is. **Each device is filtered on its own type's ports**: a
 PlayStation added to an Apex Legends zone set up for a PC gets Apex Legends'
 PlayStation ports, and the PC keeps the PC's. (Before, the zone's one device
 type decided the ports for every device in it, so the second device was
-filtered on the first one's ports.) The panel shows the types next to the game
-(*Apex Legends · PC + PlayStation*) and next to each device. Games that use
-the same ports on every device type (Call of Duty, say) keep one set of ports
-for all of them.
+filtered on the first one's ports.) The ports are not shared: the router keeps
+a list for each type and matches each device's packets against its own. The
+window shows them - under every device, the ports it is filtered on - and so
+does the panel: the types next to the game (*Apex Legends · PC + PlayStation*),
+a line for each device with its type, and its ports when you point at it.
+Games that use the same ports on every device type (Call of Duty, say) keep
+one set of ports for all of them, and the windows say so.
 
 **Ports…** keeps each type's ports apart: a zone with a type on ports of its
 own shows a *Devices* choice at the top - pick whose ports to see and narrow.
@@ -881,7 +890,8 @@ games.
   this router had found already.
 
 LobbyFence also comes with a list of known **Apex Legends**, **Call of
-Duty**, **Battlefield** and **Fortnite** servers and where they are (`/usr/share/lobbyfence/servers.txt`, the
+Duty**, **THE FINALS**, **Fortnite**, **Battlefield** and **Roblox** servers
+and where they are (`/usr/share/lobbyfence/servers.txt`, the
 same format as a servers file). The Servers file window lists them under
 **Comes with LobbyFence**, by game (read-only: they are part of LobbyFence);
 from the command line, `lobbyfence builtin-servers`. A router that sees one

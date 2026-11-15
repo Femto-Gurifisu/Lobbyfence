@@ -1278,8 +1278,9 @@ def main():
         cg.locator(".lf-cg-platform").nth(1).select_option("ps")
         cg.locator(".lf-cg-game").select_option("cod")
         areas = page.evaluate("[...document.querySelectorAll('#modal .lf-cg-ports')].map(a => [a.dataset.type, a.value])")
-        check("a game with the same ports on every type: one field for all", areas == [["", "3074-3079"]]
-              and cg.locator(".lf-cg-portsrow label").all_inner_texts() == ["Game ports (either side)"], areas)
+        check("a game with the same ports on every type: one field for all, named for both types", areas == [["", "3074-3079"]]
+              and cg.locator(".lf-cg-portsrow label").all_inner_texts() == ["Game ports (either side) · PC + PlayStation"],
+              [areas, cg.locator(".lf-cg-portsrow label").all_inner_texts()])
         cg.locator(".lf-cg-apply").click()
         z = page.evaluate("z => uciState[z]", zid)
         check("...the types stay, no ports of a type's own",
@@ -1298,6 +1299,25 @@ def main():
         page.locator("#modal .lf-cg-apply").click()
         z = page.evaluate("z => uciState[z]", zid)
         check("...and each type gets them", z.get("remote_port") == APEX_PC and z.get("remote_port_ps") == APEX_PS, z)
+        # a type without ports of its own is filtered on the zone's ports (the router does that): shown so, and kept so
+        page.evaluate("""z => { const s = uciState[z]; window.__keepPs = s.remote_port_ps; window.__keepPc = s.remote_port;
+            delete s.remote_port_ps; s.remote_port = [ '7700-7799' ]; window.view.renderStatus(); }""", zid)
+        titles = page.evaluate("[...document.querySelectorAll('.lf-zonedev')].map(e => e.title)")
+        check("a type that shares the zone's ports: the status shows the zone's ports for it (not the game's for that type)",
+              titles == ["Server ports: 7700-7799", "Server ports: 7700-7799"], titles)
+        page.locator(".lf-changegame").click()
+        areas = page.evaluate("[...document.querySelectorAll('#modal .lf-cg-ports')].map(a => [a.dataset.type, a.value])")
+        check("...Change game too", areas == [["pc", "7700-7799"], ["ps", "7700-7799"]], areas)
+        page.locator("#modal").get_by_role("button", name="Cancel").click()
+        page.locator(".lf-devsbtn").click()
+        page.wait_for_function("document.querySelectorAll('#modal .lf-devs-row').length === 2")
+        check("...and Devices…", page.locator("#modal .lf-devs-ports").all_inner_texts() == ["Server ports: 7700-7799", "Server ports: 7700-7799"],
+              page.locator("#modal .lf-devs-ports").all_inner_texts())
+        page.locator("#modal .lf-devs-save").click()
+        z = page.evaluate("z => uciState[z]", zid)
+        check("...Save leaves its ports as they are", z.get("remote_port") == ["7700-7799"] and "remote_port_ps" not in z
+              and z.get("device_type") == ["aa:bb:cc:dd:ee:02=ps"], z)
+        page.evaluate("z => { const s = uciState[z]; s.remote_port_ps = window.__keepPs; s.remote_port = window.__keepPc; window.view.renderStatus(); }", zid)
         # the PC out: the PlayStation is the zone's only device, on its ports
         page.locator(".lf-devsbtn").click()
         page.wait_for_function("document.querySelectorAll('#modal .lf-devs-row').length === 2")
