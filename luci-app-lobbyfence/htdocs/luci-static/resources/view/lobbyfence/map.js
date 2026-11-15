@@ -483,6 +483,17 @@ function satelliteStyle(base) {
 var STYLE_CSS = [
 	'.lf-app{background:var(--lf-bg);color:var(--lf-text);border:1px solid var(--lf-border);border-radius:10px;padding:12px;font-size:14px;line-height:1.4}',
 	'.lf-app *{box-sizing:border-box}',
+	/* a wide screen in a theme that keeps the page in a narrow column: the map page
+	   takes the free room next to it too (fitWide measures it) */
+	'.lf-app:not(.lf-full){margin-left:calc(-1*var(--lf-wide-l,0px));margin-right:calc(-1*var(--lf-wide-r,0px))}',
+	/* windows with a row for each device: wider than the theme's, where there is room */
+	'#modal_overlay .modal.lf-modal-wide{max-width:min(820px,calc(100vw - 24px))}',
+	'.lf-devrow{display:flex;gap:.6em;align-items:center;flex-wrap:wrap;margin:.45em 0 0}',
+	'.lf-devrow .lf-devname{flex:1 1 12em;min-width:0;overflow-wrap:anywhere}',
+	'.lf-devrow>select{flex:0 0 auto;width:auto!important;max-width:100%}',
+	'.lf-devrow>button{flex:0 0 auto}',
+	'.lf-devports{font-size:90%;opacity:.8;margin:.15em 0 .5em;overflow-wrap:anywhere}',
+	'.lf-ports-area{display:block;width:100%;box-sizing:border-box;min-height:2.4em;resize:vertical;font:inherit;line-height:1.45;overflow-wrap:anywhere}',
 	'.lf-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}',
 	'.lf-spacer{flex:1}',
 	'.lf-savebar{display:none;gap:6px;align-items:center}',
@@ -524,7 +535,7 @@ var STYLE_CSS = [
 	/* the panel: wide enough for its rows (the server-test setting on one line,
 	   the status buttons in one row) with a scrollbar too - the scrollbar's room
 	   is kept, so the rows don't move when the panel starts or stops scrolling */
-	'.lf-body{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:12px}',
+	'.lf-body{display:grid;grid-template-columns:minmax(0,1fr) clamp(360px,27%,460px);gap:12px}',
 	'@media (max-width:960px){.lf-body{grid-template-columns:minmax(0,1fr)}.lf-panel{height:auto!important}}',
 	'.lf-mapwrap{position:relative;height:72vh;min-height:440px;border-radius:8px;overflow:hidden;border:1px solid var(--lf-border);background:var(--lf-panel)}',
 	'.lf-panel{display:flex;flex-direction:column;height:72vh;min-height:440px;scrollbar-gutter:stable;background:var(--lf-panel);border:1px solid var(--lf-border);border-radius:8px;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--lf-border) transparent}',
@@ -1003,6 +1014,36 @@ function samePorts(a, b) {
 	return !!a && !!b && a.either === b.either && a.list.slice().sort().join(' ') === b.list.slice().sort().join(' ');
 }
 
+/* The ports a device type is filtered on in a zone: { either, list }. A type
+   the zone has devices of: its own ports, else the zone's - as the router
+   filters it (maybe narrowed with Ports…). A type the zone has no device of
+   yet: the game's ports on that type - or the zone's, when that is the type
+   the zone's ports are for or the game uses the same ports on every device
+   type. first: the type the zone's ports are for when the zone names none. */
+function zoneTypePorts(sec, preset, type, first) {
+	var own = typePorts(sec, type), cur = (sec || {}).platform || first || '';
+	if (own.own || !type || type === cur || !preset || !preset.platforms || zoneTypes(sec).indexOf(type) >= 0)
+		return { either: own.either, list: own.list };
+	return presetPorts(preset, type);
+}
+
+function portsText(p) {
+	return (p.either ? _('Ports (either side)') : _('Server ports')) + ': ' + (p.list.length ? p.list.join(', ') : _('none'));
+}
+
+/* a field for a list of ports that shows all of them: it grows with its lines */
+function portsArea(cls) {
+	var ta = E('textarea', { 'class': 'cbi-input-textarea lf-ports-area ' + cls, 'rows': 1, 'spellcheck': 'false', 'autocapitalize': 'off', 'autocomplete': 'off' });
+	ta.lfGrow = function() {
+		if (!ta.offsetParent)
+			return;
+		ta.style.height = 'auto';
+		ta.style.height = (ta.scrollHeight + 2) + 'px';
+	};
+	ta.addEventListener('input', ta.lfGrow);
+	return ta;
+}
+
 /* The device types in use in a zone, each once, in the order of their devices */
 function zoneTypes(sec) {
 	var seen = {};
@@ -1193,18 +1234,28 @@ function pageList(sel) {
 	function place() {
 		var r = sel.getBoundingClientRect(), m = 8, gap = 3;
 		var vw = window.innerWidth || document.documentElement.clientWidth, vh = window.innerHeight || document.documentElement.clientHeight;
-		var w = Math.min(Math.max(r.width, 180), vw - 2 * m);
-		box.style.width = w + 'px';
 		box.style.maxHeight = 'none';
 		box.style.left = box.style.top = '0px';
+		/* as wide as its longest line needs, the field's width at least: a narrow
+		   field (a device type next to a device) must not cut its choices off */
+		box.style.width = 'max-content';
+		var w = Math.min(Math.max(r.width, 180, Math.ceil(box.getBoundingClientRect().width) + 1), vw - 2 * m);
+		box.style.width = w + 'px';
 		/* where 0,0 ends up: the list's frame of reference (the page, or a dialog layer) */
-		var o = box.getBoundingClientRect(), natural = box.offsetHeight;
+		var o = box.getBoundingClientRect(), natural = box.offsetHeight, edge = box.offsetWidth - box.clientWidth;
 		var below = vh - r.bottom - gap - m, above = r.top - gap - m;
 		var down = below >= Math.min(natural, 240) || below >= above;
 		var h = Math.min(natural, Math.max(Math.min(480, Math.round(vh * 0.6)), 160), Math.max(down ? below : above, Math.min(120, vh - 2 * m)));
 		var x = Math.min(Math.max(m, r.left), vw - w - m);
 		var y = Math.max(m, Math.min(down ? r.bottom + gap : r.top - gap - h, vh - m - h));
 		box.style.maxHeight = h + 'px';
+		/* (a list that scrolls: room for its scrollbar next to the lines) */
+		var bar = box.offsetWidth - box.clientWidth - edge;
+		if (bar > 0) {
+			w = Math.min(w + bar, vw - 2 * m);
+			box.style.width = w + 'px';
+			x = Math.min(Math.max(m, r.left), vw - w - m);
+		}
 		box.style.left = Math.round(x - o.left) + 'px';
 		box.style.top = Math.round(y - o.top) + 'px';
 	}
@@ -1738,12 +1789,13 @@ function loadDevices(hintsOnly) {
 		} catch (e) {}
 		var hints = r[1];
 		if (hints && hints.getMACHints) {
+			/* (asked with the address as LuCI has it - capitals: its tables go by that) */
 			hints.getMACHints(false).forEach(function(h) {
 				var e = get(h[0]);
 				if (!e) return;
-				e.name = e.name || hints.getHostnameByMACAddr(e.mac) || '';
-				add(e.ipv4, hints.getIPAddrByMACAddr(e.mac));
-				if (hints.getIP6AddrByMACAddr) add(e.ipv6, hints.getIP6AddrByMACAddr(e.mac));
+				e.name = e.name || hints.getHostnameByMACAddr(h[0]) || '';
+				add(e.ipv4, hints.getIPAddrByMACAddr(h[0]));
+				if (hints.getIP6AddrByMACAddr) add(e.ipv6, hints.getIP6AddrByMACAddr(h[0]));
 			});
 		}
 		return order.map(function(m) { return byMac[m]; }).filter(function(d) {
@@ -1806,7 +1858,7 @@ var RELEASES_URL = 'https://github.com/Femto-Gurifisu/Lobbyfence/releases/latest
  * servers in these data-centre networks are sent - never a player's own address,
  * which peer-to-peer games show too - and only for the games below. A copy of
  * files/usr/share/lobbyfence/server-networks.txt (tests/safety_static.py checks that they match). */
-var SERVER_NETWORKS = '45.32.0.0/16 45.63.0.0/16 45.76.0.0/15 64.176.0.0/15 64.237.32.0/19 65.20.96.0/19 66.42.32.0/19 66.42.64.0/18 66.135.0.0/19 78.141.192.0/18 80.240.16.0/20 95.179.128.0/17 104.156.224.0/19 104.207.128.0/19 104.238.128.0/18 107.191.32.0/19 108.61.0.0/16 136.244.64.0/18 137.220.32.0/19 139.84.128.0/17 139.180.128.0/18 140.82.0.0/18 144.202.0.0/17 149.28.0.0/16 149.248.0.0/18 155.138.128.0/17 158.247.192.0/18 167.179.64.0/18 173.199.64.0/18 192.248.144.0/20 198.13.32.0/19 199.247.0.0/19 202.182.96.0/19 207.148.0.0/17 207.246.64.0/18 208.167.224.0/19 208.85.16.0/21 209.222.0.0/19 216.128.128.0/19 216.238.64.0/18 217.69.0.0/20 96.30.192.0/20 34.0.0.0/15 34.18.0.0/16 34.48.0.0/16 34.51.0.0/16 34.64.0.0/10 34.128.0.0/10 35.184.0.0/13 35.192.0.0/11 35.224.0.0/12 35.240.0.0/13 136.70.128.0/17 3.0.0.0/8 13.32.0.0/11 13.112.0.0/12 13.184.0.0/14 13.200.0.0/13 13.208.0.0/12 13.224.0.0/11 15.128.0.0/10 15.220.0.0/14 15.228.0.0/15 15.236.0.0/15 16.24.0.0/16 16.162.0.0/15 16.170.0.0/15 18.88.0.0/16 18.128.0.0/9 32.190.0.0/16 34.240.0.0/13 35.42.0.0/16 35.72.0.0/13 35.80.0.0/12 35.152.0.0/13 35.160.0.0/13 43.192.0.0/10 44.192.0.0/10 51.20.0.0/16 51.84.0.0/16 52.0.0.0/10 52.88.0.0/13 52.192.0.0/11 54.0.0.0/8 63.176.0.0/15 63.183.0.0/16 78.12.0.0/15 95.40.0.0/15 107.20.0.0/14 184.32.0.0/14 184.192.0.0/13 216.244.0.0/18 155.133.224.0/19 162.254.192.0/21 146.66.152.0/21 185.25.180.0/22 103.10.124.0/23 103.28.54.0/23 205.196.6.0/24 45.121.184.0/22 128.116.0.0/17 103.43.72.0/24 189.1.164.0/24 95.141.40.0/24 185.34.107.0/24 212.102.63.0/24 89.222.108.0/24 89.222.117.0/24 152.233.52.0/24 216.198.196.0/24 216.198.246.0/24 208.76.222.0/24';
+var SERVER_NETWORKS = '45.32.0.0/16 45.63.0.0/16 45.76.0.0/15 64.176.0.0/15 64.237.32.0/19 65.20.96.0/19 66.42.32.0/19 66.42.64.0/18 66.135.0.0/19 78.141.192.0/18 80.240.16.0/20 95.179.128.0/17 104.156.224.0/19 104.207.128.0/19 104.238.128.0/18 107.191.32.0/19 108.61.0.0/16 136.244.64.0/18 137.220.32.0/19 139.84.128.0/17 139.180.128.0/18 140.82.0.0/18 144.202.0.0/17 149.28.0.0/16 149.248.0.0/18 155.138.128.0/17 158.247.192.0/18 167.179.64.0/18 173.199.64.0/18 192.248.144.0/20 198.13.32.0/19 199.247.0.0/19 202.182.96.0/19 207.148.0.0/17 207.246.64.0/18 208.167.224.0/19 208.85.16.0/21 209.222.0.0/19 216.128.128.0/19 216.238.64.0/18 217.69.0.0/20 96.30.192.0/20 34.0.0.0/15 34.18.0.0/16 34.48.0.0/16 34.51.0.0/16 34.64.0.0/10 34.128.0.0/10 35.184.0.0/13 35.192.0.0/11 35.224.0.0/12 35.240.0.0/13 136.70.128.0/17 8.234.24.0/21 8.234.128.0/17 8.235.0.0/17 34.6.0.0/15 34.9.0.0/16 34.11.0.0/17 34.12.0.0/16 34.13.128.0/17 34.14.0.0/17 34.14.128.0/18 34.20.128.0/17 34.21.0.0/17 34.21.128.0/17 34.26.0.0/16 34.32.128.0/17 34.34.0.0/17 34.38.0.0/16 34.39.128.0/17 34.53.128.0/17 34.55.0.0/16 34.56.0.0/14 34.62.0.0/16 104.154.32.0/19 104.196.0.0/18 104.196.96.0/19 104.196.128.0/18 104.199.128.0/18 130.211.64.0/19 136.64.0.0/15 136.66.0.0/15 136.70.64.0/18 136.71.0.0/16 136.90.0.0/16 136.107.0.0/16 136.108.0.0/16 136.111.0.0/16 136.112.0.0/14 136.116.0.0/16 192.158.28.0/22 207.175.0.0/16 3.0.0.0/8 13.32.0.0/11 13.112.0.0/12 13.184.0.0/14 13.200.0.0/13 13.208.0.0/12 13.224.0.0/11 15.128.0.0/10 15.220.0.0/14 15.228.0.0/15 15.236.0.0/15 16.24.0.0/16 16.162.0.0/15 16.170.0.0/15 18.88.0.0/16 18.128.0.0/9 32.190.0.0/16 34.240.0.0/13 35.42.0.0/16 35.72.0.0/13 35.80.0.0/12 35.152.0.0/13 35.160.0.0/13 43.192.0.0/10 44.192.0.0/10 51.20.0.0/16 51.84.0.0/16 52.0.0.0/10 52.88.0.0/13 52.192.0.0/11 54.0.0.0/8 63.176.0.0/15 63.183.0.0/16 78.12.0.0/15 78.14.0.0/15 95.40.0.0/15 107.20.0.0/14 184.32.0.0/14 184.192.0.0/13 216.244.0.0/18 155.133.224.0/19 162.254.192.0/21 146.66.152.0/21 185.25.180.0/22 103.10.124.0/23 103.28.54.0/23 205.196.6.0/24 45.121.184.0/22 128.116.0.0/17 103.43.72.0/24 189.1.164.0/24 95.141.40.0/24 185.34.107.0/24 212.102.63.0/24 89.222.108.0/24 89.222.117.0/24 152.233.52.0/24 216.198.196.0/24 216.198.246.0/24 208.76.222.0/24';
 /* not sent: peer-to-peer games (like the fighting games: players, not servers) and
    Minecraft (players' and communities' own servers) */
 var NOT_SHARED_GAMES = [ 'gta', 'minecraft' ];
@@ -2145,6 +2197,8 @@ return view.extend({
 		this.showZone(this.zoneSelect.value || null);
 
 		document.addEventListener('keydown', function(ev) { self.onKey(ev); });
+		window.addEventListener('resize', function() { self.fitWide(); });
+		this.waitForAttach().then(function() { self.fitWide(); });
 		[ 'fullscreenchange', 'webkitfullscreenchange' ].forEach(function(t) {
 			document.addEventListener(t, function() {
 				var fsEl = document.fullscreenElement || document.webkitFullscreenElement;
@@ -2318,7 +2372,56 @@ return view.extend({
 		this.fullButton.classList.toggle('lf-on', this.full);
 		this.fullButton.textContent = this.full ? _('Exit full screen') : _('Full screen');
 		document.body.style.overflow = this.full ? 'hidden' : '';
-		window.setTimeout(function() { if (self.map) self.map.resize(); }, 60);
+		window.setTimeout(function() { self.fitWide(); if (self.map) self.map.resize(); }, 60);
+	},
+
+	/* On a wide screen LuCI's themes keep the page in a narrow column and leave
+	   the rest of the window empty: the map page takes that room too (up to
+	   1800 pixels) - as far as the window goes, nothing would cut it off and
+	   nothing else is there (a menu at the side stays clear). The panel grows
+	   with it. The other firmwares' pages are as wide as the window already. */
+	fitWide: function() {
+		var app = this.app, de = document.documentElement, st = app && app.style;
+		if (!app || !document.body.contains(app) || app.classList.contains('lf-full') ||
+		    document.body.classList.contains('modal-overlay-active'))
+			return;
+		var was = [ st.getPropertyValue('--lf-wide-l'), st.getPropertyValue('--lf-wide-r') ];
+		function set(l, r) {
+			st.setProperty('--lf-wide-l', l);
+			st.setProperty('--lf-wide-r', r);
+		}
+		set('0px', '0px');
+		var r = app.getBoundingClientRect(), vh = window.innerHeight || de.clientHeight, pad = 24, most = 1800;
+		/* (not in view: nothing to measure by - as it was) */
+		if (!r.width || r.bottom <= 0 || r.top >= vh)
+			return set(was[0] || '0px', was[1] || '0px');
+		var lo = 0, hi = de.clientWidth, y = (Math.max(r.top, 0) + Math.min(r.bottom, vh)) / 2;
+		for (var n = app.parentNode; n && n !== document.body && n.nodeType === 1; n = n.parentNode) {
+			if (window.getComputedStyle(n).overflowX !== 'visible') {
+				var q = n.getBoundingClientRect();
+				lo = Math.max(lo, q.left);
+				hi = Math.min(hi, q.right);
+			}
+		}
+		function free(x) {
+			var els = document.elementsFromPoint ? document.elementsFromPoint(x, y) : [];
+			return els.length > 0 && els.every(function(e) { return e === de || e === document.body || e.contains(app); });
+		}
+		/* how far the page can grow to one side: up to the window's edge (or what
+		   would cut it off), and only as far as nothing else is there */
+		function side(room, dir) {
+			var edge = dir < 0 ? r.left : r.right, grow = Math.max(0, Math.floor((most - r.width) / 2)), step = 8;
+			var far = Math.min(Math.max(0, Math.floor(room)), grow + pad);
+			for (var d = step; d < far; d += step) {
+				if (!free(edge + dir * d)) {
+					far = d - step;
+					break;
+				}
+			}
+			room = Math.min(far - pad, grow);
+			return room >= 30 ? room : 0;
+		}
+		set(side(r.left - lo, -1) + 'px', side(hi - r.right, 1) + 'px');
 	},
 
 	setPanel: function(show, initial) {
@@ -2725,7 +2828,7 @@ return view.extend({
 		this.updateFullPage();
 		this.updateTouchGestures();
 		document.body.style.overflow = (this.full || this.borderless) ? 'hidden' : '';
-		window.setTimeout(function() { if (self.map) self.map.resize(); }, 60);
+		window.setTimeout(function() { self.fitWide(); if (self.map) self.map.resize(); }, 60);
 	},
 
 	setEndless: function(on) {
@@ -3723,9 +3826,13 @@ return view.extend({
 			/* the devices the zone filters (with their type: PC & console games) */
 			sec.appendChild(E('div', { 'class': 'lf-line lf-zonedevs', 'style': 'margin:6px 0 0' }, [
 				E('span', { 'class': 'lf-muted lf-sm' }, (zdevs.length === 1 ? _('Device') : _('Devices')) + ':'),
-				E('span', { 'class': 'lf-sm lf-zonedevs-list', 'style': 'flex:1;min-width:0;overflow-wrap:anywhere' }, zdevs.length ? zdevs.map(function(d) {
-					return (self.deviceName(d.dev) || d.dev) + (showTypes && d.type ? ' (' + platformName(d.type) + ')' : '');
-				}).join(', ') : _('none')),
+				/* (one a line, each with the ports it is filtered on when pointed at; a
+				   click opens Devices…) */
+				E('span', { 'class': 'lf-sm lf-zonedevs-list', 'style': 'flex:1;min-width:0;overflow-wrap:anywhere;cursor:pointer',
+					'click': function() { self.openDevices(); } }, zdevs.length ? zdevs.map(function(d) {
+					return E('div', { 'class': 'lf-zonedev', 'title': portsText(zoneTypePorts(zsec, gp, showTypes ? d.type : '')) },
+						(self.deviceName(d.dev) || d.dev) + (showTypes && d.type ? ' (' + platformName(d.type) + ')' : ''));
+				}) : _('none')),
 				E('button', { 'class': 'lf-btn lf-sm lf-devsbtn', 'title': _('The devices this zone filters: add one, take one out, say whether each is a PC or a console'),
 					'click': function(ev) { ev.preventDefault(); self.openDevices(); } }, _('Devices…'))
 			]));
@@ -3759,15 +3866,18 @@ return view.extend({
 
 			/* where the device is, and why nothing may show up yet */
 			var devs = z.devices || [], v4 = devs.filter(function(a) { return a.indexOf(':') < 0; });
+			var several = optList((uci.get('lobbyfence', this.zone) || {}).device).length > 1;
 			if (z.macs && !devs.length)
-				sec.appendChild(line(t.blocked, E('span', { 'class': 'lf-warn' },
-					_('Device not seen on the network - is it connected? (looked up by MAC address)')), 'lf-sm'));
+				sec.appendChild(line(t.blocked, E('span', { 'class': 'lf-warn' }, several
+					? _('Devices not seen on the network - are they connected? (looked up by MAC address)')
+					: _('Device not seen on the network - is it connected? (looked up by MAC address)')), 'lf-sm'));
 			else if (devs.length)
-				sec.appendChild(line(t.allowed, (optList((uci.get('lobbyfence', this.zone) || {}).device).length > 1 ? _('Devices at %s') : _('Device at %s')).format(
+				sec.appendChild(line(t.allowed, (several ? _('Devices at %s') : _('Device at %s')).format(
 					(v4.length ? v4.join(', ') : devs[0]) + (devs.length > v4.length && v4.length ? ' ' + _('+ %d IPv6').format(devs.length - v4.length) : '')), 'lf-sm'));
 			if (this.running && !z.packets)
-				sec.appendChild(line(t.unknown, E('span', { 'class': 'lf-warn' },
-					_('No game traffic from this device yet. Play a match - if this stays at 0, the device or the ports are wrong (the "Any game" preset catches everything).')), 'lf-sm'));
+				sec.appendChild(line(t.unknown, E('span', { 'class': 'lf-warn' }, several
+					? _('No game traffic from these devices yet. Play a match - if this stays at 0, the devices or the ports are wrong (the "Any game" preset catches everything).')
+					: _('No game traffic from this device yet. Play a match - if this stays at 0, the device or the ports are wrong (the "Any game" preset catches everything).')), 'lf-sm'));
 		}
 
 		if (st && st.offload && DDWRT)
@@ -5463,7 +5573,6 @@ return view.extend({
 
 	/* ----------------------------------------------------- new zone */
 
-	/* the preset the zone uses: stored, or recognised from its protocol and ports */
 	/* the zone's ports differ from its game preset's (narrowed with Ports seen) */
 	portsNarrowed: function(p, zone) {
 		var sec = uci.get('lobbyfence', zone || this.zone) || {};
@@ -5479,6 +5588,7 @@ return view.extend({
 		});
 	},
 
+	/* the preset the zone uses: stored, or recognised from its protocol and ports */
 	zonePreset: function(zone) {
 		var z = zone || this.zone, sec = uci.get('lobbyfence', z) || {}, p = presetById(sec.game);
 		if (p)
@@ -5733,27 +5843,25 @@ return view.extend({
 		if (!sec)
 			return;
 		var old = this.zonePreset(zone), preset = old;
-		var arr = function(v) { return Array.isArray(v) ? v : (v ? [ v ] : []); };
-		var curPorts = arr(sec.port).length ? arr(sec.port) : arr(sec.remote_port);
 		var game = gameSelect('lf-cg-game');
-		var info = E('div', { 'style': 'font-size:90%;opacity:.8;margin-top:.3em' });
-		/* the device type (PC & console games): one for each device - the first
-		   device's picks the zone's ports, another type gets the game's ports on it */
-		var zdevs = zoneDevices(sec), multi = zdevs.length > 1, oldPorts = {}, oldPlatform = sec.platform;
-		/* (each type's ports now, before anything changes: in the same game a type keeps its own) */
-		zoneTypes(sec).forEach(function(t) { oldPorts[t] = typePorts(sec, t); });
+		var info = E('div', { 'class': 'lf-cg-info', 'style': 'font-size:90%;opacity:.8;margin-top:.3em' });
+		/* the device type (PC & console games): one for each device, and a ports
+		   field for each type in use - a game may use other ports on each */
+		var zdevs = zoneDevices(sec), multi = zdevs.length > 1, oldPorts = {};
+		/* (each type's ports now, before anything changes: while the game stays the
+		   same, a type's field starts with them) */
+		zoneTypes(sec).forEach(function(t) { oldPorts[t] = zoneTypePorts(sec, old, t); });
 		var typeSels = (multi ? zdevs : [ zdevs[0] || { type: sec.platform || '' } ]).map(function() { return platformSelect('lf-cg-platform'); });
 		var platform = typeSels[0];
 		var platformRow = E('div', { 'style': 'margin:.6em 0' }, [ E('label', { 'style': 'display:block;font-weight:bold;margin-bottom:.2em' }, multi ? _('Device types') : _('Device type')) ]
 			.concat(multi ? zdevs.map(function(d, i) {
-				return E('div', { 'class': 'lf-cg-devrow', 'style': 'display:flex;gap:.5em;align-items:center;flex-wrap:wrap;margin:.25em 0' }, [
-					E('span', { 'style': 'flex:1 1 10em;min-width:0;overflow-wrap:anywhere' }, self.deviceName(d.dev) || d.dev),
-					E('div', { 'style': 'flex:0 1 12em;min-width:9em' }, typeSels[i])
+				return E('div', { 'class': 'lf-devrow lf-cg-devrow' }, [
+					E('span', { 'class': 'lf-devname' }, self.deviceLabel(d.dev)),
+					typeSels[i]
 				]);
 			}) : [ platform ])
 			.concat([ E('div', { 'class': 'lf-cg-platinfo', 'style': 'font-size:90%;opacity:.8;margin-top:.3em' }) ]));
-		var ports = E('input', { 'class': 'cbi-input-text lf-cg-ports', 'style': 'width:100%' });
-		var portsLabel = E('label', { 'style': 'display:block;font-weight:bold;margin-bottom:.2em' });
+		var portsBox = E('div', { 'class': 'lf-cg-portsbox' }), fields = {}, gameChanged = false;
 		var proto = protoSelect('lf-cg-proto');
 		var burst = E('input', { 'class': 'cbi-input-text lf-cg-burst', 'type': 'number', 'min': 0, 'max': 10000, 'style': 'width:6em' });
 		var hint = E('div', { 'style': 'font-size:90%;opacity:.8;margin-top:.3em' });
@@ -5768,28 +5876,75 @@ return view.extend({
 		function row(l, fields) {
 			return E('div', { 'style': 'margin:.6em 0' }, [ E('label', { 'style': 'display:block;font-weight:bold;margin-bottom:.2em' }, l) ].concat(fields));
 		}
+		/* the device types picked, each once, in the devices' order ('' while none is,
+		   or for a game that is the same on every device) */
+		function typesNow(base) {
+			var out = [];
+			if (needsPlatform(base))
+				typeSels.forEach(function(x) { if (x.value && out.indexOf(x.value) < 0) out.push(x.value); });
+			return out.length ? out : [ '' ];
+		}
+		/* what a type's field starts with: the zone's ports for it while the game is
+		   the one it had, else the game's ports on that type */
+		function startPorts(base, t) {
+			if (!gameChanged && t && oldPorts[t])
+				return oldPorts[t];
+			if (!gameChanged && (!t || !base.platforms))
+				return typePorts(sec, '');
+			return presetPorts(base, t);
+		}
+		/* a ports field for each type in use (one for all when the game uses the same
+		   ports on every device type): what is typed in a field stays while its type does */
+		function portFields() {
+			var base = presetById(game.value) || old, types = base.platforms ? typesNow(base) : [ '' ], next = {};
+			/* (one field for several device types: it says whose ports these are) */
+			var shared = base.platforms ? [] : typesNow(base).filter(Boolean);
+			portsBox.innerHTML = '';
+			types.forEach(function(t) {
+				var f = fields[t];
+				if (!f) {
+					var w = startPorts(base, t);
+					f = { either: w.either, area: portsArea('lf-cg-ports') };
+					f.area.value = w.list.join(' ');
+					f.area.setAttribute('data-type', t);
+				}
+				f.area.placeholder = base.custom ? _('e.g. 3074 or 30000-45000') : '';
+				next[t] = f;
+				portsBox.appendChild(E('div', { 'class': 'lf-cg-portsrow', 'style': 'margin:.6em 0' }, [
+					E('label', { 'style': 'display:block;font-weight:bold;margin-bottom:.2em' },
+						(f.either ? _('Game ports (either side)') : _('Game server ports')) +
+							(types.length > 1 ? ' · ' + platformName(t) : shared.length > 1 ? ' · ' + shared.map(platformName).join(' + ') : '')),
+					f.area
+				]));
+			});
+			fields = next;
+			types.forEach(function(t) { fields[t].area.lfGrow(); });
+			/* what the game uses on each of them */
+			info.innerHTML = '';
+			(base.platforms && types.length > 1 ? types : [ types[0] ]).forEach(function(t) {
+				info.appendChild(E('div', {}, (base.platforms && types.length > 1 ? platformName(t) + ': ' : '') +
+					presetSummary(needsPlatform(base) ? presetOn(base, t) : base)));
+			});
+		}
 		/* fill in what the chosen game uses; the zone's own values while it is the same game */
 		function fill(first) {
 			var base = presetById(game.value) || old;
 			platformRow.style.display = needsPlatform(base) ? '' : 'none';
 			platformRow.lastChild.textContent = !needsPlatform(base) ? '' : (base.platforms
-				? _('%s uses other ports on each device type.').format(base.name || base.label)
+				? (multi ? _('%s uses other ports on each device type: each device is filtered on its own type\'s ports, below.') : _('%s uses other ports on each device type.')).format(base.name || base.label)
 				: _('Same ports on every device type.'));
 			preset = needsPlatform(base) ? presetOn(base, platform.value) : base;
-			portsLabel.textContent = preset.either ? _('Game ports (either side)') : _('Game server ports');
-			info.textContent = presetSummary(preset);
 			if (first) {
 				proto.value = sec.proto || preset.proto;
-				ports.value = curPorts.join(' ');
 				var bs = sec.burst_servers;
 				burst.value = (bs == null || bs === '') ? '0' : String(bs);
 			}
 			else {
 				proto.value = preset.proto;
-				ports.value = (preset.remote || preset.either || []).join(' ');
 				burst.value = String(preset.burst || 0);
+				fields = {};
 			}
-			ports.placeholder = preset.custom ? _('e.g. 3074 or 30000-45000') : '';
+			portFields();
 			hint.textContent = burstAdvice(preset.burst != null ? preset : null);
 			var newName = preset.custom ? '' : (preset.name != null ? preset.name : preset.label);
 			var wasDefault = !old.custom && (label === old.label || label === old.name);
@@ -5803,12 +5958,17 @@ return view.extend({
 				.format(oldName, oldName, preset.label) : '';
 		}
 		game.value = old.id;
-		typeSels.forEach(function(s, i) {
+		typeSels.forEach(function(x, i) {
 			var t = multi ? zdevs[i].type : (zdevs[0] ? zdevs[0].type : sec.platform);
-			s.value = platformName(t) ? t : '';
+			x.value = platformName(t) ? t : '';
+			/* another type: its own ports field (the others keep what they hold) */
+			x.addEventListener('change', function() {
+				var base = presetById(game.value) || old;
+				preset = needsPlatform(base) ? presetOn(base, platform.value) : base;
+				portFields();
+			});
 		});
-		game.addEventListener('change', function() { fill(false); });
-		platform.addEventListener('change', function() { fill(false); });
+		game.addEventListener('change', function() { gameChanged = true; fill(false); });
 		fill(true);
 
 		ui.showModal(_('Change game – %s').format(label), [
@@ -5817,10 +5977,8 @@ return view.extend({
 			row(_('Game'), [ game, info ]),
 			platformRow,
 			keepNote,
-			E('div', { 'style': 'display:flex;gap:1em;flex-wrap:wrap' }, [
-				E('div', { 'style': 'flex:1 1 240px' }, E('div', { 'style': 'margin:.6em 0' }, [ portsLabel, ports ])),
-				E('div', {}, row(_('Protocol'), [ proto ]))
-			]),
+			portsBox,
+			row(_('Protocol'), [ proto ]),
 			row(_('Open for server tests'), [
 				E('div', { 'style': 'display:flex;gap:.5em;align-items:center;flex-wrap:wrap' }, [ _('more than'), burst, _('servers at once (0 = off)') ]),
 				hint
@@ -5832,40 +5990,32 @@ return view.extend({
 				E('button', {
 					'class': 'cbi-button cbi-button-positive important lf-cg-apply',
 					'click': function() {
-						var list = parsePorts(ports.value), bn = parseInt(burst.value || '0', 10);
+						var bn = parseInt(burst.value || '0', 10);
 						var base = presetById(game.value) || old, typed = needsPlatform(base);
-						if (typed && typeSels.some(function(s) { return !s.value; }))
+						if (typed && typeSels.some(function(x) { return !x.value; }))
 							return (error.textContent = (multi ? _('Choose each device\'s type - %s.') : _('Choose the device type - %s.')).format(_('PC or a console')));
-						if (list === null)
-							return (error.textContent = _('Ports must be numbers (1-65535) or ranges like 30000-45000.'));
-						if (!list.length)
-							return (error.textContent = _('Enter the game\'s ports.'));
+						/* each type's ports, as its field has them */
+						var tports = {}, bad = null, shown = Object.keys(fields);
+						shown.forEach(function(t) {
+							var list = parsePorts(fields[t].area.value), who = shown.length > 1 ? platformName(t) + ': ' : '';
+							if (list === null)
+								bad = bad || who + _('Ports must be numbers (1-65535) or ranges like 30000-45000.');
+							else if (!list.length)
+								bad = bad || who + _('Enter the game\'s ports.');
+							tports[t] = { either: fields[t].either, list: list || [] };
+						});
+						if (bad)
+							return (error.textContent = bad);
 						if (!isFinite(bn) || bn < 0 || bn > 10000)
 							return (error.textContent = _('Open for server tests: 0-10000 servers.'));
-						uci.set('lobbyfence', zone, 'proto', proto.value);
-						if (preset.either) {
-							uci.set('lobbyfence', zone, 'port', list);
-							uci.unset('lobbyfence', zone, 'remote_port');
-						}
-						else {
-							uci.set('lobbyfence', zone, 'remote_port', list);
-							uci.unset('lobbyfence', zone, 'port');
-						}
-						uci.set('lobbyfence', zone, 'game', preset.id);
-						/* the devices' types: the first one's gets these ports; another type
-						   keeps its own (the same game) or gets the game's ports on it - the
-						   ports here when the game uses the same ports on every device type */
-						var mainPorts = { either: !!preset.either, list: list }, tports = {}, same = base.id === oldGame;
 						var devs = zdevs.map(function(d, i) { return { dev: d.dev, type: typed ? typeSels[multi ? i : 0].value : '' }; });
-						if (typed && devs.length)
-							tports[devs[0].type] = mainPorts;
-						devs.forEach(function(d) {
-							var t = d.type;
-							if (!t || tports[t])
-								return;
-							var o = oldPorts[t];
-							tports[t] = same && o && (o.own || t === oldPlatform) ? o : base.platforms ? presetPorts(base, t) : mainPorts;
-						});
+						/* (one field for all: a game with the same ports on every device type) */
+						var main = tports[typed && devs.length ? devs[0].type : shown[0]] || tports[shown[0]];
+						devs.forEach(function(d) { if (d.type && !tports[d.type]) tports[d.type] = main; });
+						uci.set('lobbyfence', zone, 'proto', proto.value);
+						uci.set('lobbyfence', zone, main.either ? 'port' : 'remote_port', main.list);
+						uci.unset('lobbyfence', zone, main.either ? 'remote_port' : 'port');
+						uci.set('lobbyfence', zone, 'game', preset.id);
 						if (devs.length)
 							setZoneDevices(uci, zone, devs, tports, typed);
 						else if (typed)
@@ -5886,7 +6036,8 @@ return view.extend({
 					}
 				}, _('Change'))
 			])
-		]);
+		], 'lf-modal-wide');
+		Object.keys(fields).forEach(function(t) { fields[t].area.lfGrow(); });
 	},
 
 	/* names for the zone's devices: LuCI's host hints, once - the router's own
@@ -5905,52 +6056,116 @@ return view.extend({
 		return this.devList || [];
 	},
 
-	/* a zone device's name from the router's list ('' when it has none) */
-	deviceName: function(dev) {
+	/* a zone device in the list of devices the page knows (null when it is not there) */
+	deviceEntry: function(dev) {
 		var mac = isMac(dev) ? String(dev).trim().toLowerCase().replace(/-/g, ':') : null;
-		var d = this.knownDevices().filter(function(x) {
+		return this.knownDevices().filter(function(x) {
 			return mac ? x.mac === mac : (x.ipv4.indexOf(dev) >= 0 || x.ipv6.indexOf(dev) >= 0);
-		})[0];
+		})[0] || null;
+	},
+
+	/* its name ('' when it has none) */
+	deviceName: function(dev) {
+		var d = this.deviceEntry(dev);
 		return d && d.name ? d.name : '';
+	},
+
+	/* a zone device for a window's rows: "<name> (<address>)" - a device without
+	   a name given by its MAC address: its IPv4 address, to tell which it is */
+	deviceLabel: function(dev) {
+		var d = this.deviceEntry(dev), n = d ? (d.name || (isMac(dev) ? d.ipv4[0] : '')) : '';
+		return n ? n + ' (' + dev + ')' : dev;
 	},
 
 	/* "Devices…": the zone's devices - add one, take one out, and (PC & console
 	   games) say which type each is: each type's devices are filtered on the
-	   game's ports for that type, so a PC and a PlayStation can share a zone */
+	   game's ports for that type, so a PC and a PlayStation can share a zone.
+	   Each device's ports are shown under it. */
 	openDevices: function() {
 		var self = this, zone = this.zone, sec = uci.get('lobbyfence', zone);
 		if (!sec)
 			return;
-		var preset = this.zonePreset(zone), typed = needsPlatform(preset);
+		var preset = this.zonePreset(zone), typed = needsPlatform(preset), perType = typed && !!preset.platforms;
 		var rows = zoneDevices(sec).map(function(d) { return { dev: d.dev, type: d.type }; });
 		var listNode = E('div', { 'class': 'lf-devs-list' });
+		var allPorts = E('div', { 'class': 'lf-devports lf-devs-allports' });
 		var error = E('p', { 'style': 'color:#d33a3a;min-height:1.2em;margin:.5em 0 0' });
 		var devicePick = pageList(E('select', { 'class': 'cbi-input-select lf-devs-pick', 'style': 'width:100%;display:none' }));
 		var manual = E('input', { 'class': 'cbi-input-text lf-devs-manual', 'placeholder': _('192.168.1.50 or aa:bb:cc:dd:ee:ff'), 'style': 'width:100%' });
 		var addType = typed ? platformSelect('lf-devs-addtype') : null;
+		var known = [];
 
-		function label(dev) {
-			var n = self.deviceName(dev);
-			return n ? n + ' (' + dev + ')' : dev;
+		/* the ports a type's devices are (or, once saved, will be) filtered on */
+		function portsOf(t) {
+			return zoneTypePorts(sec, preset, t, rows.length ? rows[0].type : '');
+		}
+		function inZone(dev) {
+			dev = String(dev).toLowerCase();
+			return rows.some(function(r) { return r.dev.toLowerCase() === dev; });
+		}
+		/* a device on the network that is in the zone - by its MAC address or by
+		   one of its IP addresses */
+		function knownInZone(d) {
+			return inZone(d.mac) || d.ipv4.concat(d.ipv6).some(inZone);
+		}
+		/* the devices on the network that are not in the zone yet */
+		function fillPick() {
+			var keep = devicePick.value;
+			devicePick.innerHTML = '';
+			if (!known.length)
+				return;
+			devicePick.appendChild(E('option', { 'value': '', 'disabled': 'disabled', 'hidden': 'hidden' }, _('Choose a device…')));
+			known.forEach(function(d) {
+				if (!knownInZone(d))
+					devicePick.appendChild(E('option', { 'value': d.mac }, deviceLabel(d)));
+			});
+			devicePick.appendChild(E('option', { 'value': DEVICE_MANUAL }, _('Enter an address manually…')));
+			devicePick.value = keep;
+			if (devicePick.selectedIndex < 0)
+				devicePick.selectedIndex = 0;
+			devicePick.style.display = '';
+		}
+		function syncManual() {
+			manual.style.display = (!devicePick.options.length || devicePick.value === DEVICE_MANUAL) ? '' : 'none';
 		}
 		function render() {
 			listNode.innerHTML = '';
 			if (!rows.length)
 				listNode.appendChild(E('p', { 'class': 'lf-muted' }, _('No device yet - add the one the game runs on.')));
 			rows.forEach(function(r, i) {
-				var sel = null;
+				var sel = null, portsNode = perType ? E('div', { 'class': 'lf-devports lf-devs-ports' }) : null;
+				function showPorts() {
+					if (portsNode)
+						portsNode.textContent = r.type ? portsText(portsOf(r.type)) : _('Choose its type to see its ports.');
+				}
 				if (typed) {
 					sel = platformSelect('lf-devs-type');
 					sel.value = r.type;
-					sel.addEventListener('change', function() { r.type = sel.value; });
+					/* (the first device's type decides which type the zone's own ports are for:
+					   every row again) */
+					sel.addEventListener('change', function() {
+						r.type = sel.value;
+						render();
+						var again = listNode.querySelectorAll('.lf-devs-type')[i];
+						if (again)
+							again.focus();
+					});
 				}
-				listNode.appendChild(E('div', { 'class': 'lf-devs-row', 'style': 'display:flex;gap:.5em;align-items:center;flex-wrap:wrap;margin:.35em 0' }, [
-					E('span', { 'class': 'lf-devs-name', 'style': 'flex:1 1 12em;min-width:0;overflow-wrap:anywhere' }, label(r.dev)),
-					sel ? E('div', { 'style': 'flex:0 1 12em;min-width:9em' }, sel) : '',
-					E('button', { 'class': 'cbi-button lf-devs-remove', 'title': _('Take this device out of the zone'),
-						'click': function() { rows.splice(i, 1); render(); } }, _('Remove'))
+				listNode.appendChild(E('div', { 'class': 'lf-devs-item' }, [
+					E('div', { 'class': 'lf-devrow lf-devs-row' }, [
+						E('span', { 'class': 'lf-devname lf-devs-name' }, self.deviceLabel(r.dev)),
+						sel || '',
+						E('button', { 'class': 'cbi-button lf-devs-remove', 'title': _('Take this device out of the zone'),
+							'click': function() { rows.splice(i, 1); render(); } }, _('Remove'))
+					]),
+					portsNode || ''
 				]));
+				showPorts();
 			});
+			allPorts.textContent = perType || !rows.length ? '' :
+				(typed ? _('Every device type uses the same ports here.') + ' ' : '') + portsText(portsOf(typed ? rows[0].type : ''));
+			fillPick();
+			syncManual();
 		}
 		function addDevice() {
 			var dev = (devicePick.options.length && devicePick.value !== DEVICE_MANUAL) ? devicePick.value : manual.value.trim();
@@ -5958,37 +6173,27 @@ return view.extend({
 				dev = dev.toLowerCase().replace(/-/g, ':');
 			if (!validDevice(dev))
 				return (error.textContent = _('Pick a device, or enter a valid IPv4/IPv6 or MAC address.'));
-			if (rows.some(function(r) { return r.dev.toLowerCase() === dev.toLowerCase(); }))
+			/* (also under another of its addresses: a device is filtered once, on one type's ports) */
+			if (inZone(dev) || known.some(function(d) {
+				return (d.mac === dev || d.ipv4.indexOf(dev) >= 0 || d.ipv6.indexOf(dev) >= 0) && knownInZone(d);
+			}))
 				return (error.textContent = _('That device is in this zone already.'));
 			if (typed && !addType.value)
 				return (error.textContent = _('Choose the device type - %s.').format(_('PC or a console')));
 			rows.push({ dev: dev, type: typed ? addType.value : '' });
 			error.textContent = '';
 			manual.value = '';
-			if (devicePick.options.length)
-				devicePick.selectedIndex = 0;
+			devicePick.value = '';
 			if (addType)
 				addType.value = '';
-			syncManual();
 			render();
-		}
-		function syncManual() {
-			manual.style.display = (!devicePick.options.length || devicePick.value === DEVICE_MANUAL) ? '' : 'none';
 		}
 		devicePick.addEventListener('change', syncManual);
 
 		loadDevices().then(function(list) {
 			if (!list.length)
 				return;
-			self.devList = list;
-			devicePick.appendChild(E('option', { 'value': '', 'disabled': 'disabled', 'hidden': 'hidden' }, _('Choose a device…')));
-			list.forEach(function(d) {
-				devicePick.appendChild(E('option', { 'value': d.mac }, deviceLabel(d)));
-			});
-			devicePick.appendChild(E('option', { 'value': DEVICE_MANUAL }, _('Enter an address manually…')));
-			devicePick.selectedIndex = 0;
-			devicePick.style.display = '';
-			syncManual();
+			self.devList = known = list;
 			render();
 		});
 		render();
@@ -6000,10 +6205,11 @@ return view.extend({
 					: _('The devices this zone filters, and what each one is (%s uses the same ports on every device type).').format(preset.name || preset.label))
 				: _('The devices this zone filters.')),
 			listNode,
-			E('div', { 'style': 'margin:.8em 0 .2em;font-weight:bold' }, _('Add a device')),
-			E('div', { 'style': 'display:flex;gap:.5em;align-items:flex-start;flex-wrap:wrap' }, [
+			allPorts,
+			E('div', { 'style': 'margin:.9em 0 .1em;font-weight:bold' }, _('Add a device')),
+			E('div', { 'class': 'lf-devrow lf-devs-addrow', 'style': 'align-items:flex-start' }, [
 				E('div', { 'style': 'flex:1 1 14em;min-width:0' }, [ devicePick, manual ]),
-				addType ? E('div', { 'style': 'flex:0 1 12em;min-width:9em' }, addType) : '',
+				addType || '',
 				E('button', { 'class': 'cbi-button cbi-button-add lf-devs-add', 'click': addDevice }, _('Add'))
 			]),
 			error,
@@ -6016,21 +6222,9 @@ return view.extend({
 							return (error.textContent = _('A zone needs a device. To stop filtering, switch the zone off or delete it.'));
 						if (typed && rows.some(function(r) { return !r.type; }))
 							return (error.textContent = _('Choose each device\'s type - %s.').format(_('PC or a console')));
-						var types = [];
-						rows.forEach(function(r) { if (r.type && types.indexOf(r.type) < 0) types.push(r.type); });
-						/* each type's ports: what the zone has for it now (maybe narrowed with
-						   Ports…), else the game's ports on it - the zone's own when the game
-						   uses the same ports on every device type */
-						var cur = sec.platform || zoneTypes(sec)[0] || (typed ? rows[0].type : ''), mp = typePorts(sec, ''), ports = {};
-						types.forEach(function(t) {
-							var own = typePorts(sec, t);
-							if (own.own)
-								ports[t] = own;
-							else if (t === cur)
-								ports[t] = mp;
-							else
-								ports[t] = preset.platforms ? presetPorts(preset, t) : mp;
-						});
+						/* each type's ports: as shown under its devices */
+						var ports = {};
+						rows.forEach(function(r) { if (r.type && !ports[r.type]) ports[r.type] = portsOf(r.type); });
 						setZoneDevices(uci, zone, rows, ports, typed);
 						ui.hideModal();
 						self.stage();
@@ -6040,7 +6234,7 @@ return view.extend({
 					}
 				}, _('Save'))
 			])
-		]);
+		], 'lf-modal-wide');
 	},
 
 	openNewZone: function() {

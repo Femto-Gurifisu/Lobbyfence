@@ -52,7 +52,7 @@ const HELPERS = [ 'distanceKm', 'destination', 'circleRing', 'wrapLon', 'parseCi
 	'mercY', 'normalizePolygon', 'inPolygon', 'parsePolygons', 'formatPolygon', 'v4num', 'v6groups', 'cidrMatch', 'inList',
 	'edgeKind', 'alignedKind', 'straightenPolygon', 'mercArea', 'satelliteStyle',
 	'parseAddressList', 'deviceLabel', 'RANGES', 'addExtraLabels', 'WORLD_BOUNDS',
-	'zoneDevices', 'zoneTypes', 'typePorts', 'presetPorts', 'samePorts', 'setZoneDevices' ];
+	'zoneDevices', 'zoneTypes', 'typePorts', 'presetPorts', 'samePorts', 'setZoneDevices', 'zoneTypePorts', 'portsText' ];
 
 // even-odd point in polygon on plain lon/lat (what the map draws in mercator)
 function inRing(ring, lon, lat) {
@@ -370,6 +370,31 @@ const inDrawn = (ring, lon, lat) => [ -360, 0, 360 ].some((k) => inRing(ring, lo
 		assert.deepStrictEqual(v.secs.y.port, [ '3074' ]);
 		assert.deepStrictEqual(v.secs.y.port_switch, [ '9000' ]);
 		assert(!('remote_port' in v.secs.y) && !('remote_port_switch' in v.secs.y));
+	});
+	await check('the ports each device type is filtered on: as the router has them - the game\'s only for a type the zone has no device of yet', () => {
+		const apex = h.presetById('apex'), cod = h.presetById('cod'), PS = h.presetOn(apex, 'ps').remote;
+		const sec = { device: [ '10.0.0.1', '10.0.0.2' ], platform: 'pc', device_type: [ '10.0.0.2=ps' ], remote_port: [ '7700-7799' ], remote_port_ps: [ '1000-1099' ] };
+		assert.deepStrictEqual(h.zoneTypePorts(sec, apex, 'pc'), { either: false, list: [ '7700-7799' ] }, 'the zone\'s type: the zone\'s ports');
+		assert.deepStrictEqual(h.zoneTypePorts(sec, apex, 'ps'), { either: false, list: [ '1000-1099' ] }, 'a type on ports of its own: those');
+		assert.deepStrictEqual(h.zoneTypePorts(sec, apex, 'xbox'), { either: false, list: [ '1024-65535' ] }, 'a type not in the zone yet: the game\'s ports on it');
+		assert.deepStrictEqual(h.zoneTypePorts(sec, apex, ''), { either: false, list: [ '7700-7799' ] }, 'no type: the zone\'s');
+		// a PlayStation without ports of its own shares the zone's (the router filters it on those)
+		const shared = { device: [ '10.0.0.1', '10.0.0.2' ], platform: 'pc', device_type: [ '10.0.0.2=ps' ], remote_port: [ '7700-7799' ] };
+		assert.deepStrictEqual(h.zoneTypePorts(shared, apex, 'ps'), { either: false, list: [ '7700-7799' ] }, 'a type in the zone without its own: the zone\'s, not the game\'s');
+		// one device, its type changed in Devices… before saving: the game's ports on the new type
+		const one = { device: [ '10.0.0.1' ], platform: 'pc', remote_port: [ '7700-7799' ] };
+		assert.deepStrictEqual(h.zoneTypePorts(one, apex, 'ps', 'ps').list, PS);
+		// a zone from before device types (no type named): its ports are for the first device's type
+		const old = { device: [ '10.0.0.1' ], remote_port: [ '7700-7799' ] };
+		assert.deepStrictEqual(h.zoneTypePorts(old, apex, 'ps', 'ps').list, [ '7700-7799' ]);
+		assert.deepStrictEqual(h.zoneTypePorts(old, apex, 'xbox', 'ps').list, [ '1024-65535' ]);
+		// a game with the same ports on every type: always the zone's
+		const c = { device: [ '10.0.0.1' ], platform: 'pc', port: [ '3074-3079' ] };
+		assert.deepStrictEqual(h.zoneTypePorts(c, cod, 'ps'), { either: true, list: [ '3074-3079' ] });
+		assert.deepStrictEqual(h.zoneTypePorts(c, null, 'ps'), { either: true, list: [ '3074-3079' ] }, 'no preset known');
+		assert.strictEqual(h.portsText({ either: false, list: [ '1000-1099', '3000' ] }), 'Server ports: 1000-1099, 3000');
+		assert.strictEqual(h.portsText({ either: true, list: [ '3074-3079' ] }), 'Ports (either side): 3074-3079');
+		assert.strictEqual(h.portsText({ either: false, list: [] }), 'Server ports: none');
 	});
 	await check('createZone honours an explicit monitor mode', () => {
 		const u = fakeUci({});

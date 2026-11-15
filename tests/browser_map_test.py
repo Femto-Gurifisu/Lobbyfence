@@ -1125,21 +1125,28 @@ def main():
         # ---- 6b. Devices…: a PC and a PlayStation in one zone, each on its own type's ports
         APEX_PC = ["7700-7799", "8100-8199", "9000-9099", "10000-10599", "10700-10899", "15000-15099", "22200-22299", "27000-27199", "49000-49099"]
         APEX_PS = ["1000-1099", "1900-1999", "3000-3199", "7700-7799", "8100-8199", "10000-10999", "27000-27199", "27500-27599", "34100-34199"]
+        # (LuCI's host hints are kept under the MAC address in capitals; the zone's device is given in small letters)
         page.evaluate("""([z, pc]) => {
             const s = uciState[z];
             ['device_type', 'port', 'remote_port_ps', 'remote_port_xbox', 'port_ps'].forEach(o => delete s[o]);
-            Object.assign(s, { game: 'apex', platform: 'pc', device: [ '192.168.1.10' ], remote_port: pc.slice(), proto: 'udp' });
+            Object.assign(s, { game: 'apex', platform: 'pc', device: [ 'aa:bb:cc:dd:ee:01' ], remote_port: pc.slice(), proto: 'udp' });
             window.__devices = [ { mac: 'aa:bb:cc:dd:ee:01', name: 'Gaming PC', ipv4: [ '192.168.1.10' ], ipv6: [] },
-                                 { mac: 'aa:bb:cc:dd:ee:02', name: 'PS5', ipv4: [ '192.168.1.20' ], ipv6: [] } ];
-            window.__hints = [ { mac: 'aa:bb:cc:dd:ee:01', name: 'Gaming PC', ip: '192.168.1.10' } ];
+                                 { mac: 'aa:bb:cc:dd:ee:02', name: 'PS5', ipv4: [ '192.168.1.20' ], ipv6: [] },
+                                 { mac: 'aa:bb:cc:dd:ee:03', name: 'Living room console with a rather long name', ipv4: [ '192.168.1.30' ], ipv6: [] } ];
+            window.__hints = [ { mac: 'AA:BB:CC:DD:EE:01', name: 'Gaming PC', ip: '192.168.1.10' } ];
             if (!fs.__counted) { const ex = fs.exec; fs.exec = (c, a) => { if (a && a[0] === 'devices') window.__devAsked = (window.__devAsked || 0) + 1; return ex(c, a); }; fs.__counted = true; }
             window.__devAsked = 0;
             window.view.devList = null; window.view.devLoading = null; window.view.renderStatus();
         }""", [zid, APEX_PC])
         page.wait_for_function("document.querySelector('.lf-zonedevs-list') && document.querySelector('.lf-zonedevs-list').innerText.includes('Gaming PC')")
-        check("the status names the zone's device and its type (LuCI's host hints: no request to the router)",
-              page.locator(".lf-zonedevs").inner_text().startswith("Device:") and "Gaming PC (PC)" in page.locator(".lf-zonedevs-list").inner_text()
+        check("the status names the zone's device and its type (LuCI's host hints, kept in capitals: no request to the router)",
+              page.locator(".lf-zonedevs").inner_text().startswith("Device:") and page.locator(".lf-zonedev").all_inner_texts() == ["Gaming PC (PC)"]
               and page.evaluate("window.__devAsked") == 0, [page.locator(".lf-zonedevs").inner_text(), page.evaluate("window.__devAsked")])
+        check("...and, pointed at, the ports it is filtered on",
+              page.locator(".lf-zonedev").get_attribute("title") == "Server ports: " + ", ".join(APEX_PC), page.locator(".lf-zonedev").get_attribute("title"))
+        page.evaluate("z => { uciState[z].device = [ '192.168.1.10' ]; window.view.renderStatus(); }", zid)
+        check("a device given by its IP address is named too", page.locator(".lf-zonedev").all_inner_texts() == ["Gaming PC (PC)"],
+              page.locator(".lf-zonedev").all_inner_texts())
         page.locator(".lf-devsbtn").click()
         dm = page.locator("#modal")
         page.wait_for_function("document.querySelectorAll('#modal .lf-devs-pick option').length > 2")
@@ -1147,25 +1154,87 @@ def main():
         check("Devices… lists the zone's device with its type", dm.locator(".lf-devs-row").count() == 1
               and dm.locator(".lf-devs-type").input_value() == "pc" and "Gaming PC (192.168.1.10)" in dm.locator(".lf-devs-name").inner_text())
         check("...and says the game uses other ports on each type", "uses other ports on each device type" in dm.inner_text())
-        dm.locator(".lf-devs-pick").select_option("aa:bb:cc:dd:ee:02")
+        check("...with the ports it is filtered on under it", dm.locator(".lf-devs-ports").all_inner_texts() == ["Server ports: " + ", ".join(APEX_PC)],
+              dm.locator(".lf-devs-ports").all_inner_texts())
+        picks = page.evaluate("[...document.querySelectorAll('#modal .lf-devs-pick option')].map(o => o.value)")
+        check("the devices to add: those on the network that are not in the zone yet", picks == ["", "aa:bb:cc:dd:ee:03", "aa:bb:cc:dd:ee:02", "#manual"], picks)
+        # the type list next to a device: a narrow field - its list is as wide as its longest line
+        def cut_lines():
+            return page.evaluate("""() => { const b = document.querySelector('.lf-pagelist'); if (!b) return null;
+                const r = b.getBoundingClientRect();
+                return { cut: [...b.querySelectorAll('.lf-pl-opt, .lf-pl-head')].filter(e => e.scrollWidth > e.clientWidth).map(e => e.textContent),
+                         inside: r.left >= 0 && r.right <= innerWidth, width: Math.round(r.width) }; }""")
+        tsel = dm.locator(".lf-devs-type")
+        # (this stand-in page has its windows under the page: scrolled to first - a page that scrolls closes an open list)
+        dm.locator(".lf-devs-save").scroll_into_view_if_needed()
+        page.wait_for_timeout(150)
+        tsel.click()
+        cl = cut_lines()
+        check("the device type list: no line cut off, inside the window", cl and cl["cut"] == [] and cl["inside"]
+              and "Choose the device type…" in page.locator(".lf-pagelist .lf-pl-opt").all_inner_texts(), cl)
+        if SHOTS:
+            page.screenshot(path=str(SHOTS / "devices-type-list.png"))
+        page.keyboard.press("Escape")
+        # (as narrow as in a small dialog: the list is still as wide as its lines need - wider than the field)
+        tsel.evaluate("e => e.style.setProperty('width', '90px', 'important')")
+        tsel.click()
+        cl = cut_lines()
+        check("...also under a field narrower than its lines", cl and cl["cut"] == [] and cl["inside"] and cl["width"] > 90, cl)
+        page.keyboard.press("Escape")
+        tsel.evaluate("e => e.style.removeProperty('width')")
+        pick = dm.locator(".lf-devs-pick")
+        pick.click()
+        cl = cut_lines()
+        check("the list of devices: no line cut off either", cl and cl["cut"] == [] and cl["inside"]
+              and "Living room console with a rather long name - 192.168.1.30 - AA:BB:CC:DD:EE:03" in page.locator(".lf-pagelist .lf-pl-opt").all_inner_texts(), cl)
+        page.keyboard.press("Escape")
+        pick.select_option("aa:bb:cc:dd:ee:02")
         dm.locator(".lf-devs-add").click()
         check("a device needs its type before it is added", "Choose the device type" in dm.inner_text() and dm.locator(".lf-devs-row").count() == 1)
         dm.locator(".lf-devs-addtype").select_option("ps")
         dm.locator(".lf-devs-add").click()
         check("...then it is added, with that type", dm.locator(".lf-devs-row").count() == 2
               and dm.locator(".lf-devs-type").nth(1).input_value() == "ps" and "PS5 (aa:bb:cc:dd:ee:02)" in dm.locator(".lf-devs-name").nth(1).inner_text())
-        dm.locator(".lf-devs-pick").select_option("aa:bb:cc:dd:ee:02")
+        check("...each device with its own type's ports under it: the PC's, and the game's PlayStation ports",
+              dm.locator(".lf-devs-ports").all_inner_texts() == ["Server ports: " + ", ".join(APEX_PC), "Server ports: " + ", ".join(APEX_PS)],
+              dm.locator(".lf-devs-ports").all_inner_texts())
+        picks = page.evaluate("[...document.querySelectorAll('#modal .lf-devs-pick option')].map(o => o.value)")
+        check("...and it is no longer among the devices to add", picks == ["", "aa:bb:cc:dd:ee:03", "#manual"], picks)
+        pick.select_option("#manual")
+        dm.locator(".lf-devs-manual").fill("AA-BB-CC-DD-EE-02")
         dm.locator(".lf-devs-addtype").select_option("ps")
         dm.locator(".lf-devs-add").click()
-        check("the same device is not added twice", "in this zone already" in dm.inner_text() and dm.locator(".lf-devs-row").count() == 2)
+        check("the same device is not added twice (typed in another way)", "in this zone already" in dm.inner_text() and dm.locator(".lf-devs-row").count() == 2)
+        # (the PC is in the zone by its IP address: not again by its MAC address - a device is filtered once)
+        dm.locator(".lf-devs-manual").fill("aa:bb:cc:dd:ee:01")
+        dm.locator(".lf-devs-addtype").select_option("ps")
+        dm.locator(".lf-devs-add").click()
+        check("...nor under another of its addresses", "in this zone already" in dm.inner_text() and dm.locator(".lf-devs-row").count() == 2)
+        dm.locator(".lf-devs-manual").fill("192.168.1.77")
+        dm.locator(".lf-devs-add").click()
+        check("an address the router doesn't know can be added by hand", dm.locator(".lf-devs-row").count() == 3
+              and dm.locator(".lf-devs-name").nth(2).inner_text() == "192.168.1.77", dm.locator(".lf-devs-name").all_inner_texts())
+        dm.locator(".lf-devs-remove").nth(2).click()
+        # another type for a device: its ports line follows
+        dm.locator(".lf-devs-type").nth(1).select_option("xbox")
+        check("another type for a device: the ports under it are that type's",
+              dm.locator(".lf-devs-ports").nth(1).inner_text() == "Server ports: 1024-65535", dm.locator(".lf-devs-ports").nth(1).inner_text())
+        dm.locator(".lf-devs-type").nth(1).select_option("ps")
+        if SHOTS:
+            page.screenshot(path=str(SHOTS / "devices.png"))
+        over = page.evaluate("""() => [...document.querySelectorAll('#modal .lf-devs-row, #modal .lf-devs-ports, #modal .lf-devs-addrow')]
+            .filter(e => e.scrollWidth > e.clientWidth + 1).map(e => e.className)""")
+        check("Devices…: nothing in the window is cut off", over == [], over)
         dm.locator(".lf-devs-save").click()
         z = page.evaluate("z => uciState[z]", zid)
         check("Save: both devices, the PlayStation with its type and the game's PlayStation ports",
               z.get("device") == ["192.168.1.10", "aa:bb:cc:dd:ee:02"] and z.get("platform") == "pc" and z.get("device_type") == ["aa:bb:cc:dd:ee:02=ps"]
               and z.get("remote_port_ps") == APEX_PS and z.get("remote_port") == APEX_PC, z)
-        check("the status shows both types", "Apex Legends · PC + PlayStation" in page.locator(".lf-zonegame").inner_text()
+        check("the status shows both types, a device a line", "Apex Legends · PC + PlayStation" in page.locator(".lf-zonegame").inner_text()
               and page.locator(".lf-zonedevs").inner_text().startswith("Devices:")
-              and "Gaming PC (PC), PS5 (PlayStation)" in page.locator(".lf-zonedevs-list").inner_text(), page.locator(".lf-zonedevs").inner_text())
+              and page.locator(".lf-zonedev").all_inner_texts() == ["Gaming PC (PC)", "PS5 (PlayStation)"], page.locator(".lf-zonedevs").inner_text())
+        titles = page.evaluate("[...document.querySelectorAll('.lf-zonedev')].map(e => e.title)")
+        check("...each with its own ports when pointed at", titles == ["Server ports: " + ", ".join(APEX_PC), "Server ports: " + ", ".join(APEX_PS)], titles)
         # Ports…: each type's ports apart
         page.evaluate("t => { window.__execResult = { code: 0, stdout: t }; }", "udp/1050 1 900 100 200 3 1 900\nudp/34150 1 700 100 200 2 1 700\n")
         page.locator(".lf-portsseen").click()
@@ -1185,26 +1254,85 @@ def main():
         z = page.evaluate("z => uciState[z]", zid)
         check("Use these ports: the PlayStation's ports, the PC's stay", z.get("remote_port_ps") == ["1000-1099"] and z.get("remote_port") == APEX_PC, z)
         page.evaluate("window.__execResult = null")
-        # Change game: one type for each device; the game's ports on each type
+        check("the status and Devices… show the PlayStation's narrowed ports",
+              page.evaluate("[...document.querySelectorAll('.lf-zonedev')].map(e => e.title)")[1] == "Server ports: 1000-1099")
+        # Change game: one type for each device, and a ports field for each type
         page.locator(".lf-changegame").click()
         cg = page.locator("#modal")
         check("Change game with two devices: a type for each", cg.locator(".lf-cg-devrow").count() == 2
               and cg.locator(".lf-cg-platform").nth(1).input_value() == "ps" and "PS5" in cg.locator(".lf-cg-devrow").nth(1).inner_text())
-        cg.locator(".lf-cg-game").select_option("cod")
+        areas = page.evaluate("[...document.querySelectorAll('#modal .lf-cg-ports')].map(a => [a.dataset.type, a.value])")
+        labels = cg.locator(".lf-cg-portsrow label").all_inner_texts()
+        check("...and a ports field for each type, with the zone's ports for it (not only the first device's)",
+              areas == [["pc", " ".join(APEX_PC)], ["ps", "1000-1099"]] and labels == ["Game server ports · PC", "Game server ports · PlayStation"], [areas, labels])
+        info = cg.locator(".lf-cg-info").inner_text()
+        check("...what the game uses on each type is said for both", "PC: UDP 7700-7799" in info and "PlayStation: UDP 1000-1099, 1900-1999" in info, info)
+        grown = page.evaluate("[...document.querySelectorAll('#modal .lf-cg-ports')].map(a => a.scrollHeight <= a.clientHeight + 2)")
+        check("...every port in a field can be read (the fields grow with their lines)", grown == [True, True], grown)
+        if SHOTS:
+            page.screenshot(path=str(SHOTS / "change-game-two-types.png"))
+        cg.locator(".lf-cg-ports[data-type='ps']").fill("1000-1099 3000-3199")
         cg.locator(".lf-cg-apply").click()
         z = page.evaluate("z => uciState[z]", zid)
-        check("a game with the same ports on every type: the types stay, no ports of a type's own",
+        check("ports typed for the PlayStation change the PlayStation's only", z.get("remote_port_ps") == ["1000-1099", "3000-3199"]
+              and z.get("remote_port") == APEX_PC and z.get("game") == "apex" and z.get("device_type") == ["aa:bb:cc:dd:ee:02=ps"], z)
+        page.locator(".lf-changegame").click()
+        # a third type takes a field of its own; a type no device has any more loses its field
+        cg.locator(".lf-cg-platform").nth(1).select_option("xbox")
+        areas = page.evaluate("[...document.querySelectorAll('#modal .lf-cg-ports')].map(a => [a.dataset.type, a.value])")
+        check("another type for a device: a field for that type, with the game's ports on it", areas == [["pc", " ".join(APEX_PC)], ["xbox", "1024-65535"]], areas)
+        cg.locator(".lf-cg-platform").nth(1).select_option("pc")
+        areas = page.evaluate("[...document.querySelectorAll('#modal .lf-cg-ports')].map(a => [a.dataset.type, a.value])")
+        check("both devices of one type: one field", areas == [["pc", " ".join(APEX_PC)]] and cg.locator(".lf-cg-portsrow label").all_inner_texts() == ["Game server ports"], areas)
+        cg.locator(".lf-cg-platform").nth(1).select_option("ps")
+        cg.locator(".lf-cg-game").select_option("cod")
+        areas = page.evaluate("[...document.querySelectorAll('#modal .lf-cg-ports')].map(a => [a.dataset.type, a.value])")
+        check("a game with the same ports on every type: one field for all, named for both types", areas == [["", "3074-3079"]]
+              and cg.locator(".lf-cg-portsrow label").all_inner_texts() == ["Game ports (either side) · PC + PlayStation"],
+              [areas, cg.locator(".lf-cg-portsrow label").all_inner_texts()])
+        cg.locator(".lf-cg-apply").click()
+        z = page.evaluate("z => uciState[z]", zid)
+        check("...the types stay, no ports of a type's own",
               z.get("game") == "cod" and z.get("port") == ["3074-3079"] and z.get("device_type") == ["aa:bb:cc:dd:ee:02=ps"]
               and "remote_port_ps" not in z and "port_ps" not in z and z.get("platform") == "pc", z)
+        page.locator(".lf-devsbtn").click()
+        page.wait_for_function("document.querySelectorAll('#modal .lf-devs-row').length === 2")
+        dtxt = page.locator("#modal").inner_text()
+        check("Devices… for such a game: one line of ports for all", page.locator("#modal .lf-devs-ports").count() == 0
+              and "Every device type uses the same ports here. Ports (either side): 3074-3079" in page.locator("#modal .lf-devs-allports").inner_text(), dtxt)
+        page.locator("#modal").get_by_role("button", name="Cancel").click()
         page.locator(".lf-changegame").click()
         page.locator("#modal .lf-cg-game").select_option("apex")
+        areas = page.evaluate("[...document.querySelectorAll('#modal .lf-cg-ports')].map(a => [a.dataset.type, a.value])")
+        check("back to Apex Legends: a field for each type again, with the game's ports on it", areas == [["pc", " ".join(APEX_PC)], ["ps", " ".join(APEX_PS)]], areas)
         page.locator("#modal .lf-cg-apply").click()
         z = page.evaluate("z => uciState[z]", zid)
-        check("back to Apex Legends: each type gets the game's ports on it", z.get("remote_port") == APEX_PC and z.get("remote_port_ps") == APEX_PS, z)
+        check("...and each type gets them", z.get("remote_port") == APEX_PC and z.get("remote_port_ps") == APEX_PS, z)
+        # a type without ports of its own is filtered on the zone's ports (the router does that): shown so, and kept so
+        page.evaluate("""z => { const s = uciState[z]; window.__keepPs = s.remote_port_ps; window.__keepPc = s.remote_port;
+            delete s.remote_port_ps; s.remote_port = [ '7700-7799' ]; window.view.renderStatus(); }""", zid)
+        titles = page.evaluate("[...document.querySelectorAll('.lf-zonedev')].map(e => e.title)")
+        check("a type that shares the zone's ports: the status shows the zone's ports for it (not the game's for that type)",
+              titles == ["Server ports: 7700-7799", "Server ports: 7700-7799"], titles)
+        page.locator(".lf-changegame").click()
+        areas = page.evaluate("[...document.querySelectorAll('#modal .lf-cg-ports')].map(a => [a.dataset.type, a.value])")
+        check("...Change game too", areas == [["pc", "7700-7799"], ["ps", "7700-7799"]], areas)
+        page.locator("#modal").get_by_role("button", name="Cancel").click()
+        page.locator(".lf-devsbtn").click()
+        page.wait_for_function("document.querySelectorAll('#modal .lf-devs-row').length === 2")
+        check("...and Devices…", page.locator("#modal .lf-devs-ports").all_inner_texts() == ["Server ports: 7700-7799", "Server ports: 7700-7799"],
+              page.locator("#modal .lf-devs-ports").all_inner_texts())
+        page.locator("#modal .lf-devs-save").click()
+        z = page.evaluate("z => uciState[z]", zid)
+        check("...Save leaves its ports as they are", z.get("remote_port") == ["7700-7799"] and "remote_port_ps" not in z
+              and z.get("device_type") == ["aa:bb:cc:dd:ee:02=ps"], z)
+        page.evaluate("z => { const s = uciState[z]; s.remote_port_ps = window.__keepPs; s.remote_port = window.__keepPc; window.view.renderStatus(); }", zid)
         # the PC out: the PlayStation is the zone's only device, on its ports
         page.locator(".lf-devsbtn").click()
         page.wait_for_function("document.querySelectorAll('#modal .lf-devs-row').length === 2")
         page.locator("#modal .lf-devs-remove").nth(0).click()
+        check("a device taken out: the other keeps its ports", page.locator("#modal .lf-devs-ports").all_inner_texts() == ["Server ports: " + ", ".join(APEX_PS)],
+              page.locator("#modal .lf-devs-ports").all_inner_texts())
         page.locator("#modal .lf-devs-save").click()
         z = page.evaluate("z => uciState[z]", zid)
         check("one device left: its type is the zone's, with its ports", z.get("device") == ["aa:bb:cc:dd:ee:02"] and z.get("platform") == "ps"
@@ -1217,6 +1345,47 @@ def main():
         page.locator("#modal").get_by_role("button", name="Cancel").click()
         page.evaluate("""([z, pc]) => { Object.assign(uciState[z], { device: [ '192.168.1.10' ], platform: 'pc', remote_port: pc.slice() });
             window.view.renderStatus(); }""", [zid, APEX_PC])
+
+        # ---- 6c. a wide window: LuCI keeps its pages in a narrow column - the map page takes the free room next to it
+        def wide():
+            return page.evaluate("""() => { const a = document.querySelector('.lf-app').getBoundingClientRect(), p = document.querySelector('.lf-panel').getBoundingClientRect();
+                return { left: Math.round(a.left), right: Math.round(a.right), width: Math.round(a.width), panel: Math.round(p.width),
+                         vw: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth }; }""")
+        narrow = wide()
+        page.evaluate("() => { const r = document.getElementById('root'); r.style.maxWidth = '1000px'; r.style.margin = '0 auto'; }")
+        page.set_viewport_size({"width": 2100, "height": 900})
+        page.wait_for_timeout(150)
+        w = wide()
+        check("a wide window, the page in a 1000 pixel column: the map page takes the room next to it (1800 pixels at most)",
+              w["width"] == 1800 and w["left"] >= 24 and w["right"] <= w["vw"] - 24 and w["scroll"] <= w["vw"], w)
+        check("...and the panel grows with it", w["panel"] > narrow["panel"] and 440 <= w["panel"] <= 460, [narrow, w])
+        if SHOTS:
+            page.screenshot(path=str(SHOTS / "wide-window.png"))
+        # a menu at the side (as some themes have): the page stays clear of it
+        page.evaluate("""() => { const m = document.createElement('div'); m.id = 'sidemenu';
+            m.style.cssText = 'position:fixed;left:0;top:0;bottom:0;width:300px;background:#345;z-index:5'; document.body.appendChild(m); }""")
+        page.evaluate("window.view.fitWide()")
+        w = wide()
+        check("a menu at the side: the page grows up to it, not under it", 316 <= w["left"] <= 340 and w["right"] <= w["vw"] - 24 and w["width"] > 1000, w)
+        page.evaluate("document.getElementById('sidemenu').style.width = '540px'; window.view.fitWide()")
+        w = wide()
+        check("...and not at all on that side when the menu reaches the page", w["left"] == 550 and w["right"] > 1550, w)
+        page.evaluate("document.getElementById('sidemenu').remove()")
+        # something that would cut the page off (a column that hides what runs over it): the page stays inside
+        page.evaluate("""() => { const r = document.getElementById('root'); r.style.overflowX = 'hidden'; window.view.fitWide(); }""")
+        w = wide()
+        check("a column that would cut the page off: the page stays in it", w["width"] == 1000 and w["left"] == 550, w)
+        page.evaluate("""() => { const r = document.getElementById('root'); r.style.overflowX = ''; window.view.fitWide(); }""")
+        # a window is open: the page keeps its width (nothing moves behind the window)
+        page.evaluate("document.body.classList.add('modal-overlay-active'); document.getElementById('root').style.maxWidth = '900px'; window.view.fitWide()")
+        held = page.evaluate("getComputedStyle(document.querySelector('.lf-app')).getPropertyValue('--lf-wide-l')")
+        page.evaluate("document.body.classList.remove('modal-overlay-active'); document.getElementById('root').style.maxWidth = '1000px'; window.view.fitWide()")
+        check("while a window is open the page's width is left alone", held.strip() == "400px", held)
+        page.evaluate("() => { const r = document.getElementById('root'); r.style.maxWidth = ''; r.style.margin = ''; }")
+        page.set_viewport_size({"width": 1400, "height": 900})
+        page.wait_for_timeout(150)
+        w = wide()
+        check("back in a window as wide as the page: as before", w["width"] == narrow["width"] and w["left"] == narrow["left"] and w["panel"] == narrow["panel"], [narrow, w])
 
         # a crash and an error the router recorded an hour ago by its own clock (years behind this PC's)
         page.evaluate("""() => { const s = window.view.status; window.__upd = s.updated; s.updated = 1700000000;
