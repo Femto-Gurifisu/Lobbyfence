@@ -217,7 +217,7 @@ above the map, with the steps for your browser); the icon opens straight to
 the map.
 
 **Which version do I have?** The map page's Status section shows it next to
-its heading - *LobbyFence 1.4.0 · up to date*, or *version 1.4.1 is out -
+its heading - *LobbyFence 1.4.1 · up to date*, or *version 1.4.2 is out -
 update* with a link to the latest release. To know that, your
 browser (not the router) asks GitHub for the newest release, at most twice a
 day; nothing else is sent. From the command line: `lobbyfence version`.
