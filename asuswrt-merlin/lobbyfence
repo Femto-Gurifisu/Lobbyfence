@@ -323,9 +323,10 @@ web_run() { # id file
 		restart)
 			"$SELF" restart > "$out" 2> "$err" < /dev/null 8>&-; rc=$?;;
 		ports)
+			# ports <zone> [<device type>] [clear]
 			valid_zone "$1" || { answer_err "$id" "bad zone"; return; }
-			case "$2" in ''|clear) ;; *) answer_err "$id" "bad argument"; return;; esac
-			[ $# -le 2 ] || { answer_err "$id" "bad argument"; return; }
+			case "$#:$2:$3" in 1::|2:clear:|2:pc:|2:ps:|2:xbox:|2:switch:|3:pc:clear|3:ps:clear|3:xbox:clear|3:switch:clear) ;;
+				*) answer_err "$id" "bad argument"; return;; esac
 			"$MAIN" ports "$@" > "$out" 2> "$err" < /dev/null 8>&-; rc=$?;;
 		remove-servers)
 			case "$1" in ''|*[!a-z0-9_]*) answer_err "$id" "bad game"; return;; esac

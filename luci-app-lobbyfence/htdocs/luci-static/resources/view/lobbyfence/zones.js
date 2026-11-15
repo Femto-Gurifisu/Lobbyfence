@@ -132,7 +132,8 @@ return view.extend({
 		o.editable = true;
 
 		o = s.option(form.DynamicList, 'device', _('Devices'),
-			_('MAC address (recommended - covers all of the device\'s IPv4 and IPv6 addresses, best for phones) or an IPv4/IPv6 address or subnet.'));
+			_('MAC address (recommended - covers all of the device\'s IPv4 and IPv6 addresses, best for phones) or an IPv4/IPv6 address or subnet.') + ' ' +
+			_('A PC and a console in one zone: say which is which on the Map page (Devices…) - some games use other ports on each, and each device is then filtered on its own type\'s ports.'));
 		o.datatype = 'or(macaddr,ipaddr)';
 		o.rmempty = false;
 		/* suggestions: devices on the network, shown with their name and addresses */

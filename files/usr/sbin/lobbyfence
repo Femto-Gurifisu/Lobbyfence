@@ -279,7 +279,7 @@ load_config() {
 }
 
 zone_load() {
-	local s="$1"
+	local s="$1" t
 	Z_ID="$s"
 	config_get_bool Z_ENABLED "$s" enabled 0
 	config_get Z_LABEL "$s" label "$s"
@@ -293,6 +293,17 @@ zone_load() {
 	config_get Z_LPORT "$s" local_port
 	config_get Z_RPORT "$s" remote_port
 	config_get Z_PORT "$s" port
+	# PC & console games: the device type the zone's ports are for (platform),
+	# each device's own type when it differs ("device_type": "<device>=<type>")
+	# and the ports of a type that uses others (remote_port_<type>, port_<type>,
+	# local_port_<type>) - see zone_groups
+	config_get Z_PLATFORM "$s" platform
+	config_get Z_DEVTYPE "$s" device_type
+	for t in $LF_TYPES; do
+		config_get "Z_RPORT_$t" "$s" "remote_port_$t"
+		config_get "Z_PORT_$t" "$s" "port_$t"
+		config_get "Z_LPORT_$t" "$s" "local_port_$t"
+	done
 	config_get Z_CIRCLES "$s" circle
 	config_get Z_POLYGONS "$s" polygon
 	config_get Z_COUNTRIES "$s" country
@@ -325,10 +336,68 @@ zone_load() {
 	[ "${Z_LAG_LOSS%%.*}" = 100 ] && Z_LAG_LOSS=100
 	# nothing to simulate -> off
 	case "$Z_LAG_LOSS" in *[1-9]*) ;; *) [ "$Z_LAG_DELAY" = 0 ] && [ "$Z_LAG_JITTER" = 0 ] && Z_LAG=0;; esac
-	words_fix Z_DEV Z_ALLOW Z_BLOCK
+	words_fix Z_DEV Z_ALLOW Z_BLOCK Z_DEVTYPE
 	[ -n "$Z_COUNTRIES" ] && Z_COUNTRIES="$(echo "$Z_COUNTRIES" | tr ',a-z' ' A-Z')"
 	Z_HAS_REGION=0
 	case "$Z_CIRCLES$Z_POLYGONS$Z_COUNTRIES" in *[!\ \	]*) Z_HAS_REGION=1;; esac
+	zone_groups
+}
+
+# The device types of PC & console games (the map page's PLATFORMS)
+LF_TYPES="pc ps xbox switch"
+
+# does device type $1 have ports of its own in the loaded zone?
+type_ports() { eval "[ -n \"\$Z_RPORT_$1\$Z_PORT_$1\$Z_LPORT_$1\" ]"; }
+
+# The zone's devices by the ports they are filtered on (zone_load does this):
+# a device whose type has ports of its own (a PlayStation in a zone set up for
+# a PC, say - some games use other ports on each) is filtered on those, every
+# other device on the zone's ports. Z_MDEV: the devices on the zone's ports;
+# Z_GROUPS: the types with ports of their own that have devices, in the order
+# of their first device; Z_GDEV_<type>: those devices; Z_GPORTS: the types'
+# ports for awk (-v gports: "<type>|<device>|<server>|<either>;...").
+# The learned servers, the region and the counts stay the zone's: one game.
+zone_groups() {
+	local d t e
+	Z_MDEV=""; Z_GROUPS=""; Z_GPORTS=""
+	for t in $LF_TYPES; do eval "Z_GDEV_$t=''"; done
+	for d in $Z_DEV; do
+		t="$Z_PLATFORM"
+		for e in $Z_DEVTYPE; do
+			[ "${e%%=*}" = "$d" ] && { t="${e#*=}"; break; }
+		done
+		case " $LF_TYPES " in *" $t "*) ;; *) t="";; esac
+		if [ -n "$t" ] && [ "$t" != "$Z_PLATFORM" ] && type_ports "$t"; then
+			eval "Z_GDEV_$t=\"\${Z_GDEV_$t:+\$Z_GDEV_$t }\$d\""
+			case " $Z_GROUPS " in *" $t "*) ;; *) Z_GROUPS="${Z_GROUPS:+$Z_GROUPS }$t";; esac
+		else
+			Z_MDEV="${Z_MDEV:+$Z_MDEV }$d"
+		fi
+	done
+	# (awk splits the lists themselves on spaces and commas)
+	for t in $Z_GROUPS; do
+		eval "Z_GPORTS=\"\${Z_GPORTS:+\$Z_GPORTS;}\$t|\$Z_LPORT_$t|\$Z_RPORT_$t|\$Z_PORT_$t\""
+	done
+}
+
+# the short name of a type in set and chain names (an ipset name holds 31
+# characters): G_TAG
+group_tag() { case "$1" in xbox) G_TAG=xb;; switch) G_TAG=sw;; *) G_TAG="$1";; esac; }
+
+# One group of the loaded zone (zone_group "" - the devices on the zone's
+# ports - or zone_group <type>): its devices' addresses G_DEV4 / G_DEV6 / G_MACS
+# (as addr_list / mac_list give them), its ports G_LPORT / G_RPORT / G_PORT and
+# G_TAG, the part of its sets' and chains' names after "<zone>_" ("" for the
+# zone's own ports: the names as they always were)
+zone_group() {
+	local d
+	if [ -z "$1" ]; then
+		d="$Z_MDEV"; G_LPORT="$Z_LPORT"; G_RPORT="$Z_RPORT"; G_PORT="$Z_PORT"; G_TAG=""
+	else
+		eval "d=\"\$Z_GDEV_$1\"; G_LPORT=\"\$Z_LPORT_$1\"; G_RPORT=\"\$Z_RPORT_$1\"; G_PORT=\"\$Z_PORT_$1\""
+		group_tag "$1"
+	fi
+	G_DEV4="$(addr_list 4 $d)"; G_DEV6="$(addr_list 6 $d)"; G_MACS="$(mac_list $d)"
 }
 
 # "3074 3075-3079" -> "{ 3074, 3075-3079 }" (empty when no valid ports)
@@ -396,9 +465,15 @@ neigh_table() {
 }
 
 # current addresses of a zone's MAC devices: resolve_macs "<mac, mac>"
+# (with NEIGH_TAB set: the neighbour table is read once, into that file)
 resolve_macs() {
 	[ -n "$1" ] || return 0
-	neigh_table | lfawk neigh -v macs="$1"
+	if [ -n "$NEIGH_TAB" ]; then
+		[ -f "$NEIGH_TAB" ] || neigh_table > "$NEIGH_TAB"
+		lfawk neigh -v macs="$1" < "$NEIGH_TAB"
+	else
+		neigh_table | lfawk neigh -v macs="$1"
+	fi
 }
 
 # ------------------------------------------------------- firewall backend
@@ -728,22 +803,38 @@ classify_zone() { # zone (zone_load done) [force] -> $LF_RUN/<zone>.servers
 
 # classification -> set contents; only touches nft when something changed
 refresh_sets() { # [1 = rewrite everything] [build = only write $FW_SETS]
-	local z out="$FW_SETS" force="$1" mode="$2" macs
+	local z out="$FW_SETS" force="$1" mode="$2" macs mm g gd
 	# (the last load failed: everything again)
 	[ -f "$LF_RUN/sets.force" ] && force=1
 	: > "$out"
+	NEIGH_TAB="$LF_RUN/neigh.$$"; rm -f "$NEIGH_TAB"
 	for z in $ZONES; do
 		zone_load "$z"
 		# (even a full rewrite reuses the last classification while the region,
 		# the server list and the locations are unchanged - it only depends on those)
 		classify_zone "$z"
 		# where the zone's devices are right now: configured addresses plus
-		# the current IPv4/IPv6 addresses of its MAC devices
+		# the current IPv4/IPv6 addresses of its MAC devices - those of devices
+		# filtered on their type's own ports in <zone>.mip.<type tag>, and every
+		# address of those devices with its type in <zone>.gdev
 		macs="$(mac_list $Z_DEV)"
+		mm="$macs"; [ -n "$Z_GROUPS" ] && mm="$(mac_list $Z_MDEV)"
+		# (<zone>.gdev is there whenever a type had its own ports the pass before)
+		if [ -n "$Z_GROUPS" ] || [ -e "$LF_RUN/$z.gdev" ]; then rm -f "$LF_RUN/$z.mip".* "$LF_RUN/$z.gdev"; fi
 		{
 			echo "$Z_DEV" | tr ' ' '\n' | lfawk addrs | awk '$1 == "4" || $1 == "6" { print $2 }'
-			resolve_macs "$macs" > "$LF_RUN/$z.mip"
+			resolve_macs "$mm" > "$LF_RUN/$z.mip"
 			cat "$LF_RUN/$z.mip"
+			for g in $Z_GROUPS; do
+				eval "gd=\"\$Z_GDEV_$g\""
+				group_tag "$g"
+				resolve_macs "$(mac_list $gd)" > "$LF_RUN/$z.mip.$G_TAG"
+				{
+					echo "$gd" | tr ' ' '\n' | lfawk addrs | awk '$1 == "4" || $1 == "6" { print $2 }'
+					cat "$LF_RUN/$z.mip.$G_TAG"
+				} | awk -v g="$g" '{ print $1, g }' >> "$LF_RUN/$z.gdev"
+				cat "$LF_RUN/$z.mip.$G_TAG"
+			done
 		} | sort -u > "$LF_RUN/$z.dev"
 		[ -n "$macs" ] && echo "$macs" > "$LF_RUN/$z.macs" || rm -f "$LF_RUN/$z.macs"
 		[ "$Z_ENABLED" = 1 ] || continue
@@ -767,6 +858,7 @@ refresh_sets() { # [1 = rewrite everything] [build = only write $FW_SETS]
 		fi
 		[ -n "$macs" ] && fw_zone_mip "$z" >> "$out"
 	done
+	rm -f "$NEIGH_TAB"; NEIGH_TAB=""
 	[ "$mode" = build ] && return 0
 	if [ "$force" = 1 ] || ! cmp -s "$out" "$LF_RUN/sets.last" 2>/dev/null; then
 		if fw_load_sets "$out"; then
@@ -894,9 +986,9 @@ cleanup_zones() {
 		case " $ZONES " in *" $z "*) continue;; esac
 		keep_servers "$z" "$(cat "$G_DATA/zones/$z.game" 2>/dev/null)"
 		rm -f "$G_DATA/zones/$z.game"
-		rm -f "$LF_STATE/$z.ports" "$G_DATA/zones/$z.ports"
+		rm -f "$LF_STATE/$z.ports" "$G_DATA/zones/$z.ports" "$LF_STATE/$z".*.ports "$G_DATA/zones/$z".*.ports
 		rm -f "$LF_STATE/$z.ips" "$G_DATA/zones/$z.ips" "$LF_RUN/$z.servers" "$LF_RUN/$z.rev" "$LF_RUN/$z.sig" "$LF_RUN/$z.cls" "$LF_RUN/$z.new" "$LF_RUN/$z.merged" "$LF_RUN/$z.counts" "$LF_RUN/$z.state.last" "$LF_RUN/$z.out.last" \
-			"$LF_RUN/$z.dev" "$LF_RUN/$z.mip" "$LF_RUN/$z.macs" "$LF_RUN/$z.ctlast" "$LF_RUN/$z.ctpat" "$LF_RUN/$z.ports.at" \
+			"$LF_RUN/$z.dev" "$LF_RUN/$z.mip" "$LF_RUN/$z.mip".* "$LF_RUN/$z.gdev" "$LF_RUN/$z.macs" "$LF_RUN/$z.ctlast" "$LF_RUN/$z.ctpat" "$LF_RUN/$z.ports.at" \
 			"$LF_RUN/$z.ct6" "$LF_RUN/live.$z.prev"
 		log info "removed the learned servers of deleted zone $z"
 	done
@@ -1737,7 +1829,7 @@ do_status() {
 
 # what the map would show and why - for "my servers don't show up"
 do_diag() {
-	local z t n
+	local z t n g
 	load_config
 	ensure_dirs
 	restore
@@ -1751,7 +1843,10 @@ do_diag() {
 		zone_load "$z"
 		classify_zone "$z"
 		echo
-		echo "zone $z ($Z_LABEL): $Z_MODE$([ "$Z_STRICT" = 1 ] && echo ', strict'), $Z_PROTO, ports: ${Z_RPORT:+server $Z_RPORT }${Z_LPORT:+device $Z_LPORT }${Z_PORT:+either $Z_PORT}"
+		echo "zone $z ($Z_LABEL): $Z_MODE$([ "$Z_STRICT" = 1 ] && echo ', strict'), $Z_PROTO, ports: ${Z_RPORT:+server $Z_RPORT }${Z_LPORT:+device $Z_LPORT }${Z_PORT:+either $Z_PORT}${Z_PLATFORM:+ (for $Z_PLATFORM)}"
+		for g in $Z_GROUPS; do
+			eval "echo \"  $g devices on their own ports: \$Z_GDEV_$g - ports: \${Z_RPORT_$g:+server \$Z_RPORT_$g }\${Z_LPORT_$g:+device \$Z_LPORT_$g }\${Z_PORT_$g:+either \$Z_PORT_$g}\""
+		done
 		echo "  device addresses now: $(tr '\n' ' ' 2>/dev/null < "$LF_RUN/$z.dev")"
 		set -- $(awk '{c[$2]++} END {printf "%d %d %d %d %d", NR, c["in"], c["out"], c["pending"], c["unloc"]}' "$LF_RUN/$z.servers" 2>/dev/null)
 		echo "  learned: ${1:-0} (inside ${2:-0}, outside ${3:-0}, waiting for a location ${4:-0}, not locatable ${5:-0} - only located servers are drawn)"
@@ -1785,7 +1880,7 @@ ct_sift() { # zone conntrack-file
 # a zone on a wide preset (Any game, Apex Legends) can be narrowed to the
 # ports its game really uses. Only on passes with game traffic: cheap.
 tally_ports() {
-	local z="$1" t="$2" ct last=0
+	local z="$1" t="$2" ct last=0 g pf
 	ct="$(ct_file)" || return 0
 	[ -s "$LF_RUN/$z.dev" ] || return 0
 	# (once a pass at most - passes come every 2 s while a game looks for servers)
@@ -1795,34 +1890,63 @@ tally_ports() {
 	# (each connection's packet count is kept for the next pass: a port's total
 	# grows by what its connections sent in between)
 	: > "$LF_RUN/$z.ctlast.new"
+	# (devices filtered on their type's own ports: each type's ports in a list
+	# of their own, <zone>.<type>.ports - the lines then start with the type, "-"
+	# for the zone's own ports)
 	ct_sift "$z" "$ct" | lfawk ct_ports -v devs="$LF_RUN/$z.dev" -v proto="$Z_PROTO" \
-		-v ctlast="$LF_RUN/$z.ctlast" -v ctnext="$LF_RUN/$z.ctlast.new" > "$LF_RUN/ports.now" 2>/dev/null
+		-v gdev="$LF_RUN/$z.gdev" -v bygroup="${Z_GROUPS:+1}" \
+		-v ctlast="$LF_RUN/$z.ctlast" -v ctnext="$LF_RUN/$z.ctlast.new" > "$LF_RUN/ports.all" 2>/dev/null
 	mv -f "$LF_RUN/$z.ctlast.new" "$LF_RUN/$z.ctlast"
-	if [ -s "$LF_RUN/ports.now" ]; then
-		[ -f "$LF_STATE/$z.ports" ] || : > "$LF_STATE/$z.ports"
-		lfawk ports_merge -v now="$t" "$LF_STATE/$z.ports" "$LF_RUN/ports.now" | \
-			sort -k5,5nr -k3,3nr | head -n 200 > "$LF_STATE/$z.ports.new" && mv "$LF_STATE/$z.ports.new" "$LF_STATE/$z.ports"
-	fi
-	rm -f "$LF_RUN/ports.now"
+	for g in - $Z_GROUPS; do
+		if [ -z "$Z_GROUPS" ]; then
+			mv -f "$LF_RUN/ports.all" "$LF_RUN/ports.now"
+		else
+			awk -v g="$g" '$1 == g { sub(/^[^ ]+ /, ""); print }' "$LF_RUN/ports.all" > "$LF_RUN/ports.now"
+		fi
+		pf="$(ports_file "$z" "$g")"
+		if [ -s "$LF_RUN/ports.now" ]; then
+			[ -f "$pf" ] || : > "$pf"
+			lfawk ports_merge -v now="$t" "$pf" "$LF_RUN/ports.now" | \
+				sort -k5,5nr -k3,3nr | head -n 200 > "$pf.new" && mv "$pf.new" "$pf"
+		fi
+	done
+	rm -f "$LF_RUN/ports.now" "$LF_RUN/ports.all"
 }
 
-# ports <zone> [clear]: the zone's "Ports seen" list, busiest first:
+# where the ports seen by a zone's devices on the zone's own ports ("-" or
+# "") or on a type's own ports are kept: ports_file <zone> <-|type>
+ports_file() {
+	case "$2" in ''|-) echo "$LF_STATE/$1.ports";; *) echo "$LF_STATE/$1.$2.ports";; esac
+}
+
+# ports <zone> [<type>] [clear]: the zone's "Ports seen" list, busiest first -
+# with a device type (pc, ps, xbox, switch): the one of the devices of that
+# type (the zone's own list when the type has no ports of its own):
 # "<proto>/<port> <servers at once> <packets, peak> <first seen> <last seen> <passes> <covered 1|0>"
 do_ports() {
-	local z="$1"
+	local z="$1" g="-" pf
 	zone_or_die "$z"
 	restore
+	zone_load "$z"
+	case " $LF_TYPES " in *" $2 "*)
+		[ "$2" != "$Z_PLATFORM" ] && type_ports "$2" && g="$2"
+		shift;;
+	esac
+	pf="$(ports_file "$z" "$g")"
 	if [ "$2" = clear ]; then
 		lock_acquire
-		rm -f "$LF_STATE/$z.ports" "$G_DATA/zones/$z.ports"
+		rm -f "$pf" "$G_DATA/zones/${pf##*/}"
 		lock_release
-		echo "cleared the ports seen for zone $z"
+		echo "cleared the ports seen for zone $z$([ "$g" = - ] || echo " ($g)")"
 		return 0
 	fi
-	[ -n "$2" ] && die "usage: lobbyfence ports <zone> [clear]"
-	zone_load "$z"
-	[ -s "$LF_STATE/$z.ports" ] || return 0
-	lfawk ports_show -v lp="$Z_LPORT" -v rp="$Z_RPORT" -v pp="$Z_PORT" "$LF_STATE/$z.ports" | sort -k8,8nr -k3,3nr
+	[ -n "$2" ] && die "usage: lobbyfence ports <zone> [<device type>] [clear]"
+	[ -s "$pf" ] || return 0
+	if [ "$g" = - ]; then
+		lfawk ports_show -v lp="$Z_LPORT" -v rp="$Z_RPORT" -v pp="$Z_PORT" "$pf"
+	else
+		eval "lfawk ports_show -v lp=\"\$Z_LPORT_$g\" -v rp=\"\$Z_RPORT_$g\" -v pp=\"\$Z_PORT_$g\" \"\$pf\""
+	fi | sort -k8,8nr -k3,3nr
 }
 
 # Which server ports the zone's device uses right now (from the router's
@@ -1832,8 +1956,14 @@ diag_ports() {
 	local ct p="$Z_PROTO"
 	ct="$(ct_file)" && [ -s "$LF_RUN/$1.dev" ] || return 0
 	[ "$p" = both ] && p=""
-	echo "  server ports the device uses now (servers, packets it sent; * = NOT covered by this zone's ports):"
-	ct_sift "$1" "$ct" | lfawk ct_ports -v devs="$LF_RUN/$1.dev" -v proto="${p:-both}" -v lp="$Z_LPORT" -v rp="$Z_RPORT" -v pp="$Z_PORT" 2>/dev/null \
+	if [ -n "$Z_GROUPS" ]; then
+		echo "  server ports the devices use now (servers, packets they sent; <type>: devices on their type's own ports; * = NOT covered by their ports):"
+	else
+		echo "  server ports the device uses now (servers, packets it sent; * = NOT covered by this zone's ports):"
+	fi
+	ct_sift "$1" "$ct" | lfawk ct_ports -v devs="$LF_RUN/$1.dev" -v proto="${p:-both}" -v lp="$Z_LPORT" -v rp="$Z_RPORT" -v pp="$Z_PORT" \
+		-v gdev="$LF_RUN/$1.gdev" -v gports="$Z_GPORTS" -v bygroup="${Z_GROUPS:+1}" 2>/dev/null \
+		| awk 'NF == 5 { $2 = ($1 == "-" ? "" : $1 ":") $2; $1 = ""; sub(/^ /, "") } { print }' \
 		| sort -k2,2nr -k3,3nr | head -n 15 \
 		| awk '{ printf "    %s%s: %d server(s), %s packets\n", ($4 == 1 ? "  " : "* "), $1, $2, ($3 < 0 ? "?" : $3) }'
 }
@@ -1977,8 +2107,10 @@ usage() {
 	                           delete a game's servers list (kept, imported and
 	                           learned by zones set to that game), or just those
 	                           servers of it
-	  ports <zone> [clear]     the server ports the zone's device used while playing
-	                           (to narrow a wide preset to its game's real ports)
+	  ports <zone> [type] [clear]
+	                           the server ports the zone's devices used while playing
+	                           (to narrow a wide preset to its game's real ports);
+	                           type (pc, ps, xbox, switch): the devices of that type
 	  forget <zone> [addr...]  remove learned addresses (all when none given)
 	  allow <zone> <addr...>   always allow these servers (takes effect at once)
 	  block <zone> <addr...>   always block these servers (takes effect at once)

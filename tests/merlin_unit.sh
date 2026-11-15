@@ -14,8 +14,10 @@ mac_list() { :; }
 . "\$LF_SHARE/fw-merlin.sh"
 ipt_target_ok() { return 0; }          # the router's kernel has SKIPLOG and NFQUEUE
 fw_families() { echo 4; }
-zl() { Z_ID=game; Z_PROTO=udp; Z_LPORT=""; Z_RPORT=3074; Z_PORT=""; Z_BURST=0; Z_STRICT=1; Z_MODE=enforce; Z_LAG=1; Z_LAG_DIR=\$DIR; Z_LAG_DELAY=80; Z_LAG_JITTER=10; Z_LAG_LOSS=0; Z_DEV=192.168.1.100; Z_ALLOW=""; Z_BLOCK=""; Z_DEV4=192.168.1.100; Z_MACS=""; }
+zl() { Z_ID=game; Z_PROTO=udp; Z_LPORT=""; Z_RPORT=3074; Z_PORT=""; Z_BURST=0; Z_STRICT=1; Z_MODE=enforce; Z_LAG=1; Z_LAG_DIR=\$DIR; Z_LAG_DELAY=80; Z_LAG_JITTER=10; Z_LAG_LOSS=0; Z_DEV=192.168.1.100; Z_ALLOW=""; Z_BLOCK=""; Z_GROUPS=""; }
 zone_load() { zl; }
+# (the main script's: one group, the device on the zone's own ports)
+zone_group() { G_TAG=""; G_LPORT="\$Z_LPORT"; G_RPORT="\$Z_RPORT"; G_PORT="\$Z_PORT"; G_DEV4="\$(addr_list 4)"; G_DEV6=""; G_MACS=""; }
 ZONES_ON=game
 fw_prepare; zl; ipt_zone game 4 > "\$LF_RUN/zone.out"
 for DIR in both up down; do LAG_SUPPORTED=1; ipt_lag_zones; fw_mangle_extra 4 > "\$LF_RUN/mangle.\$DIR"; echo "\$MANGLE_HOOKS" > "\$LF_RUN/hooks.\$DIR"; done

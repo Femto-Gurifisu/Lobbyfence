@@ -178,6 +178,27 @@ cfg delete lobbyfence.game.port; cfg add_list lobbyfence.game.remote_port=3074
 lf apply
 expect "remote_port only: other server ports untouched" "80.20.0.1 ok" "$(probe_port 5555 80.20.0.1)"
 
+# --- 7b2. device types: a PC and a PlayStation in one zone, each filtered on its own
+# type's ports (some games use other ports on each), not on the first device's
+inl $IP addr add 192.168.1.101/24 dev veth0
+probe_from() { s="$1"; p="$2"; shift 2; inl env UDP_SRC="$s" python3 "$HERE/udp.py" probe "$p" "$@" | tr '\n' ' ' | sed 's/ $//'; }
+cfg add_list lobbyfence.game.device=192.168.1.101
+cfg set lobbyfence.game.platform=pc
+cfg add_list lobbyfence.game.device_type=192.168.1.101=ps
+cfg add_list lobbyfence.game.remote_port_ps=5555
+lf apply || fail "apply with device types"
+expect "device types: the PC on the zone's ports, the PlayStation on its own" "80.20.0.1 blocked 80.20.0.1 ok 80.20.0.1 blocked 80.20.0.1 ok" \
+	"$(probe_from 192.168.1.100 3074 80.20.0.1) $(probe_from 192.168.1.100 5555 80.20.0.1) $(probe_from 192.168.1.101 5555 80.20.0.1) $(probe_from 192.168.1.101 3074 80.20.0.1)"
+ips test lf_game_psdev4 192.168.1.101 2>/dev/null && ! ips test lf_game_dev4 192.168.1.101 2>/dev/null && ips test lf_game_dev4 192.168.1.100 2>/dev/null \
+	&& pass "device types: the type's devices in sets of their own" || fail "device type sets: $(ips list -n | grep lf_game)"
+inr "$W/bin/iptables" -t mangle -S LF_CTF_IN | grep -q "lf_game_psdev4 src -j MARK" && inr "$W/bin/iptables" -t mangle -S LF_CTF_IN | grep -q "lf_game_dev4 src -j MARK" \
+	&& pass "...both types' devices kept out of the hardware acceleration" || fail "CTF by type: $(inr "$W/bin/iptables" -t mangle -S LF_CTF_IN)"
+cfg del_list lobbyfence.game.device=192.168.1.101
+for o in device_type remote_port_ps platform; do cfg delete lobbyfence.game.$o; done
+lf apply
+ips list -n | grep -q '^lf_game_ps' && fail "the type's sets stayed: $(ips list -n | grep lf_game_ps)" || pass "device types gone: their sets go too"
+inr "$W/bin/iptables" -S | grep -q 'LF_game_ps' && fail "the type's chains stayed" || pass "...and their chains"
+
 # --- 7c. click to allow / block: live; also kept in changes waiting on the web page
 printf "config globals 'globals'\n\toption enabled '1'\n" > "$LF_RUN/staged.conf.seed"
 cp "$LF_HOME/lobbyfence.conf" "$LF_RUN/staged.conf"
@@ -553,6 +574,12 @@ out="$(cgi "$TOKEN" "exec ports game")"
 python3 -c "import json,sys; d=json.loads(sys.argv[1]); assert d['code']==0, d" "$out" && pass "CGI: ports seen" || fail "CGI ports: $out"
 out="$(cgi "$TOKEN" "exec ports game reboot")"
 python3 -c "import json,sys; d=json.loads(sys.argv[1]); assert d.get('error') == 'bad argument', d" "$out" && pass "CGI: ports takes clear only" || fail "CGI ports bad: $out"
+out="$(cgi "$TOKEN" "exec ports game ps")"; out2="$(cgi "$TOKEN" "exec ports game xbox clear")"
+python3 -c "import json,sys; assert all(json.loads(a).get('code') == 0 for a in sys.argv[1:])" "$out" "$out2" \
+	&& pass "CGI: ports of one device type (and clear them)" || fail "CGI ports by type: $out / $out2"
+out="$(cgi "$TOKEN" "exec ports game ps reboot")"; out2="$(cgi "$TOKEN" "exec ports game toaster")"
+python3 -c "import json,sys; assert all(json.loads(a).get('error') == 'bad argument' for a in sys.argv[1:])" "$out" "$out2" \
+	&& pass "CGI: ports takes a device type and clear only" || fail "CGI ports by type, bad: $out / $out2"
 # Save (stage) -> config shows the waiting change -> Apply
 conf="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['text'])" "$(cgi "$TOKEN" config)")"
 new="$(printf '%s\n' "$conf" | sed "s/option label 'Test \"game\"'/option label 'Renamed'/")"

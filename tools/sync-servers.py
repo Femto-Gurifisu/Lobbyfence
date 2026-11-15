@@ -41,8 +41,12 @@ def networks():
 def games():
     """{id: label} for the games whose servers may be shared, read from map.js"""
     js = MAPJS.read_text()
-    p2p = re.search(r"var P2P_GAMES = \[([^\]]*)\]", js)
-    p2p = set(re.findall(r"'([a-z0-9_]+)'", p2p.group(1))) if p2p else set()
+    # games never shared: peer-to-peer ones (players, not servers) and Minecraft
+    # (players' own servers) - without that list nothing is safe to take
+    m = re.search(r"var NOT_SHARED_GAMES = \[([^\]]*)\]", js)
+    if not m:
+        sys.exit("map.js has no NOT_SHARED_GAMES list - not importing anything")
+    p2p = set(re.findall(r"'([a-z0-9_]+)'", m.group(1)))
     out = {}
     for m in re.finditer(r"\{ id: '([a-z0-9_]+)', group: '([a-z]+)', label: (?:_\()?'((?:[^'\\]|\\.)*)'", js):
         gid, group, label = m.group(1), m.group(2), m.group(3).replace("\\'", "'")

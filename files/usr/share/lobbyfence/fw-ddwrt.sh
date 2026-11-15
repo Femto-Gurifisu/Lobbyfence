@@ -43,17 +43,9 @@ fw_sfe() {
 	grep -q '^fast_classifier ' "${LF_PROC_MODULES:-/proc/modules}" 2>/dev/null
 }
 
-# the zone's devices -> LF_CTF_X (the double XOR); the chains are hooked in
-# by ipt_mangle (LF_CTF_IN in PREROUTING, LF_CTF_OUT in POSTROUTING)
-ipt_ctf_zone() { # zone family
-	local f="$2" s="lf_$1" d mac
-	eval "d=\"\$Z_DEV$f\""
-	[ -n "$d" ] && { echo "-A LF_CTF_IN -m set --match-set ${s}_dev$f src -j LF_CTF_X"; echo "-A LF_CTF_OUT -m set --match-set ${s}_dev$f dst -j LF_CTF_X"; }
-	if [ -n "$Z_MACS" ]; then
-		for mac in $(one_per_line "$Z_MACS"); do echo "-A LF_CTF_IN -m mac --mac-source $mac -j LF_CTF_X"; done
-		echo "-A LF_CTF_OUT -m set --match-set ${s}_mip$f dst -j LF_CTF_X"
-	fi
-}
+# the zone's devices -> LF_CTF_X (the double XOR) in ipt_ctf_zone; the chains
+# are hooked in by ipt_mangle (LF_CTF_IN in PREROUTING, LF_CTF_OUT in POSTROUTING)
+CTF_TARGET=LF_CTF_X
 
 # (called inside ipt_mangle, which has "ctf" set)
 fw_mangle_extra() {

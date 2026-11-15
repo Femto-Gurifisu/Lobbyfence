@@ -30,8 +30,10 @@ game apex Apex Legends
 3.3.3.4 10 10 US 9999999999
 game sf6 Street Fighter 6
 3.4.5.6 40 -70 US 1794416301
-game gta GTA Online
+game gta Rockstar Games
 3.4.5.7 40 -70 US 1794416301
+game minecraft Minecraft
+3.4.5.9 40 -70 US 1794416301
 game other Victor's PS5
 3.4.5.8 40 -70 US 1794416301
 game valorant VALORANT
@@ -48,8 +50,8 @@ game valorant VALORANT
     check("an address already listed is not added again", sum(l.startswith("155.133.248.36 ") for l in after.splitlines()) == 1)
     check("a home address, a bad location and a time in the future are left out",
           not any(l.split()[0] in ("73.12.44.5", "3.3.3.3", "3.3.3.4") for l in added), added)
-    check("peer-to-peer games, Custom zones and their labels are left out",
-          not any(x in after for x in ("3.4.5.6", "3.4.5.7", "3.4.5.8", "Victor")), added)
+    check("peer-to-peer games, Minecraft (players' own servers), Custom zones and their labels are left out",
+          not any(x in after for x in ("3.4.5.6", "3.4.5.7", "3.4.5.8", "3.4.5.9", "Victor")), added)
     check("a listed game not in the list yet gets its own section",
           "game valorant VALORANT\n3.120.9.9 50.11 8.68 DE 1794416301" in after, added)
     check("exactly those two lines are new", sorted(added) == sorted(["155.133.248.99 52.2961 4.9549 NL 1794416301",

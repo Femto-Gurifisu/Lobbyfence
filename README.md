@@ -551,7 +551,9 @@ What is different on DD-WRT:
    games, the **device type** (its ports are filled in - see
    [Game presets](#game-presets)) and the **device** from the list of devices
    on your network. The zone starts in **Monitor** mode, so nothing is blocked
-   yet.
+   yet. A second device for the same game - a console next to your PC, say -
+   goes into the same zone with **Devices…** (see
+   [A PC and a console in one zone](#a-pc-and-a-console-in-one-zone)).
 2. Click the map where you want to play and drag the circle's edge dot to size
    it - or use **Draw polygon**: click the corners, then click the first
    corner, double-click or press Enter (Esc cancels). LobbyFence then offers to
@@ -594,6 +596,9 @@ If matchmaking breaks, put the login / matchmaking / relay servers in
 | `mode`          | `enforce` (default) or `monitor` |
 | `strict`        | Also drop servers not located yet (default `1`) |
 | `device`        | List: MAC address (recommended, covers all of the device's IPv4/IPv6 addresses) or an IPv4/IPv6 address / subnet |
+| `platform`      | The device type the zone's ports are for (PC & console games): `pc`, `ps`, `xbox` or `switch` - also the type of every device without one of its own |
+| `device_type`   | List: `<device>=<type>` for a device of another type than the zone's (the device as written in `device`) |
+| `remote_port_<type>` / `port_<type>` / `local_port_<type>` | Lists: the ports a device type is filtered on when they differ from the zone's (`remote_port_ps`, say); a type without any uses the zone's |
 | `proto`         | `udp`, `tcp` or `both` |
 | `port`          | List: ports / ranges matched on either side (server or device) |
 | `remote_port`   | List: server-side ports / ranges |
@@ -628,7 +633,8 @@ PC & console games (fighting games too) are picked together with the
 **device type** - PC, or a console: PlayStation, Xbox or Nintendo Switch -
 because some games use other ports on each (Fortnite and Apex Legends below);
 the others use the same ports everywhere. The zone panel shows it next to the game (*Fortnite ·
-PlayStation*), and **Change…** switches it.
+PlayStation*), and **Change…** switches it. A zone with several devices has a
+type for each - see [A PC and a console in one zone](#a-pc-and-a-console-in-one-zone).
 
 | Preset | Ports | Source |
 |--------|-------|--------|
@@ -639,14 +645,15 @@ PlayStation*), and **Change…** switches it.
 | Call of Duty series (the ports Activision lists for Black Ops 7/6, Warzone and MW III) | UDP 3074-3079, either side | official - [Activision](https://support.activision.com/content/atvi/support/web/en/articles/ports-used-for-call-of-duty-games.html) |
 | Counter-Strike 2 / Dota 2 | UDP 27000-27100 | community |
 | Fortnite | PC: UDP 9000-9199, 10500-10599, 15000-15199, 22200-22299, 30300-30399, 32900-32999, 35000-35099, 36800-36899, 39200-39299, 45100-45199 · PlayStation: UDP 9000-9199, 10100-10199, 15000-15199, 22200-22299, 36300-36399, 37500-37599, 39900-39999, 41700-41799, 42100-42199, 48200-48299, 51100-51199, 53700-53799, 56100-56199 · Xbox, Nintendo Switch and mobile: UDP 3478-3479, 5060, 5062, 6250, 12000-65000 ([Epic Games](https://fortnitehelp.epicgames.com/help/en-US/c5719335176219/c5719372265755/a000084266), wide range) | players' routers (PC, PlayStation); Epic Games (Xbox, Nintendo Switch, mobile) |
-| GTA Online (GTA V) / Red Dead Online | UDP 6672, 61455-61458, either side - peer-to-peer, see below | official - Rockstar ([GTA Online](https://support.rockstargames.com/articles/52C2oBx4yUOClVNK6enH8z), [Red Dead Online](https://support.rockstargames.com/articles/3LzU9sNfbcR8Z2sZ8gpFLH/red-dead-online-pc-connection-troubleshooting)) |
 | League of Legends | UDP 5000-5500 | official - Riot, via [British Esports](https://britishesports.org/wp-content/uploads/2023/02/PORT-IP-24-25.pdf) |
+| Minecraft | TCP 25565 (Java Edition), UDP 19132-19133 (Bedrock Edition: consoles, phones, Windows) - the servers' default ports; a server on another port: add it with [Ports…](#narrowing-a-zone-to-its-games-real-ports-ports) | official - Mojang's defaults ([Bedrock server](https://learn.microsoft.com/en-us/minecraft/creator/documents/bedrockserver/server-properties)) |
 | Overwatch 2 | UDP 3478-3479, 5060, 5062, 6250, 12000-64000 | official - Blizzard, via [NASEF](https://www.nasef.org/overwatch-it-help-page) (wide range) |
 | Rainbow Six Siege X | UDP 3074, 6015, 10000-10099 | community - [Netduma forum](https://forum.netduma.com/topic/38151-duma-not-recognizing-rainbow-six-siege-xr1000/), [IPFire forum](https://community.ipfire.org/t/rainbow-six-siege-server/4361) |
 | Roblox (PC, console and mobile) | UDP 49152-65535 (wide range) | official - [Roblox](https://en.help.roblox.com/hc/articles/203312880) |
 | Rocket League | UDP 7000-9000 | official - Psyonix, via [British Esports](https://britishesports.org/wp-content/uploads/2023/02/PORT-IP-24-25.pdf) |
+| Rockstar Games (GTA Online, Red Dead Online) | UDP 6672, 61455-61458, either side - peer-to-peer, see below | official - Rockstar ([GTA Online](https://support.rockstargames.com/articles/52C2oBx4yUOClVNK6enH8z), [Red Dead Online](https://support.rockstargames.com/articles/3LzU9sNfbcR8Z2sZ8gpFLH/red-dead-online-pc-connection-troubleshooting)) |
 | VALORANT | UDP 7000-8000, 8180-8181 | official - [Riot](https://support.riotgames.com/en-us/valorant/support-tools/how-to-set-up-port-forwarding) |
-| ARC Raiders, Battlefield series, Dead by Daylight, EA SPORTS FC 26, Marvel Rivals, PUBG: BATTLEGROUNDS | UDP 1024-65535 (server side) - their match ports aren't published or measured yet: narrow the zone with [Ports…](#narrowing-a-zone-to-its-games-real-ports-ports) after a few matches | - |
+| ARC Raiders, Battlefield series, Dead by Daylight, EA SPORTS FC 26, Marvel Rivals, PUBG: BATTLEGROUNDS, THE FINALS | UDP 1024-65535 (server side) - their match ports aren't published or measured yet: narrow the zone with [Ports…](#narrowing-a-zone-to-its-games-real-ports-ports) after a few matches | - |
 | **Fighting games:** Street Fighter 6 | UDP 30840-30859, 30870-30879, either side - peer-to-peer, see below | community - Capcom's ports, via [portforward.com](https://portforward.com/street-fighter-6/) |
 | **Fighting games:** Dragon Ball Xenoverse 2, Dragon Ball: Sparking! ZERO, Guilty Gear -Strive-, Mortal Kombat 1, Super Smash Bros. Ultimate, TEKKEN 8 | UDP 1024-65535 (server side) - peer-to-peer, see below; their match ports aren't published or measured yet: narrow the zone with [Ports…](#narrowing-a-zone-to-its-games-real-ports-ports) after a few matches | - |
 | Arena of Valor | UDP/TCP 10001-10094, 17000 | community - [Netduma forum list](https://forum.netduma.com/topic/55803-list-of-mobile-games-and-its-ports) |
@@ -658,9 +665,9 @@ PlayStation*), and **Change…** switches it.
 
 *Open for server tests* is filled in per game: Apex Legends and Fortnite
 (PC/console and mobile) 2 (raise it if needed); Call of Duty, Call of Duty:
-Mobile, GTA Online and the fighting games 0 (off). Other games start at 0.
+Mobile, Rockstar Games and the fighting games 0 (off). Other games start at 0.
 
-**GTA Online and Red Dead Online are peer-to-peer:** the other players in your
+**GTA Online and Red Dead Online (the *Rockstar Games* preset) are peer-to-peer:** the other players in your
 session connect to your console or PC directly (from UDP 6672 when they can),
 so LobbyFence locates *them*, not servers - the smaller the region, the fewer
 players end up in your session. A session is many players at once, so *Open
@@ -683,8 +690,30 @@ like) use too.
 **Changing a zone's game:** the panel shows the zone's game with a
 *Change…* button. Pick another preset to switch the zone to that game's
 ports, protocol and *Open for server tests* value. You can rename the zone to
-match. The device, the region and the learned servers stay. Press Save &
-Apply afterwards.
+match. The devices, the region and the learned servers stay. A zone with
+several devices shows a type for each: each type gets the new game's ports on
+it. Press Save & Apply afterwards.
+
+### A PC and a console in one zone
+
+One zone can filter several devices - a PC and a PlayStation playing the same
+game, say: same region, same learned servers. **Devices…** (in the zone panel,
+next to the zone's devices) lists them, adds one from the devices on your
+network (or by address), takes one out, and - for PC & console games - says
+what each one is. **Each device is filtered on its own type's ports**: a
+PlayStation added to an Apex Legends zone set up for a PC gets Apex Legends'
+PlayStation ports, and the PC keeps the PC's. (Before, the zone's one device
+type decided the ports for every device in it, so the second device was
+filtered on the first one's ports.) The panel shows the types next to the game
+(*Apex Legends · PC + PlayStation*) and next to each device. Games that use
+the same ports on every device type (Call of Duty, say) keep one set of ports
+for all of them.
+
+**Ports…** keeps each type's ports apart: a zone with a type on ports of its
+own shows a *Devices* choice at the top - pick whose ports to see and narrow.
+Set by hand, a device's type is `list device_type '<device>=<type>'` and that
+type's ports are `remote_port_<type>` / `port_<type>` / `local_port_<type>`
+(see [Configuration](#configuration-etcconfiglobbyfence)).
 
 **Any mobile game** is for a phone or tablet: mobile games find their match
 (lobby, matchmaking) over TCP, mostly on port 443, so filtering those
@@ -779,7 +808,12 @@ same device. **Ports…** (next to *Change…* under the zone's game) fixes that
    becomes 10200-10299, so the game's next servers on a nearby port are still
    caught. The zone keeps its game; the panel then says *own ports*.
 
-From the command line: `lobbyfence ports <zone>` (and `... clear`).
+A zone with devices of a type on ports of their own (a PlayStation in a zone
+set up for a PC) keeps a list for each type: pick whose at the top of the
+window, and *Use these ports* changes that type's ports only.
+
+From the command line: `lobbyfence ports <zone>` (and `... clear`); one
+device type's list: `lobbyfence ports <zone> ps` (`pc`, `ps`, `xbox`, `switch`).
 
 ## Sharing located servers (Servers file)
 
@@ -822,8 +856,9 @@ games.
   is deleted once its servers are added. Only game servers in the data-centre
   networks LobbyFence knows (`files/usr/share/lobbyfence/server-networks.txt`) go, for the listed
   client-server games, under the game's own name: nothing from peer-to-peer
-  games (the fighting games, GTA Online), *Any game* or *Custom* zones, no
-  zone labels - so no player's own address and nothing about you.
+  games (the fighting games, Rockstar Games), Minecraft (players' own
+  servers), *Any game* or *Custom* zones, no zone labels - so no player's own
+  address and nothing about you.
 * **Send new ones by itself, once a day** (under the button, off until you
   tick it): the router sends what it found since the last time to the same
   form, by itself - the first time within the hour, then once a day around
@@ -911,7 +946,7 @@ lobbyfence export                   located servers by game (the Servers file)
 lobbyfence import-servers <file|->  add the locations from a Servers file (no lookups)
 lobbyfence remove-servers <game|all> [addr...]  delete a game's servers list, or just those servers
 lobbyfence share-servers [status|preview|now|auto on|off]  send new found game servers to LobbyFence (once a day: auto on)
-lobbyfence ports <zone> [clear]     the server ports the zone's device used while playing
+lobbyfence ports <zone> [type] [clear]  the server ports the zone's devices used while playing (type: pc, ps, xbox, switch)
 lobbyfence forget <zone> [addr...]  drop learned addresses
 lobbyfence cycle                    run a learning pass now
 lobbyfence apply                    rebuild the firewall table

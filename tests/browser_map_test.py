@@ -344,13 +344,17 @@ def main():
         platform.select_option("switch")
         check("Apex Legends on Nintendo Switch (not measured): every port", ports.input_value() == "1024-65535", ports.input_value())
         names = page.evaluate("[...[...document.querySelectorAll('#modal optgroup')].find(g => g.label === 'PC & console').children].map(o => o.textContent)")
-        check("PC & console games A to Z - Marvel Rivals, Roblox, GTA Online, Battlefield and more",
-              names == sorted(names, key=str.lower) and all(n in names for n in ["Marvel Rivals", "Roblox", "GTA Online (GTA V) / Red Dead Online",
+        check("PC & console games A to Z - Marvel Rivals, Roblox, Rockstar Games, Battlefield, THE FINALS, Minecraft and more",
+              names == sorted(names, key=str.lower) and all(n in names for n in ["Marvel Rivals", "Roblox", "Rockstar Games", "THE FINALS", "Minecraft",
                                                                               "Battlefield series", "Rainbow Six Siege X", "EA SPORTS FC 26"]), names)
         game.select_option("gta")
-        check("GTA Online: Rockstar's ports on either side, open for server tests off, short name",
+        check("Rockstar Games (GTA Online, Red Dead Online): Rockstar's ports on either side, open for server tests off, its name",
               ports.input_value() == "6672 61455-61458" and modal.get_by_text("Game ports (either side)").is_visible()
-              and burst_in.input_value() == "0" and modal.locator("input").nth(1).input_value() == "GTA Online", ports.input_value())
+              and burst_in.input_value() == "0" and modal.locator("input").nth(1).input_value() == "Rockstar Games"
+              and modal.get_by_text("GTA Online and Red Dead Online", exact=False).is_visible(), ports.input_value())
+        game.select_option("minecraft")
+        check("Minecraft: Java (TCP 25565) and Bedrock (UDP 19132-19133), both protocols",
+              ports.input_value() == "19132-19133 25565" and proto.input_value() == "both", ports.input_value())
         game.select_option("marvelrivals")
         check("Marvel Rivals: every UDP port until its ports are known - and says so",
               ports.input_value() == "1024-65535" and modal.get_by_text("match ports not known yet", exact=False).is_visible())
@@ -1117,6 +1121,103 @@ def main():
         page.evaluate("window.__execResult = null; window.__live = null")
         page.evaluate("window.__poll()")
         page.wait_for_timeout(200)
+
+        # ---- 6b. Devices…: a PC and a PlayStation in one zone, each on its own type's ports
+        APEX_PC = ["7700-7799", "8100-8199", "9000-9099", "10000-10599", "10700-10899", "15000-15099", "22200-22299", "27000-27199", "49000-49099"]
+        APEX_PS = ["1000-1099", "1900-1999", "3000-3199", "7700-7799", "8100-8199", "10000-10999", "27000-27199", "27500-27599", "34100-34199"]
+        page.evaluate("""([z, pc]) => {
+            const s = uciState[z];
+            ['device_type', 'port', 'remote_port_ps', 'remote_port_xbox', 'port_ps'].forEach(o => delete s[o]);
+            Object.assign(s, { game: 'apex', platform: 'pc', device: [ '192.168.1.10' ], remote_port: pc.slice(), proto: 'udp' });
+            window.__devices = [ { mac: 'aa:bb:cc:dd:ee:01', name: 'Gaming PC', ipv4: [ '192.168.1.10' ], ipv6: [] },
+                                 { mac: 'aa:bb:cc:dd:ee:02', name: 'PS5', ipv4: [ '192.168.1.20' ], ipv6: [] } ];
+            window.__hints = [ { mac: 'aa:bb:cc:dd:ee:01', name: 'Gaming PC', ip: '192.168.1.10' } ];
+            if (!fs.__counted) { const ex = fs.exec; fs.exec = (c, a) => { if (a && a[0] === 'devices') window.__devAsked = (window.__devAsked || 0) + 1; return ex(c, a); }; fs.__counted = true; }
+            window.__devAsked = 0;
+            window.view.devList = null; window.view.devLoading = null; window.view.renderStatus();
+        }""", [zid, APEX_PC])
+        page.wait_for_function("document.querySelector('.lf-zonedevs-list') && document.querySelector('.lf-zonedevs-list').innerText.includes('Gaming PC')")
+        check("the status names the zone's device and its type (LuCI's host hints: no request to the router)",
+              page.locator(".lf-zonedevs").inner_text().startswith("Device:") and "Gaming PC (PC)" in page.locator(".lf-zonedevs-list").inner_text()
+              and page.evaluate("window.__devAsked") == 0, [page.locator(".lf-zonedevs").inner_text(), page.evaluate("window.__devAsked")])
+        page.locator(".lf-devsbtn").click()
+        dm = page.locator("#modal")
+        page.wait_for_function("document.querySelectorAll('#modal .lf-devs-pick option').length > 2")
+        check("Devices… asks the router for its device list", page.evaluate("window.__devAsked") == 1)
+        check("Devices… lists the zone's device with its type", dm.locator(".lf-devs-row").count() == 1
+              and dm.locator(".lf-devs-type").input_value() == "pc" and "Gaming PC (192.168.1.10)" in dm.locator(".lf-devs-name").inner_text())
+        check("...and says the game uses other ports on each type", "uses other ports on each device type" in dm.inner_text())
+        dm.locator(".lf-devs-pick").select_option("aa:bb:cc:dd:ee:02")
+        dm.locator(".lf-devs-add").click()
+        check("a device needs its type before it is added", "Choose the device type" in dm.inner_text() and dm.locator(".lf-devs-row").count() == 1)
+        dm.locator(".lf-devs-addtype").select_option("ps")
+        dm.locator(".lf-devs-add").click()
+        check("...then it is added, with that type", dm.locator(".lf-devs-row").count() == 2
+              and dm.locator(".lf-devs-type").nth(1).input_value() == "ps" and "PS5 (aa:bb:cc:dd:ee:02)" in dm.locator(".lf-devs-name").nth(1).inner_text())
+        dm.locator(".lf-devs-pick").select_option("aa:bb:cc:dd:ee:02")
+        dm.locator(".lf-devs-addtype").select_option("ps")
+        dm.locator(".lf-devs-add").click()
+        check("the same device is not added twice", "in this zone already" in dm.inner_text() and dm.locator(".lf-devs-row").count() == 2)
+        dm.locator(".lf-devs-save").click()
+        z = page.evaluate("z => uciState[z]", zid)
+        check("Save: both devices, the PlayStation with its type and the game's PlayStation ports",
+              z.get("device") == ["192.168.1.10", "aa:bb:cc:dd:ee:02"] and z.get("platform") == "pc" and z.get("device_type") == ["aa:bb:cc:dd:ee:02=ps"]
+              and z.get("remote_port_ps") == APEX_PS and z.get("remote_port") == APEX_PC, z)
+        check("the status shows both types", "Apex Legends · PC + PlayStation" in page.locator(".lf-zonegame").inner_text()
+              and page.locator(".lf-zonedevs").inner_text().startswith("Devices:")
+              and "Gaming PC (PC), PS5 (PlayStation)" in page.locator(".lf-zonedevs-list").inner_text(), page.locator(".lf-zonedevs").inner_text())
+        # Ports…: each type's ports apart
+        page.evaluate("t => { window.__execResult = { code: 0, stdout: t }; }", "udp/1050 1 900 100 200 3 1 900\nudp/34150 1 700 100 200 2 1 700\n")
+        page.locator(".lf-portsseen").click()
+        page.wait_for_function("document.querySelectorAll('.lf-ports-pick').length === 2")
+        opts = page.evaluate("[...document.querySelectorAll('.lf-ports-type option')].map(o => o.textContent)")
+        check("Ports… with a type on its own ports: pick whose ports", opts == ["PC", "PlayStation"]
+              and page.evaluate("window.__execs.filter(e => e[1] === 'ports').slice(-1)[0]") == ["/usr/sbin/lobbyfence", "ports", zid], opts)
+        page.locator(".lf-ports-type").select_option("1")
+        page.wait_for_function("(z) => { const e = window.__execs.filter(e => e[1] === 'ports').slice(-1)[0]; return e.length === 4 && e[3] === 'ps'; }", arg=zid)
+        page.wait_for_function("document.querySelectorAll('.lf-ports-pick').length === 2")
+        ticked = page.evaluate("[...document.querySelectorAll('.lf-ports-pick')].map(c => c.checked)")
+        check("...the PlayStation's own list, its own ports ticked", ticked == [True, True], ticked)
+        page.locator(".lf-ports-pick[value='34150']").uncheck()
+        check("...and the preview says whose ports change", "server ports for PlayStation in this zone become: 1000-1099" in page.locator(".lf-ports-preview").inner_text(),
+              page.locator(".lf-ports-preview").inner_text())
+        page.locator(".lf-ports-use").click()
+        z = page.evaluate("z => uciState[z]", zid)
+        check("Use these ports: the PlayStation's ports, the PC's stay", z.get("remote_port_ps") == ["1000-1099"] and z.get("remote_port") == APEX_PC, z)
+        page.evaluate("window.__execResult = null")
+        # Change game: one type for each device; the game's ports on each type
+        page.locator(".lf-changegame").click()
+        cg = page.locator("#modal")
+        check("Change game with two devices: a type for each", cg.locator(".lf-cg-devrow").count() == 2
+              and cg.locator(".lf-cg-platform").nth(1).input_value() == "ps" and "PS5" in cg.locator(".lf-cg-devrow").nth(1).inner_text())
+        cg.locator(".lf-cg-game").select_option("cod")
+        cg.locator(".lf-cg-apply").click()
+        z = page.evaluate("z => uciState[z]", zid)
+        check("a game with the same ports on every type: the types stay, no ports of a type's own",
+              z.get("game") == "cod" and z.get("port") == ["3074-3079"] and z.get("device_type") == ["aa:bb:cc:dd:ee:02=ps"]
+              and "remote_port_ps" not in z and "port_ps" not in z and z.get("platform") == "pc", z)
+        page.locator(".lf-changegame").click()
+        page.locator("#modal .lf-cg-game").select_option("apex")
+        page.locator("#modal .lf-cg-apply").click()
+        z = page.evaluate("z => uciState[z]", zid)
+        check("back to Apex Legends: each type gets the game's ports on it", z.get("remote_port") == APEX_PC and z.get("remote_port_ps") == APEX_PS, z)
+        # the PC out: the PlayStation is the zone's only device, on its ports
+        page.locator(".lf-devsbtn").click()
+        page.wait_for_function("document.querySelectorAll('#modal .lf-devs-row').length === 2")
+        page.locator("#modal .lf-devs-remove").nth(0).click()
+        page.locator("#modal .lf-devs-save").click()
+        z = page.evaluate("z => uciState[z]", zid)
+        check("one device left: its type is the zone's, with its ports", z.get("device") == ["aa:bb:cc:dd:ee:02"] and z.get("platform") == "ps"
+              and z.get("remote_port") == APEX_PS and "device_type" not in z and "remote_port_ps" not in z, z)
+        page.locator(".lf-devsbtn").click()
+        page.wait_for_function("document.querySelectorAll('#modal .lf-devs-row').length === 1")
+        page.locator("#modal .lf-devs-remove").click()
+        page.locator("#modal .lf-devs-save").click()
+        check("a zone keeps at least one device", "A zone needs a device" in page.locator("#modal").inner_text())
+        page.locator("#modal").get_by_role("button", name="Cancel").click()
+        page.evaluate("""([z, pc]) => { Object.assign(uciState[z], { device: [ '192.168.1.10' ], platform: 'pc', remote_port: pc.slice() });
+            window.view.renderStatus(); }""", [zid, APEX_PC])
+
         # a crash and an error the router recorded an hour ago by its own clock (years behind this PC's)
         page.evaluate("""() => { const s = window.view.status; window.__upd = s.updated; s.updated = 1700000000;
             s.problems = { crashes: 1, crash_time: 1699996400, error: 'test error', error_time: 1699999000 }; window.view.renderStatus(); }""")

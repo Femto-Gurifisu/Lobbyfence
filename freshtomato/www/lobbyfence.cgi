@@ -98,9 +98,10 @@ case "$cmd" in
 				# the debug report, or "debug clear" (forget the crash records)
 				case "$1" in ''|clear) run "$LF" debug $1;; *) fail "not allowed";; esac;;
 			ports)
+				# ports <zone> [<device type>] [clear]
 				valid_zone "$1" || fail "bad zone"
-				case "$2" in ''|clear) ;; *) fail "bad argument";; esac
-				[ $# -le 2 ] || fail "bad argument"
+				case "$#:$2:$3" in 1::|2:clear:|2:pc:|2:ps:|2:xbox:|2:switch:|3:pc:clear|3:ps:clear|3:xbox:clear|3:switch:clear) ;;
+					*) fail "bad argument";; esac
 				run "$LF" ports "$@";;
 			remove-servers)
 				case "$1" in ''|*[!a-z0-9_]*) fail "bad game";; esac

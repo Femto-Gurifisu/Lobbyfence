@@ -196,7 +196,7 @@ return view.extend({
 			{ opt: 'strict', label: _('Strict'), type: 'flag', def: true,
 			  help: _('Also block servers that have not been located yet (usually located within a minute).') },
 			{ opt: 'device', label: _('Devices'), type: 'list', extra: deviceHelper,
-			  help: _('MAC address (best - covers all of the device\'s addresses) or an IPv4/IPv6 address, one per line.') },
+			  help: _('MAC address (best - covers all of the device\'s addresses) or an IPv4/IPv6 address, one per line. A PC and a console in one zone: say which is which on the Map tab (Devices…) - some games use other ports on each.') },
 			{ opt: 'proto', label: _('Protocol'), type: 'select', def: 'udp', options: [ [ 'udp', 'UDP' ], [ 'tcp', 'TCP' ], [ 'both', _('UDP and TCP') ] ] },
 			{ opt: 'port', label: _('Game ports (either side)'), type: 'list',
 			  help: _('Matches when the server or your device uses one of these ports (e.g. 3074 for Call of Duty).') },

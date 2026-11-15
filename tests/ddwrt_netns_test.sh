@@ -420,6 +420,19 @@ ipt -t mangle -S | grep -q LF_CTF && fail "CTF off: rules left" || pass "CTF swi
 echo 0 > "$W/nvram/ctf_disable"; echo 2 > "$W/nvram/sfe"
 lf apply
 ipt -t mangle -S LF_CTF_X >/dev/null 2>&1 && pass "CTF back on: rules back" || fail "CTF rules not back"
+# a second device of another type, on that type's own ports: excluded the same way
+inl $IP addr add 192.168.1.101/24 dev veth0
+cfg add_list lobbyfence.game.device=192.168.1.101; cfg set lobbyfence.game.platform=pc
+cfg add_list lobbyfence.game.device_type=192.168.1.101=ps; cfg add_list lobbyfence.game.remote_port_ps=5555
+lf apply
+ipt -t mangle -S LF_CTF_IN | grep -q "lf_game_psdev4 src -j LF_CTF_X" && ipt -t mangle -S LF_CTF_OUT | grep -q "lf_game_psdev4 dst -j LF_CTF_X" \
+	&& ipt -t mangle -S LF_CTF_IN | grep -q "lf_game_dev4 src -j LF_CTF_X" \
+	&& pass "device types: the other type's devices go through the CTF exclusion too" || fail "CTF by type: $(ipt -t mangle -S LF_CTF_IN)"
+expect "device types: each on its own type's ports" "80.20.0.1 ok 80.20.0.1 blocked" \
+	"$(inl env UDP_SRC=192.168.1.101 python3 "$HERE/udp.py" probe 3074 80.20.0.1) $(inl env UDP_SRC=192.168.1.101 python3 "$HERE/udp.py" probe 5555 80.20.0.1)"
+cfg del_list lobbyfence.game.device=192.168.1.101
+for o in device_type remote_port_ps platform; do cfg delete lobbyfence.game.$o; done
+lf apply
 
 # --- 10. status for the page
 lf status >/dev/null

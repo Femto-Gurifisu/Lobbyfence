@@ -51,7 +51,8 @@ const HELPERS = [ 'distanceKm', 'destination', 'circleRing', 'wrapLon', 'parseCi
 	'PRESETS', 'PRESET_GROUPS', 'DEFAULT_PRESET', 'presetById', 'presetSummary', 'burstAdvice', 'presetOn', 'needsPlatform', 'PLATFORMS', 'isMac', 'validDevice',
 	'mercY', 'normalizePolygon', 'inPolygon', 'parsePolygons', 'formatPolygon', 'v4num', 'v6groups', 'cidrMatch', 'inList',
 	'edgeKind', 'alignedKind', 'straightenPolygon', 'mercArea', 'satelliteStyle',
-	'parseAddressList', 'deviceLabel', 'RANGES', 'addExtraLabels', 'WORLD_BOUNDS' ];
+	'parseAddressList', 'deviceLabel', 'RANGES', 'addExtraLabels', 'WORLD_BOUNDS',
+	'zoneDevices', 'zoneTypes', 'typePorts', 'presetPorts', 'samePorts', 'setZoneDevices' ];
 
 // even-odd point in polygon on plain lon/lat (what the map draws in mercator)
 function inRing(ring, lon, lat) {
@@ -160,15 +161,21 @@ const inDrawn = (ring, lon, lat) => [ -360, 0, 360 ].some((k) => inRing(ring, lo
 			assert.deepStrictEqual(labels, labels.slice().sort(), g + ' games A to Z');
 		});
 	});
-	await check('new games: Marvel Rivals, Roblox, GTA Online, Battlefield and more', () => {
+	await check('new games: Marvel Rivals, Roblox, Rockstar Games, Battlefield, THE FINALS, Minecraft and more', () => {
 		const P = (id) => h.presetById(id);
 		assert.deepStrictEqual(P('roblox').remote, [ '49152-65535' ]);                  // Roblox support
 		assert.deepStrictEqual(P('roblox_m').remote, [ '49152-65535' ]);
 		assert(P('roblox').official && P('roblox').wide && P('roblox_m').group === 'mobile');
 		assert.deepStrictEqual(P('gta').either, [ '6672', '61455-61458' ]);             // Rockstar, GTA Online & Red Dead Online
 		assert.strictEqual(P('gta').burst, 0, 'peer-to-peer: a session is many players at once - never open for them');
-		assert(/0 \(off\)/.test(h.burstAdvice(P('gta'))) && /GTA Online/.test(h.burstAdvice(P('gta'))));
+		assert(/0 \(off\)/.test(h.burstAdvice(P('gta'))) && /Rockstar Games/.test(h.burstAdvice(P('gta'))));
 		assert(/either side/.test(h.presetSummary(P('gta'))) && /Peer-to-peer/.test(h.presetSummary(P('gta'))));
+		assert(P('gta').label === 'Rockstar Games' && /GTA Online and Red Dead Online/.test(h.presetSummary(P('gta'))), 'one filter for Rockstar\'s games');
+		// Minecraft: Mojang's defaults - Java Edition TCP 25565, Bedrock Edition UDP 19132 (IPv6 19133)
+		assert.deepStrictEqual(P('minecraft').remote, [ '19132-19133', '25565' ]);
+		assert(P('minecraft').proto === 'both' && P('minecraft').official && h.needsPlatform(P('minecraft')));
+		// THE FINALS: Embark publishes no match ports - every UDP port until measured
+		assert(P('thefinals').unmeasured && P('thefinals').remote.join() === '1024-65535' && P('thefinals').group === 'pc');
 		assert.deepStrictEqual(P('r6').remote, [ '3074', '6015', '10000-10099' ]);
 		assert(/reported by players/.test(h.presetSummary(P('r6'))));
 		// fighting games: peer-to-peer, picked with the device type, never open for a burst of players
@@ -317,6 +324,52 @@ const inDrawn = (ring, lon, lat) => [ -360, 0, 360 ].some((k) => inRing(ring, lo
 		assert.deepStrictEqual(u.secs[sid].device, [ 'aa:bb:cc:dd:ee:01' ]);
 		assert.deepStrictEqual(u.secs[sid].port, [ '3074-3079' ]);
 		assert(!('remote_port' in u.secs[sid]));
+	});
+	await check('device types: each device\'s type, each type\'s ports - a type on ports of its own only where they differ', () => {
+		const P = (id) => h.presetById(id);
+		const sec = { device: [ '192.168.1.10', 'aa:bb:cc:dd:ee:01', '192.168.1.30' ], platform: 'pc',
+			device_type: [ 'aa:bb:cc:dd:ee:01=ps', '192.168.1.99=xbox', 'junk' ], remote_port: [ '7700-7799' ], remote_port_ps: [ '1000-1099' ] };
+		assert.deepStrictEqual(h.zoneDevices(sec), [ { dev: '192.168.1.10', type: 'pc' }, { dev: 'aa:bb:cc:dd:ee:01', type: 'ps' }, { dev: '192.168.1.30', type: 'pc' } ],
+			'own type, else the zone\'s; entries for devices not in the zone ignored');
+		assert.deepStrictEqual(h.zoneTypes(sec), [ 'pc', 'ps' ]);
+		assert.deepStrictEqual(h.zoneDevices({ device: '10.0.0.1' }), [ { dev: '10.0.0.1', type: '' } ], 'no type known');
+		assert.deepStrictEqual(h.zoneDevices({ device: [ '10.0.0.1' ], device_type: [ '10.0.0.1=toaster' ] }), [ { dev: '10.0.0.1', type: '' } ], 'unknown types left out');
+		assert.deepStrictEqual(h.typePorts(sec, 'ps'), { either: false, list: [ '1000-1099' ], own: true });
+		assert.deepStrictEqual(h.typePorts(sec, 'pc'), { either: false, list: [ '7700-7799' ], own: false }, 'the zone\'s type: the zone\'s ports');
+		assert.deepStrictEqual(h.typePorts(sec, 'xbox'), { either: false, list: [ '7700-7799' ], own: false }, 'a type without its own: the zone\'s');
+		assert.deepStrictEqual(h.typePorts({ port: [ '3074-3079' ] }, ''), { either: true, list: [ '3074-3079' ], own: false }, 'either-side ports');
+		assert.deepStrictEqual(h.presetPorts(P('apex'), 'ps').list, h.presetOn(P('apex'), 'ps').remote);
+		assert(h.presetPorts(P('cod'), 'xbox').either && h.samePorts(h.presetPorts(P('cod'), 'pc'), h.presetPorts(P('cod'), 'ps')), 'CoD: the same on every type');
+		assert(!h.samePorts(h.presetPorts(P('apex'), 'pc'), h.presetPorts(P('apex'), 'ps')), 'Apex Legends: other ports on each');
+		// staging: the first device's type is the zone's, another type gets ports of its own where they differ
+		const u = fakeUci({ z: { '.name': 'z', '.type': 'zone', device: [ '10.0.0.1' ], platform: 'xbox', remote_port: [ '1024-65535' ],
+			remote_port_switch: [ '1-2' ], device_type: [ 'gone=ps' ] } });
+		h.setZoneDevices(u, 'z', [ { dev: '10.0.0.1', type: 'pc' }, { dev: '10.0.0.2', type: 'ps' }, { dev: '10.0.0.3', type: 'ps' }, { dev: '10.0.0.4', type: 'xbox' } ],
+			{ pc: h.presetPorts(P('apex'), 'pc'), ps: h.presetPorts(P('apex'), 'ps'), xbox: h.presetPorts(P('apex'), 'pc') }, true);
+		const z = u.secs.z;
+		assert.deepStrictEqual(z.device, [ '10.0.0.1', '10.0.0.2', '10.0.0.3', '10.0.0.4' ]);
+		assert.strictEqual(z.platform, 'pc');
+		assert.deepStrictEqual(z.device_type, [ '10.0.0.2=ps', '10.0.0.3=ps', '10.0.0.4=xbox' ]);
+		assert.deepStrictEqual(z.remote_port, h.presetOn(P('apex'), 'pc').remote);
+		assert.deepStrictEqual(z.remote_port_ps, h.presetOn(P('apex'), 'ps').remote);
+		assert(!('remote_port_xbox' in z), 'the same ports as the zone\'s: none of its own');
+		assert(!('remote_port_switch' in z), 'a type no longer in use: its ports go');
+		// one type left: no device types, no ports of a type's own
+		h.setZoneDevices(u, 'z', [ { dev: '10.0.0.2', type: 'ps' } ], { ps: h.presetPorts(P('apex'), 'ps') }, true);
+		assert.strictEqual(z.platform, 'ps');
+		assert(!('device_type' in z) && !('remote_port_ps' in z));
+		assert.deepStrictEqual(z.remote_port, h.presetOn(P('apex'), 'ps').remote);
+		// a game that is not a PC & console game: no types at all
+		h.setZoneDevices(u, 'z', [ { dev: '10.0.0.2', type: '' }, { dev: '10.0.0.5', type: '' } ], {}, false);
+		assert(!('platform' in z) && !('device_type' in z));
+		assert.deepStrictEqual(z.device, [ '10.0.0.2', '10.0.0.5' ]);
+		assert.deepStrictEqual(z.remote_port, h.presetOn(P('apex'), 'ps').remote, 'the zone\'s ports stay');
+		// either-side ports of its own
+		const v = fakeUci({ y: { '.name': 'y', '.type': 'zone', device: [ 'a' ], port: [ '3074' ] } });
+		h.setZoneDevices(v, 'y', [ { dev: 'a', type: 'pc' }, { dev: 'b', type: 'switch' } ], { pc: { either: true, list: [ '3074' ] }, switch: { either: true, list: [ '9000' ] } }, true);
+		assert.deepStrictEqual(v.secs.y.port, [ '3074' ]);
+		assert.deepStrictEqual(v.secs.y.port_switch, [ '9000' ]);
+		assert(!('remote_port' in v.secs.y) && !('remote_port_switch' in v.secs.y));
 	});
 	await check('createZone honours an explicit monitor mode', () => {
 		const u = fakeUci({});

@@ -1,7 +1,8 @@
 # The games whose servers LobbyFence may send (Servers file -> Send to
 # LobbyFence, and once a day when that is on): the listed client-server games -
-# not peer-to-peer ones (the fighting games, GTA Online), "Any game" or Custom,
-# where players' own addresses show up. <id> <name>; the same as the map page's
+# not peer-to-peer ones (the fighting games, Rockstar Games' GTA Online and Red
+# Dead Online), Minecraft (players' own servers), "Any game" or Custom, where
+# players' own addresses show up. <id> <name>; the same as the map page's
 # list (tests/safety_static.py checks that they match).
 apex Apex Legends
 arcraiders ARC Raiders
@@ -18,6 +19,7 @@ pubg PUBG: BATTLEGROUNDS
 r6 Rainbow Six Siege X
 roblox Roblox
 rocketleague Rocket League
+thefinals THE FINALS
 valorant VALORANT
 aov Arena of Valor
 codm Call of Duty: Mobile

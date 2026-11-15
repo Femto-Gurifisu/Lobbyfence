@@ -17,7 +17,7 @@ FW_SETS="$LF_RUN/sets.nft"
 # ------------------------------------------------------------- nft ruleset
 
 emit_zone_sets() {
-	local z="$1" f t
+	local z="$1" f t g
 	for f in 4 6; do
 		[ "$f" = 4 ] && t=ipv4_addr || t=ipv6_addr
 		cat <<-EOF
@@ -38,6 +38,17 @@ emit_zone_sets() {
 	cat <<-EOF
 	set z_${z}_mac { type ether_addr; }
 	EOF
+	# the devices of a type with ports of its own (zone_groups): sets of their own
+	for g in $Z_GROUPS; do
+		group_tag "$g"
+		cat <<-EOF
+		set z_${z}_${G_TAG}dev4 { type ipv4_addr; flags interval; auto-merge; }
+		set z_${z}_${G_TAG}dev6 { type ipv6_addr; flags interval; auto-merge; }
+		set z_${z}_${G_TAG}mip4 { type ipv4_addr; }
+		set z_${z}_${G_TAG}mip6 { type ipv6_addr; }
+		set z_${z}_${G_TAG}mac { type ether_addr; }
+		EOF
+	done
 }
 
 # emit the per-direction chain: emit_dir_chain <zone> <4|6> <o|i>
@@ -82,17 +93,14 @@ emit_dir_chain() {
 	echo "}"
 }
 
-emit_zone_chains() {
-	local z="$1" proto lp rp pp f ipk sels sel osel isel src dst srcs dsts nl='
+# The jumps that send one group's game packets (zone_group done) to the
+# zone's chains -> added to ZONE_JUMPS; the families it has devices in -> ZONE_FAMS
+group_jumps() { # zone "nft protocol match"
+	local z="$1" proto="$2" s="z_${1}_$G_TAG" lp rp pp f ipk sels sel osel isel src dst srcs dsts nl='
 '
-	case "$Z_PROTO" in
-		udp) proto="meta l4proto udp";;
-		tcp) proto="meta l4proto tcp";;
-		*) proto="meta l4proto { tcp, udp }";;
-	esac
-	lp="$(port_set "$Z_LPORT")"
-	rp="$(port_set "$Z_RPORT")"
-	pp="$(port_set "$Z_PORT")"
+	lp="$(port_set "$G_LPORT")"
+	rp="$(port_set "$G_RPORT")"
+	pp="$(port_set "$G_PORT")"
 
 	# port alternatives, each "outbound match|inbound match"
 	sels=""
@@ -104,19 +112,19 @@ emit_zone_chains() {
 	fi
 	if [ -z "$lp$rp$pp" ]; then
 		sels="$sels${nl}|"
-		log warning "zone $z: no ports set, ALL $Z_PROTO traffic of its devices is filtered"
+		[ -n "$G_DEV4$G_DEV6$G_MACS" ] && log warning "zone $z: no ports set, ALL $Z_PROTO traffic of its devices is filtered"
 	fi
 
-	ZONE_JUMPS=""
 	for f in 4 6; do
 		[ "$f" = 4 ] && ipk=ip || ipk=ip6
 		srcs=""; dsts=""
-		eval "[ -n \"\$Z_DEV$f\" ]" && { srcs="$ipk saddr @z_${z}_dev$f"; dsts="$ipk daddr @z_${z}_dev$f"; }
-		if [ -n "$Z_MACS" ]; then
-			srcs="$srcs${srcs:+$nl}meta nfproto ipv$f ether saddr @z_${z}_mac"
-			dsts="$dsts${dsts:+$nl}$ipk daddr @z_${z}_mip$f"
+		eval "[ -n \"\$G_DEV$f\" ]" && { srcs="$ipk saddr @${s}dev$f"; dsts="$ipk daddr @${s}dev$f"; }
+		if [ -n "$G_MACS" ]; then
+			srcs="$srcs${srcs:+$nl}meta nfproto ipv$f ether saddr @${s}mac"
+			dsts="$dsts${dsts:+$nl}$ipk daddr @${s}mip$f"
 		fi
 		[ -n "$srcs" ] || continue
+		ZONE_FAMS="$ZONE_FAMS $f"
 
 		for sel in $(echo "$sels" | sed '/^$/d' | tr ' ' '\001'); do
 			sel="$(echo "$sel" | tr '\001' ' ')"
@@ -128,6 +136,33 @@ emit_zone_chains() {
 				ZONE_JUMPS="$ZONE_JUMPS${nl}$(echo "$dst" | tr '\001' ' ') $proto $isel jump z_${z}_i$f"
 			done
 		done
+	done
+}
+
+# the zone's chains -> stdout, the jumps to them -> ZONE_JUMPS, its devices'
+# addresses -> elements added to file $2 (ZONE_DEVS=1 when it has any)
+emit_zone_chains() {
+	local z="$1" proto f g s v ipk
+	case "$Z_PROTO" in
+		udp) proto="meta l4proto udp";;
+		tcp) proto="meta l4proto tcp";;
+		*) proto="meta l4proto { tcp, udp }";;
+	esac
+
+	# the zone's devices on its own ports, then each type that has its own
+	ZONE_JUMPS=""; ZONE_FAMS=""; ZONE_DEVS=0
+	for g in "" $Z_GROUPS; do
+		zone_group "$g"
+		group_jumps "$z" "$proto"
+		s="z_${z}_$G_TAG"
+		for v in 4 6; do
+			eval "[ -n \"\$G_DEV$v\" ] && echo \"add element inet $LF_TABLE ${s}dev$v { \$G_DEV$v }\"" >> "$2"
+		done
+		[ -n "$G_MACS" ] && echo "add element inet $LF_TABLE ${s}mac { $G_MACS }" >> "$2"
+		[ -n "$G_DEV4$G_DEV6$G_MACS" ] && ZONE_DEVS=1
+	done
+	for f in 4 6; do
+		case "$ZONE_FAMS" in *$f*) ;; *) continue;; esac
 		emit_dir_chain "$z" "$f" o
 		emit_dir_chain "$z" "$f" i
 	done
@@ -179,18 +214,13 @@ build_ruleset() {
 			Z_LAG_MARK="$(printf '0x%08x' $((lagn << 24)))"
 			LAG_ZONES="$LAG_ZONES $z:$lagn"
 		fi
-		Z_DEV4="$(addr_list 4 $Z_DEV)"; Z_DEV6="$(addr_list 6 $Z_DEV)"; Z_MACS="$(mac_list $Z_DEV)"
-		if [ -z "$Z_DEV4$Z_DEV6$Z_MACS" ]; then
-			log warning "zone $z: no valid device address, zone is inactive"
-		fi
 		emit_zone_sets "$z" >> "$body"
-		emit_zone_chains "$z" >> "$body"
+		emit_zone_chains "$z" "$elems" >> "$body"
+		[ "$ZONE_DEVS" = 1 ] || log warning "zone $z: no valid device address, zone is inactive"
 		jumps="$jumps$ZONE_JUMPS"
 		[ "$Z_MODE" = enforce ] && [ "$Z_HAS_REGION" = 0 ] && \
 			log warning "zone $z: no region drawn yet - every server is blocked except allow_ip"
 		for v in 4 6; do
-			eval "[ -n \"\$Z_DEV$v\" ] && echo \"add element inet $LF_TABLE z_${z}_dev$v { \$Z_DEV$v }\"" >> "$elems"
-			[ "$v" = 4 ] && [ -n "$Z_MACS" ] && echo "add element inet $LF_TABLE z_${z}_mac { $Z_MACS }" >> "$elems"
 			a="$(addr_list "$v" $Z_ALLOW)"; [ -n "$a" ] && echo "add element inet $LF_TABLE z_${z}_fa$v { $a }" >> "$elems"
 			a="$(addr_list "$v" $Z_BLOCK)"; [ -n "$a" ] && echo "add element inet $LF_TABLE z_${z}_fb$v { $a }" >> "$elems"
 		done
@@ -450,15 +480,20 @@ fw_check() { lag_check; }
 # set commands refreshing a zone's in/out sets from $LF_RUN/<zone>.servers
 fw_zone_servers() { lfawk elements -v t="$LF_TABLE" -v p="z_$1" < "$LF_RUN/$1.servers"; }
 
-# set commands for the current addresses of a zone's MAC devices ($LF_RUN/<zone>.mip)
+# set commands for the current addresses of a zone's MAC devices
+# ($LF_RUN/<zone>.mip, and <zone>.mip.<tag> for each type on its own ports)
 fw_zone_mip() {
-	local z="$1" a4 a6
-	a4="$(grep -v ':' "$LF_RUN/$z.mip" | tr '\n' ',' | sed 's/,$//; s/,/, /g')"
-	a6="$(grep ':' "$LF_RUN/$z.mip" | tr '\n' ',' | sed 's/,$//; s/,/, /g')"
-	echo "flush set inet $LF_TABLE z_${z}_mip4"
-	echo "flush set inet $LF_TABLE z_${z}_mip6"
-	[ -n "$a4" ] && echo "add element inet $LF_TABLE z_${z}_mip4 { $a4 }"
-	[ -n "$a6" ] && echo "add element inet $LF_TABLE z_${z}_mip6 { $a6 }"
+	local z="$1" a4 a6 g s m
+	for g in "" $Z_GROUPS; do
+		G_TAG=""; [ -n "$g" ] && group_tag "$g"
+		s="z_${z}_${G_TAG}mip"; m="$LF_RUN/$z.mip${G_TAG:+.$G_TAG}"
+		a4="$(grep -v ':' "$m" 2>/dev/null | tr '\n' ',' | sed 's/,$//; s/,/, /g')"
+		a6="$(grep ':' "$m" 2>/dev/null | tr '\n' ',' | sed 's/,$//; s/,/, /g')"
+		echo "flush set inet $LF_TABLE ${s}4"
+		echo "flush set inet $LF_TABLE ${s}6"
+		[ -n "$a4" ] && echo "add element inet $LF_TABLE ${s}4 { $a4 }"
+		[ -n "$a6" ] && echo "add element inet $LF_TABLE ${s}6 { $a6 }"
+	done
 	return 0
 }
 

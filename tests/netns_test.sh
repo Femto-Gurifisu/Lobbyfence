@@ -794,6 +794,72 @@ echo "$ex3" | grep -q " $FB " && fail "built-in server listed: $ex3" || pass "..
 kill $GEO3 2>/dev/null; wait $GEO3 2>/dev/null
 lf remove-servers all > /dev/null
 
+# --- 13g. device types: two devices in one zone - a PC and a PlayStation - each filtered on
+# its own type's ports (some games use other ports on each), not on the first device's
+inl $IP addr add 192.168.1.101/24 dev veth0
+probe_from() { s="$1"; p="$2"; shift 2; inl env UDP_SRC="$s" python3 "$HERE/udp.py" probe "$p" "$@" | tr '\n' ' ' | sed 's/ $//'; }
+cfg set lobbyfence.game.mode=enforce; cfg set lobbyfence.game.strict=0
+cfg delete lobbyfence.game.device; cfg add_list lobbyfence.game.device=192.168.1.100; cfg add_list lobbyfence.game.device=192.168.1.101
+cfg delete lobbyfence.game.port; cfg delete lobbyfence.game.remote_port; cfg add_list lobbyfence.game.remote_port=3074
+cfg set lobbyfence.game.platform=pc
+cfg add_list lobbyfence.game.device_type=192.168.1.101=ps
+cfg add_list lobbyfence.game.remote_port_ps=5555
+cfg delete lobbyfence.game.block_ip; cfg add_list lobbyfence.game.block_ip=80.20.0.1
+cfg commit lobbyfence
+lf apply || fail "apply with device types"
+expect "device types: the PC is filtered on the zone's ports" "80.20.0.1 blocked" "$(probe_from 192.168.1.100 3074 80.20.0.1)"
+expect "...not on the PlayStation's" "80.20.0.1 ok" "$(probe_from 192.168.1.100 5555 80.20.0.1)"
+expect "device types: the PlayStation is filtered on its own ports" "80.20.0.1 blocked" "$(probe_from 192.168.1.101 5555 80.20.0.1)"
+expect "...not on the PC's (the first device's type does not decide for both)" "80.20.0.1 ok" "$(probe_from 192.168.1.101 3074 80.20.0.1)"
+inr nft list set inet lobbyfence z_game_psdev4 | grep -q '192.168.1.101' && inr nft list set inet lobbyfence z_game_dev4 | grep -q '192.168.1.100' \
+	&& ! inr nft list set inet lobbyfence z_game_dev4 | grep -q '192.168.1.101' \
+	&& pass "device types: the type's devices in sets of their own" || fail "device type sets: $(inr nft list table inet lobbyfence | grep -A2 'dev4 {')"
+# a type the game uses the same ports on (none of its own): the zone's ports
+cfg delete lobbyfence.game.device_type; cfg add_list lobbyfence.game.device_type=192.168.1.101=xbox; cfg commit lobbyfence
+lf apply
+expect "a device type without ports of its own is filtered on the zone's" "80.20.0.1 blocked 80.20.0.1 ok" \
+	"$(probe_from 192.168.1.101 3074 80.20.0.1) $(probe_from 192.168.1.101 5555 80.20.0.1)"
+inr nft list table inet lobbyfence | grep -q 'z_game_xb\|z_game_ps' && fail "sets for a type without ports of its own" || pass "...with no sets of its own"
+# "Ports seen" and diag: each type's ports apart, measured against its own ports
+cfg delete lobbyfence.game.device_type; cfg add_list lobbyfence.game.device_type=192.168.1.101=ps; cfg commit lobbyfence
+lf apply
+cat > "$W/ct2.txt" <<'CTEOF'
+ipv4     2 udp      17 175 src=192.168.1.100 dst=45.10.0.1 sport=50000 dport=3074 packets=120 bytes=9000 src=45.10.0.1 dst=10.99.0.1 sport=3074 dport=50000 packets=118 bytes=9100 [ASSURED] mark=0 use=2
+ipv4     2 udp      17 175 src=192.168.1.101 dst=45.10.0.1 sport=50010 dport=5555 packets=300 bytes=9000 src=45.10.0.1 dst=10.99.0.1 sport=5555 dport=50010 packets=280 bytes=9100 [ASSURED] mark=0 use=2
+ipv4     2 udp      17 175 src=192.168.1.101 dst=80.20.0.2 sport=50011 dport=41000 packets=50 bytes=900 src=80.20.0.2 dst=10.99.0.1 sport=41000 dport=50011 packets=40 bytes=900 [ASSURED] mark=0 use=2
+CTEOF
+lf ports game clear > /dev/null; lf ports game ps clear | grep -q 'cleared the ports seen for zone game (ps)' || fail "ports <zone> <type> clear"
+rm -f "$W/run/game.ports.at"
+probe 45.10.0.1 > /dev/null
+inr env LF_CONNTRACK="$W/ct2.txt" $LF cycle 2>>"$W/stderr.log"
+out="$(lf ports game)"; outps="$(lf ports game ps)"
+echo "$out" | grep -q '^udp/3074 1 120 ' && ! echo "$out" | grep -q 'udp/5555\|udp/41000' \
+	&& echo "$outps" | grep -q '^udp/5555 1 300 [0-9]* [0-9]* 1 1 300$' && echo "$outps" | grep -q '^udp/41000 1 50 [0-9]* [0-9]* 1 0 50$' \
+	&& ! echo "$outps" | grep -q 'udp/3074' \
+	&& pass "Ports seen: each device type's ports apart, each against its own ports" || fail "ports by type: [$out] [$outps]"
+[ -f "$W/run/state/game.ps.ports" ] && expect "...ports <zone> pc: the PC is the zone's own type" "$out" "$(lf ports game pc)" || fail "no game.ps.ports: $(ls "$W/run/state")"
+out="$(inr env LF_CONNTRACK="$W/ct2.txt" $LF diag 2>&1)"
+echo "$out" | grep -q "^  ps devices on their own ports: 192.168.1.101 - ports: server 5555" \
+	&& echo "$out" | grep -q "^      ps:udp/5555: 1 server(s), 300 packets$" && echo "$out" | grep -q "^    \* ps:udp/41000: 1 server(s), 50 packets$" \
+	&& echo "$out" | grep -q "^      udp/3074: 1 server(s), 120 packets$" \
+	&& pass "diag: the device types on their own ports, and which ports they miss" || fail "diag by type: $(echo "$out" | grep -B2 -A6 'own ports')"
+# a device given by its MAC address (a phone, a console on Wi-Fi), of a type on its own ports
+LANMAC="$(inl $IP link show veth0 | awk '/link\/ether/ { print $2 }')"
+cfg delete lobbyfence.game.device; cfg add_list lobbyfence.game.device="$LANMAC"
+cfg delete lobbyfence.game.device_type; cfg add_list lobbyfence.game.device_type="$LANMAC=ps"
+cfg commit lobbyfence
+lf apply
+expect "a MAC device of a type with its own ports is filtered on those" "80.20.0.1 blocked 80.20.0.1 ok" "$(probe_port 5555 80.20.0.1) $(probe 80.20.0.1)"
+lf cycle
+grep -qx "192.168.1.100" "$W/run/game.mip.ps" && [ ! -s "$W/run/game.mip" ] && inr nft list set inet lobbyfence z_game_psmip4 | grep -q "192.168.1.100" \
+	&& pass "...its current addresses in the type's own set" || fail "MAC by type: $(cat "$W/run/game.mip.ps" 2>&1) / $(inr nft list set inet lobbyfence z_game_psmip4 2>&1)"
+cfg delete lobbyfence.game.device; cfg add_list lobbyfence.game.device=192.168.1.100
+for o in device_type remote_port_ps platform block_ip; do cfg delete lobbyfence.game.$o; done
+cfg commit lobbyfence
+lf apply
+inr nft list table inet lobbyfence | grep -q 'z_game_ps' && fail "the type's sets stayed" || pass "device types gone: their sets go too"
+[ ! -e "$W/run/game.mip.ps" ] && [ ! -e "$W/run/game.gdev" ] && pass "...and their address files" || fail "left: $(ls "$W/run" | grep 'game\.')"
+
 # --- 14. the RAM folder taken over beforehand (a link, or someone else's folder): not used
 rm -rf "$W/run"; mkdir -p "$W/elsewhere"; ln -s "$W/elsewhere" "$W/run"
 lf apply >/dev/null 2>&1

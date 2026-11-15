@@ -98,11 +98,13 @@ elif sys.argv[1] == "stream":
         s.sendto(b"game", (ip, port))
         time.sleep(1.0 / pps)
 else:
+    # (UDP_SRC=<address>: send from that address - a second device on the LAN)
+    import os
     port = int(sys.argv[2])
     for ip in sys.argv[3:]:
         v6 = ":" in ip
         s = socket.socket(socket.AF_INET6 if v6 else socket.AF_INET, socket.SOCK_DGRAM)
-        s.bind(("::" if v6 else "0.0.0.0", 3074))      # the "game" uses local port 3074 too
+        s.bind((os.environ.get("UDP_SRC") or ("::" if v6 else "0.0.0.0"), 3074))      # the "game" uses local port 3074 too
         s.settimeout(0.7)
         ok = False
         for _ in range(2):

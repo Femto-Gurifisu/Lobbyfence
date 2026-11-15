@@ -176,7 +176,7 @@ if not _m or _m.group(1).split() != HOSTING.split():
     problems.append("map.js SERVER_NETWORKS is not the same list as files/usr/share/lobbyfence/server-networks.txt")
 
 # the router sends the same games' servers as the page (share-servers), to the same form
-_p2p = set(re.findall(r"'([a-z0-9_]+)'", re.search(r"var P2P_GAMES = \[([^\]]*)\]", _js).group(1)))
+_p2p = set(re.findall(r"'([a-z0-9_]+)'", re.search(r"var NOT_SHARED_GAMES = \[([^\]]*)\]", _js).group(1)))
 _page_games = [f"{m.group(1)} {m.group(3)}" for m in re.finditer(
     r"\{ id: '([a-z0-9_]+)', group: '([a-z]+)', label: (?:_\()?'((?:[^'\\]|\\.)*)'", _js)
     if m.group(2) in ("pc", "mobile") and m.group(1) not in _p2p]

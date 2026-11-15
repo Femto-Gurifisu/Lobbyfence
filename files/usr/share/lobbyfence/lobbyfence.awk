@@ -23,6 +23,8 @@
 #   shared_merge   <imported locations> <new lines> -> merged, one per game and address (-v statf)
 #   shared_hit     <addresses> <known locations...> -> geo cache lines for those found (the first file with one wins)
 #   ct_ports       /proc/net/nf_conntrack -> "<proto>/<server port> <servers> <packets> <in the zone's ports 1|0>"
+#                  (-v devs, lp rp pp; devices on their type's own ports: -v gdev, gports;
+#                  -v bygroup=1: each type's ports apart, lines starting with the type or "-")
 #   ports_merge    tally + ct_ports of this pass -> tally "<proto>/<port> <servers> <packets> <first> <last> <passes>" (-v now)
 #   ports_show     tally -> tally lines + " <in the zone's ports 1|0>" (-v lp rp pp)
 #   clean_ips, clean_cache, clean_ports
@@ -35,7 +37,7 @@
 #   ipset_expires  `ipset list` -> longest remaining timeout in seconds
 #   ipset_headers  `ipset list -t` -> "<name> <family> <maxelem> <timeout>"
 #   ipset_load     classify output -> `ipset restore` commands for the in/out sets (-v p, v6)
-#   ct_packets     /proc/net/nf_conntrack -> "<server> <packets from the device>" (-v devs)
+#   ct_packets     /proc/net/nf_conntrack -> "<server> <packets from the device>" (-v devs, gdev, gports)
 #   ipt_counts     `iptables -L -v -x -n` -> "z_<zone>_match|hit|opened <packets>"
 #
 # Must stay compatible with BusyBox awk (no gawk extensions, no regex
@@ -723,12 +725,19 @@ function in_ports(p, list,   n, t, i, a, b) {
 	}
 	return 0
 }
-function game_ports(dp, sp,   m) {          # dp: device port, sp: server port
-	if (lp == "" && rp == "" && pp == "") return 1
+function ports_match(dp, sp, l, r, p,   m) {   # dp: device port, sp: server port
+	if (l == "" && r == "" && p == "") return 1
 	m = 0
-	if (lp != "" || rp != "") m = (lp == "" || in_ports(dp, lp)) && (rp == "" || in_ports(sp, rp))
-	if (!m && pp != "") m = in_ports(dp, pp) || in_ports(sp, pp)
+	if (l != "" || r != "") m = (l == "" || in_ports(dp, l)) && (r == "" || in_ports(sp, r))
+	if (!m && p != "") m = in_ports(dp, p) || in_ports(sp, p)
 	return m
+}
+function game_ports(dp, sp) { return ports_match(dp, sp, lp, rp, pp) }
+# the ports of the device's type when it has its own (-v gdev: a file of
+# "<address> <type>" lines; -v gports: "<type>|<device>|<server>|<either>;...")
+function dev_ports(t, dp, sp) {
+	if (t != "" && (t in ghas)) return ports_match(dp, sp, glp[t], grp[t], gpp[t])
+	return game_ports(dp, sp)
 }
 # ---- the server ports a zone's device used, over time ("Ports seen"): a
 # game's real ports, so a zone can be narrowed to them
@@ -773,6 +782,14 @@ op == "ports_show" {
 (op == "ct_packets" || op == "ct_ports") && FNR == 1 && NR == 1 {
 	while ((getline l < devs) > 0) if (l != "") ctdev[(index(l, ":") ? v6_norm(l) : l)] = 1
 	close(devs)
+	# devices on their type's own ports (-v gdev, gports - see dev_ports;
+	# -v bygroup=1: Ports seen's lines start with the type, "-" for the zone's ports)
+	if (gdev != "") {
+		while ((getline l < gdev) > 0) if (split(l, ga, " ") == 2) ctgrp[(index(ga[1], ":") ? v6_norm(ga[1]) : ga[1])] = ga[2]
+		close(gdev)
+	}
+	ng = split(gports, gpl, ";")
+	for (i = 1; i <= ng; i++) if (split(gpl[i], gq, "|") == 4) { glp[gq[1]] = gq[2]; grp[gq[1]] = gq[3]; gpp[gq[1]] = gq[4]; ghas[gq[1]] = 1 }
 	# (Ports seen: each connection's packet count at the pass before - -v ctlast)
 	if (ctlast != "") {
 		while ((getline ctl < ctlast) > 0) if (split(ctl, ctla, " ") == 2) cprev[ctla[1]] = ctla[2] + 0
@@ -798,10 +815,12 @@ op == "ct_packets" || op == "ct_ports" {
 	if (!is_public_host(sv)) next
 	if (family == "6" && !index(sv, ":")) next
 	if (family == "4" && index(sv, ":")) next
+	gt = (ctsrc[d] in ctgrp) ? ctgrp[ctsrc[d]] : ""
 	if (op == "ct_ports") {
-		# every port the device talks to servers on - which of them the zone's ports cover
-		pk = $3 "/" ctdp[d]
-		if (!(pk in cpn)) { pord[++npt] = pk; cpk[pk] = -1; cpin[pk] = game_ports(ctsp[d], ctdp[d]) }
+		# every port the device talks to servers on - which of them the zone's ports
+		# (its type's own ones) cover
+		pk = (bygroup ? (gt == "" ? "-" : gt) " " : "") $3 "/" ctdp[d]
+		if (!(pk in cpn)) { pord[++npt] = pk; cpk[pk] = -1; cpin[pk] = dev_ports(gt, ctsp[d], ctdp[d]) }
 		if (!((pk, sv) in cpsv)) { cpsv[pk, sv] = 1; cpn[pk]++ }
 		if (d in ctpk) {
 			cpk[pk] = (cpk[pk] < 0 ? 0 : cpk[pk]) + ctpk[d]
@@ -814,7 +833,7 @@ op == "ct_packets" || op == "ct_ports" {
 		}
 		next
 	}
-	if (!game_ports(ctsp[d], ctdp[d])) next
+	if (!dev_ports(gt, ctsp[d], ctdp[d])) next
 	if (!(sv in ctp)) { cord[++nct] = sv; ctp[sv] = -1 }
 	if (d in ctpk) ctp[sv] = (ctp[sv] < 0 ? 0 : ctp[sv]) + ctpk[d]
 	next

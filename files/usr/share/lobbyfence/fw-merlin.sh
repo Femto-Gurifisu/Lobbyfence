@@ -102,7 +102,7 @@ fw_prepare() {
 # lag zones: a queue for the game's packets (mangle FORWARD - the filter
 # still sees every packet after its wait)
 fw_mangle_extra() { # family
-	local f="$1" zn z n c
+	local f="$1" zn z n c g
 	[ "$LAG_SUPPORTED" = 1 ] && [ -n "$LAG_ZONES" ] || return 0
 	ipt_target_ok "$f" "$(lag_queue_target $LAG_QBASE)" || \
 		{ [ "$NETEM_HAVE" = 1 ] && ipt_target_ok "$f" "$(lag_class_target 1)" mangle; } || return 0
@@ -110,15 +110,19 @@ fw_mangle_extra() { # family
 	for zn in $LAG_ZONES; do
 		z="${zn%%:*}"; n="${zn#*:}"; c="LF_${z}"
 		zone_load "$z"
-		Z_DEV4="$(addr_list 4 $Z_DEV)"; Z_DEV6="$(addr_list 6 $Z_DEV)"; Z_MACS="$(mac_list $Z_DEV)"
 		echo ":${c}_lo$f - [0:0]"; echo ":${c}_li$f - [0:0]"; echo ":${c}_q - [0:0]"
-		# uploads (from the device) and / or downloads (to it)
-		ipt_dev_rules LF_LAG "${c}_lo$f" "${c}_li$f" "$f" | case "$Z_LAG_DIR" in
-			down) grep -v -- "-j ${c}_lo$f\$";;
-			up) grep -v -- "-j ${c}_li$f\$";;
-			*) cat;;
-		esac
-		ipt_port_rules "${c}_lo$f" "${c}_li$f" "${c}_q" "${c}_q"
+		# the devices on the zone's ports, then each type that has ports of its own
+		for g in "" $Z_GROUPS; do
+			zone_group "$g"
+			[ -n "$g" ] && { echo ":${c}_${G_TAG}lo$f - [0:0]"; echo ":${c}_${G_TAG}li$f - [0:0]"; }
+			# uploads (from the device) and / or downloads (to it)
+			ipt_dev_rules LF_LAG "${c}_${G_TAG}lo$f" "${c}_${G_TAG}li$f" "$f" | case "$Z_LAG_DIR" in
+				down) grep -v -- "-j ${c}_${G_TAG}lo$f\$";;
+				up) grep -v -- "-j ${c}_${G_TAG}li$f\$";;
+				*) cat;;
+			esac
+			ipt_port_rules "${c}_${G_TAG}lo$f" "${c}_${G_TAG}li$f" "${c}_q" "${c}_q"
+		done
 		echo "-A ${c}_q -j $(lag_target "$n")"
 	done
 	MANGLE_HOOKS="$MANGLE_HOOKS FORWARD:LF_LAG"

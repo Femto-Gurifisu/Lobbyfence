@@ -235,7 +235,7 @@ SRV="$(dirname "$AWKF")/servers.txt"
 n_srv="$(grep -c '^[0-9]' "$SRV")"
 ra shared_in -v now=9999999999 -v maxn=20000 -v statf=/tmp/lf_st.$$ "$SRV" > /tmp/lf_bi.$$
 t "servers.txt: a servers file, every server line taken (none damaged or over the limit)" "$n_srv 0 0" "$(cat /tmp/lf_st.$$)"
-t "servers.txt: filed under the Apex Legends, Battlefield, Call of Duty and Fortnite presets" "apex battlefield cod fortnite" \
+t "servers.txt: filed under the Apex Legends, Battlefield, Call of Duty, Fortnite and Roblox presets" "apex battlefield cod fortnite roblox" \
 	"$(awk '{ print $6 }' /tmp/lf_bi.$$ | sort -u | tr '\n' ' ' | sed 's/ $//')"
 t "servers.txt: each address once per game" "" "$(awk '{ print $6, $1 }' /tmp/lf_bi.$$ | sort | uniq -d)"
 printf '13.113.128.68\n45.32.7.134\n7.7.7.7\n' > /tmp/lf_w.$$

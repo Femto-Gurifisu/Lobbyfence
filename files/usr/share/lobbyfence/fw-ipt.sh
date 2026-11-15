@@ -48,6 +48,7 @@ FW_SETS="$LF_RUN/sets.ipset"
 # Broadcom CTF (hardware NAT acceleration) leaves alone connections whose
 # packets carry this mark - the same bypass FreshTomato uses for its VPNs
 CTF_MARK="0x01/0x7"
+CTF_TARGET="MARK --set-mark $CTF_MARK"
 
 # --------------------------------------------------------------- helpers
 
@@ -310,12 +311,13 @@ port_chunks() {
 
 # --------------------------------------------------------------- rules
 
-# the zone's game ports: rules sending the device's outgoing packets from
-# chain $1 to $3 and its incoming ones from $2 to $4 (each packet once)
+# the game ports of one group of the zone's devices (zone_group done): rules
+# sending the devices' outgoing packets from chain $1 to $3 and their incoming
+# ones from $2 to $4 (each packet once)
 ipt_port_rules() { # out-chain in-chain out-target in-target
 	local po="$1" pi="$2" go="$3" gi="$4" protos p lp rp pp l r
 	case "$Z_PROTO" in udp) protos=udp;; tcp) protos=tcp;; *) protos="udp tcp";; esac
-	lp="$(port_chunks "$Z_LPORT")"; rp="$(port_chunks "$Z_RPORT")"; pp="$(port_chunks "$Z_PORT")"
+	lp="$(port_chunks "$G_LPORT")"; rp="$(port_chunks "$G_RPORT")"; pp="$(port_chunks "$G_PORT")"
 	for p in $protos; do
 		if [ -n "$lp$rp" ]; then
 			for l in ${lp:-ANY}; do for r in ${rp:-ANY}; do
@@ -330,31 +332,36 @@ ipt_port_rules() { # out-chain in-chain out-target in-target
 	done
 }
 
-# rules sending the zone's devices' packets to chains $1 (from the device)
-# and $2 (to the device) -> stdout
+# rules sending one group's devices' packets (zone_group done) to chains $2
+# (from the device) and $3 (to the device) -> stdout
 ipt_dev_rules() { # parent out-chain in-chain family
-	local s="lf_$Z_ID" f="$4" d mac
-	eval "d=\"\$Z_DEV$f\""
-	[ -n "$d" ] && { echo "-A $1 -m set --match-set ${s}_dev$f src -j $2"; echo "-A $1 -m set --match-set ${s}_dev$f dst -j $3"; }
-	if [ -n "$Z_MACS" ]; then
-		for mac in $(one_per_line "$Z_MACS"); do echo "-A $1 -m mac --mac-source $mac -j $2"; done
-		echo "-A $1 -m set --match-set ${s}_mip$f dst -j $3"
+	local s="lf_${Z_ID}_$G_TAG" f="$4" d mac
+	eval "d=\"\$G_DEV$f\""
+	[ -n "$d" ] && { echo "-A $1 -m set --match-set ${s}dev$f src -j $2"; echo "-A $1 -m set --match-set ${s}dev$f dst -j $3"; }
+	if [ -n "$G_MACS" ]; then
+		for mac in $(one_per_line "$G_MACS"); do echo "-A $1 -m mac --mac-source $mac -j $2"; done
+		echo "-A $1 -m set --match-set ${s}mip$f dst -j $3"
 	fi
 	return 0
 }
 
 # chains and rules of one zone for one family -> stdout (zone_load done)
 ipt_zone() { # zone family
-	local z="$1" f="$2" s="lf_$1" c="LF_$1" p lp rp pp sk
-	lp="$(port_chunks "$Z_LPORT")"; rp="$(port_chunks "$Z_RPORT")"; pp="$(port_chunks "$Z_PORT")"
-	[ -n "$lp$rp$pp" ] || log warning "zone $z: no ports set, ALL $Z_PROTO traffic of its devices is filtered"
+	local z="$1" f="$2" s="lf_$1" c="LF_$1" p g sk
 
 	for p in po pi o i cm x; do echo ":${c}_$p$( [ "$p" = cm ] || [ "$p" = x ] || echo "$f") - [0:0]"; done
 	[ "$Z_BURST" -gt 0 ] && { echo ":${c}_b$f - [0:0]"; echo ":${c}_co - [0:0]"; }
 
-	# which packets belong to the zone: its devices and their game ports
-	ipt_dev_rules LF_FWD "${c}_po$f" "${c}_pi$f" "$f"
-	ipt_port_rules "${c}_po$f" "${c}_pi$f" "${c}_o$f" "${c}_i$f"
+	# which packets belong to the zone: its devices and their game ports - the
+	# devices on the zone's ports, then each type that has ports of its own
+	for g in "" $Z_GROUPS; do
+		zone_group "$g"
+		[ "$f" = 4 ] && [ -z "$G_LPORT$G_RPORT$G_PORT" ] && [ -n "$G_DEV4$G_DEV6$G_MACS" ] && \
+			log warning "zone $z: no ports set, ALL $Z_PROTO traffic of its devices is filtered"
+		[ -n "$g" ] && { echo ":${c}_${G_TAG}po$f - [0:0]"; echo ":${c}_${G_TAG}pi$f - [0:0]"; }
+		ipt_dev_rules LF_FWD "${c}_${G_TAG}po$f" "${c}_${G_TAG}pi$f" "$f"
+		ipt_port_rules "${c}_${G_TAG}po$f" "${c}_${G_TAG}pi$f" "${c}_o$f" "${c}_i$f"
+	done
 
 	# outbound (device -> server)
 	echo "-A ${c}_o$f -m set --match-set lf_priv$f dst -j RETURN"
@@ -408,19 +415,28 @@ ipt_zone() { # zone family
 	[ "$Z_MODE" = enforce ] && echo "-A ${c}_x -j DROP" || echo "-A ${c}_x -j RETURN"
 }
 
-# the zone's sets (static ones filled, the others kept) -> stdout
+# the zone's sets (static ones filled, the others kept) -> stdout;
+# ZONE_DEVS=1 when the zone has a device address
 ipset_zone() { # zone family
-	local f="$2" s="lf_$1" fa
+	local f="$2" s="lf_$1" fa g
 	fa="$(ipset_fam "$f")"
-	eval "one_per_line \"\$Z_DEV$f\"" | ipset_fill "${s}_dev$f" hash:net "$fa"
+	# the devices on the zone's ports, then each type that has ports of its own
+	# (the current addresses of MAC devices: filled by refresh_sets)
+	ZONE_DEVS=0
+	for g in "" $Z_GROUPS; do
+		zone_group "$g"
+		eval "one_per_line \"\$G_DEV$f\"" | ipset_fill "${s}_${G_TAG}dev$f" hash:net "$fa"
+		echo "create ${s}_${G_TAG}mip$f hash:ip family $fa"
+		ipset_want "${s}_${G_TAG}dev$f"; ipset_want "${s}_${G_TAG}mip$f"
+		[ -n "$G_DEV4$G_DEV6$G_MACS" ] && ZONE_DEVS=1
+	done
 	one_per_line "$(addr_list "$f" $Z_ALLOW)" | ipset_fill "${s}_fa$f" hash:net "$fa"
 	one_per_line "$(addr_list "$f" $Z_BLOCK)" | ipset_fill "${s}_fb$f" hash:net "$fa"
-	ipset_want "${s}_dev$f"; ipset_want "${s}_fa$f"; ipset_want "${s}_fb$f"
+	ipset_want "${s}_fa$f"; ipset_want "${s}_fb$f"
 	# filled by refresh_sets: created here when missing
-	echo "create ${s}_mip$f hash:ip family $fa"
 	echo "create ${s}_in$f hash:ip family $fa maxelem 262144"
 	echo "create ${s}_out$f hash:ip family $fa maxelem 262144"
-	ipset_want "${s}_mip$f"; ipset_want "${s}_in$f"; ipset_want "${s}_out$f"
+	ipset_want "${s}_in$f"; ipset_want "${s}_out$f"
 	ipset_timed "${s}_seen$f" "$fa" 65536 "$SEEN_TIMEOUT"
 	ipset_timed "${s}_now$f" "$fa" 65536 "$LF_NOW_TIMEOUT"
 	# servers the zone knows nothing about yet (not inside, outside or listed):
@@ -432,15 +448,20 @@ ipset_zone() { # zone family
 	fi
 }
 
-# CTF bypass for the zone's devices (mangle table)
+# CTF bypass for the zone's devices (mangle table): every group's packets go
+# to CTF_TARGET (FreshTomato: the mark CTF leaves alone)
 ipt_ctf_zone() { # zone family
-	local f="$2" s="lf_$1" d mac
-	eval "d=\"\$Z_DEV$f\""
-	[ -n "$d" ] && { echo "-A LF_CTF_IN -m set --match-set ${s}_dev$f src -j MARK --set-mark $CTF_MARK"; echo "-A LF_CTF_OUT -m set --match-set ${s}_dev$f dst -j MARK --set-mark $CTF_MARK"; }
-	if [ -n "$Z_MACS" ]; then
-		for mac in $(one_per_line "$Z_MACS"); do echo "-A LF_CTF_IN -m mac --mac-source $mac -j MARK --set-mark $CTF_MARK"; done
-		echo "-A LF_CTF_OUT -m set --match-set ${s}_mip$f dst -j MARK --set-mark $CTF_MARK"
-	fi
+	local f="$2" t="$CTF_TARGET" s d mac g
+	for g in "" $Z_GROUPS; do
+		zone_group "$g"
+		s="lf_${1}_$G_TAG"
+		eval "d=\"\$G_DEV$f\""
+		[ -n "$d" ] && { echo "-A LF_CTF_IN -m set --match-set ${s}dev$f src -j $t"; echo "-A LF_CTF_OUT -m set --match-set ${s}dev$f dst -j $t"; }
+		if [ -n "$G_MACS" ]; then
+			for mac in $(one_per_line "$G_MACS"); do echo "-A LF_CTF_IN -m mac --mac-source $mac -j $t"; done
+			echo "-A LF_CTF_OUT -m set --match-set ${s}mip$f dst -j $t"
+		fi
+	done
 }
 
 # LobbyFence's chains that exist right now in a table: ipt_chains 4|6 filter|mangle
@@ -476,7 +497,6 @@ ipt_rules() {
 			echo ":LF_FWD - [0:0]"
 			for z in $ZONES_ON; do
 				zone_load "$z"
-				Z_DEV4="$(addr_list 4 $Z_DEV)"; Z_DEV6="$(addr_list 6 $Z_DEV)"; Z_MACS="$(mac_list $Z_DEV)"
 				Z_LAG_MARK="$(ipt_lag_mark "$z")"
 				ipt_zone "$z" "$f"
 			done > "$LF_RUN/zone.rules"
@@ -507,7 +527,6 @@ ipt_mangle() { # family ctf
 			echo ":LF_CTF_OUT - [0:0]"
 			for z in $ZONES_ON; do
 				zone_load "$z"
-				Z_DEV4="$(addr_list 4 $Z_DEV)"; Z_DEV6="$(addr_list 6 $Z_DEV)"; Z_MACS="$(mac_list $Z_DEV)"
 				ipt_ctf_zone "$z" "$f"
 			done
 			MANGLE_HOOKS="PREROUTING:LF_CTF_IN POSTROUTING:LF_CTF_OUT"
@@ -569,11 +588,10 @@ fw_build() {
 			ipset_want "lf_priv$f"
 			for z in $ZONES_ON; do
 				zone_load "$z"
-				Z_DEV4="$(addr_list 4 $Z_DEV)"; Z_DEV6="$(addr_list 6 $Z_DEV)"; Z_MACS="$(mac_list $Z_DEV)"
-				[ -z "$Z_DEV4$Z_DEV6$Z_MACS" ] && [ "$f" = 4 ] && log warning "zone $z: no valid device address, zone is inactive"
 				[ "$Z_MODE" = enforce ] && [ "$Z_HAS_REGION" = 0 ] && [ "$f" = 4 ] && \
 					log warning "zone $z: no region drawn yet - every server is blocked except allow_ip"
 				ipset_zone "$z" "$f"
+				[ "$ZONE_DEVS" = 0 ] && [ "$f" = 4 ] && log warning "zone $z: no valid device address, zone is inactive"
 			done
 		done
 	} > "$FW_RULES.ipset"
@@ -934,11 +952,16 @@ fw_zone_servers() {
 	lfawk ipset_load -v p="lf_$1" -v v6="$FW_V6" < "$LF_RUN/$1.servers"
 }
 
+# (each type on its own ports: its devices' addresses in <zone>.mip.<tag>)
 fw_zone_mip() {
-	local z="$1" f
-	for f in $(fw_families); do
-		if [ "$f" = 4 ]; then grep -v ':' "$LF_RUN/$z.mip"; else grep ':' "$LF_RUN/$z.mip"; fi | \
-			ipset_fill "lf_${z}_mip$f" hash:ip "$(ipset_fam "$f")"
+	local z="$1" f g m
+	for g in "" $Z_GROUPS; do
+		G_TAG=""; [ -n "$g" ] && group_tag "$g"
+		m="$LF_RUN/$z.mip${G_TAG:+.$G_TAG}"
+		for f in $(fw_families); do
+			if [ "$f" = 4 ]; then grep -v ':' "$m" 2>/dev/null; else grep ':' "$m" 2>/dev/null; fi | \
+				ipset_fill "lf_${z}_${G_TAG}mip$f" hash:ip "$(ipset_fam "$f")"
+		done
 	done
 }
 
@@ -950,7 +973,7 @@ ipt_ct() { # zone fam
 	[ -r "$ct" ] || ct=/proc/net/ip_conntrack
 	[ -r "$ct" ] && [ -s "$LF_RUN/$1.dev" ] || return 0
 	ct_sift "$1" "$ct" | lfawk ct_packets -v devs="$LF_RUN/$1.dev" -v family="$2" -v proto="$Z_PROTO" \
-		-v lp="$Z_LPORT" -v rp="$Z_RPORT" -v pp="$Z_PORT"
+		-v lp="$Z_LPORT" -v rp="$Z_RPORT" -v pp="$Z_PORT" -v gdev="$LF_RUN/$1.gdev" -v gports="$Z_GPORTS"
 }
 
 # ip6tables without the SET target: IPv6 servers are learned from the

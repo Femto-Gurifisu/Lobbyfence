@@ -147,6 +147,9 @@ out="$(page send "allow game 1.2.3.4;reboot")"
 js "assert d.get('error')=='bad address', d" "$out" && pass "page: odd addresses refused" || fail "injection: $out"
 out="$(page send "allow ../x 1.2.3.4")"
 js "assert d.get('error')=='bad zone', d" "$out" && pass "page: odd zone names refused" || fail "zone: $out"
+out="$(page send "ports game ps")"; out2="$(page send "ports game ps reboot")"
+js "assert d.get('done') and d['code']==0, d" "$out" && js "assert d.get('error')=='bad argument', d" "$out2" \
+	&& pass "page: Ports seen of one device type, nothing else after it" || fail "ports by type: $out / $out2"
 printf 'other_title Other Addon 1.2\nlobbyfence_cmd ../../x 1/1 cycle\n' > "$LF_CUSTOM_SETTINGS"
 page event lobbyfence; sleep 1
 ! ls "$LF_RUN" | grep -q '^web.in' && ! grep -q lobbyfence_cmd "$LF_CUSTOM_SETTINGS" && pass "a request with a bad id is dropped" || fail "bad id: $(ls "$LF_RUN")"
@@ -185,6 +188,15 @@ fast="$(rtt 3074 45.10.0.1)"
 [ "$fast" != lost ] && [ "$fast" -lt 50 ] && pass "without lf-lagd packets pass (queue bypass), not dropped ($fast ms)" || fail "bypass: $fast"
 lf cycle
 inr pidof lf-lagd >/dev/null && pass "the next pass starts lf-lagd again" || fail "not restarted"
+# a second device of another type, on that type's own ports: its game packets get the lag too
+inl $IP addr add 192.168.1.101/24 dev veth0
+out="$(page ops '[["set","game","device",["192.168.1.100","192.168.1.101"]],["set","game","platform","pc"],["set","game","device_type",["192.168.1.101=ps"]],["set","game","remote_port_ps",["5555"]]]')"
+js "assert d['code']==0, d" "$out" || fail "device types apply: $out"
+ipt -t mangle -S LF_LAG | grep -q -- "lf_game_psdev4 dst -j LF_game_psli4" && ipt -t mangle -S LF_game_psli4 | grep -q -- "--sports 5555 -g LF_game_q" \
+	&& ipt -t mangle -S LF_LAG | grep -q -- "lf_game_dev4 dst -j LF_game_li4" \
+	&& pass "device types: the other type's game packets get the lag too, on its own ports" || fail "lag by type: $(ipt -t mangle -S | grep 'LF_game\|LF_LAG')"
+out="$(page ops '[["set","game","device",["192.168.1.100"]],["unset","game","platform"],["unset","game","device_type"],["unset","game","remote_port_ps"]]')"
+js "assert d['code']==0, d" "$out" && ! ipt -t mangle -S | grep -q 'LF_game_ps' && pass "...and their queue rules go with them" || fail "type lag rules left: $out"
 
 # --- 7b. a model LobbyFence carries netem for, but the kernel refuses the module
 # (this test kernel can't load an ARM module; insmod is a stand-in that fails
