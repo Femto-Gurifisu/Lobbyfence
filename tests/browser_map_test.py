@@ -1205,7 +1205,16 @@ def main():
         dm.locator(".lf-devs-addtype").select_option("ps")
         dm.locator(".lf-devs-add").click()
         check("the same device is not added twice (typed in another way)", "in this zone already" in dm.inner_text() and dm.locator(".lf-devs-row").count() == 2)
-        dm.locator(".lf-devs-manual").fill("")
+        # (the PC is in the zone by its IP address: not again by its MAC address - a device is filtered once)
+        dm.locator(".lf-devs-manual").fill("aa:bb:cc:dd:ee:01")
+        dm.locator(".lf-devs-addtype").select_option("ps")
+        dm.locator(".lf-devs-add").click()
+        check("...nor under another of its addresses", "in this zone already" in dm.inner_text() and dm.locator(".lf-devs-row").count() == 2)
+        dm.locator(".lf-devs-manual").fill("192.168.1.77")
+        dm.locator(".lf-devs-add").click()
+        check("an address the router doesn't know can be added by hand", dm.locator(".lf-devs-row").count() == 3
+              and dm.locator(".lf-devs-name").nth(2).inner_text() == "192.168.1.77", dm.locator(".lf-devs-name").all_inner_texts())
+        dm.locator(".lf-devs-remove").nth(2).click()
         # another type for a device: its ports line follows
         dm.locator(".lf-devs-type").nth(1).select_option("xbox")
         check("another type for a device: the ports under it are that type's",

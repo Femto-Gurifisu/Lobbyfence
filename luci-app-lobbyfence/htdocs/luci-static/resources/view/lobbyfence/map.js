@@ -6103,6 +6103,11 @@ return view.extend({
 			dev = String(dev).toLowerCase();
 			return rows.some(function(r) { return r.dev.toLowerCase() === dev; });
 		}
+		/* a device on the network that is in the zone - by its MAC address or by
+		   one of its IP addresses */
+		function knownInZone(d) {
+			return inZone(d.mac) || d.ipv4.concat(d.ipv6).some(inZone);
+		}
 		/* the devices on the network that are not in the zone yet */
 		function fillPick() {
 			var keep = devicePick.value;
@@ -6111,7 +6116,7 @@ return view.extend({
 				return;
 			devicePick.appendChild(E('option', { 'value': '', 'disabled': 'disabled', 'hidden': 'hidden' }, _('Choose a device…')));
 			known.forEach(function(d) {
-				if (!inZone(d.mac) && !d.ipv4.concat(d.ipv6).some(inZone))
+				if (!knownInZone(d))
 					devicePick.appendChild(E('option', { 'value': d.mac }, deviceLabel(d)));
 			});
 			devicePick.appendChild(E('option', { 'value': DEVICE_MANUAL }, _('Enter an address manually…')));
@@ -6168,7 +6173,10 @@ return view.extend({
 				dev = dev.toLowerCase().replace(/-/g, ':');
 			if (!validDevice(dev))
 				return (error.textContent = _('Pick a device, or enter a valid IPv4/IPv6 or MAC address.'));
-			if (inZone(dev))
+			/* (also under another of its addresses: a device is filtered once, on one type's ports) */
+			if (inZone(dev) || known.some(function(d) {
+				return (d.mac === dev || d.ipv4.indexOf(dev) >= 0 || d.ipv6.indexOf(dev) >= 0) && knownInZone(d);
+			}))
 				return (error.textContent = _('That device is in this zone already.'));
 			if (typed && !addType.value)
 				return (error.textContent = _('Choose the device type - %s.').format(_('PC or a console')));
