@@ -90,7 +90,7 @@ var THEMES = {
 		dark: true,
 		ui: { 'bg': '#0e0f11', 'panel': '#16171a', 'border': '#2a2b30', 'text': '#e4e4e7', 'muted': '#8b8f97',
 		      'btn': '#1f2024', 'hover': '#1d1e22', 'accent': '#d4d4d8', 'accent-text': '#111214' },
-		overlay: { circle: '#3b82f6', circleSel: '#93c5fd', circleFill: 0.12, allowed: '#22c55e', blocked: '#ef4444', unknown: '#6b7280' },
+		overlay: { circle: '#d4d4d8', circleSel: '#ffffff', circleFill: 0.12, allowed: '#22c55e', blocked: '#ef4444', unknown: '#6b7280' },
 		map: { land: '#1b1c1f', water: '#0b0b0c', landuse: '#1f2023', road: '#2c2d32', building: '#242529',
 		       border: '#4b4d53', label: '#8b8f97', waterLabel: '#45474d', halo: '#0b0b0c' },
 		raster: { 'raster-saturation': -1, 'raster-brightness-min': 0.3, 'raster-brightness-max': 0.04 }
@@ -101,7 +101,7 @@ var THEMES = {
 		satellite: true,
 		ui: { 'bg': '#0e0f11', 'panel': '#16171a', 'border': '#2a2b30', 'text': '#e4e4e7', 'muted': '#8b8f97',
 		      'btn': '#1f2024', 'hover': '#1d1e22', 'accent': '#fbbf24', 'accent-text': '#111214' },
-		overlay: { circle: '#3b82f6', circleSel: '#93c5fd', circleFill: 0.18, allowed: '#22c55e', blocked: '#ef4444', unknown: '#9ca3af' },
+		overlay: { circle: '#fbbf24', circleSel: '#fde68a', circleFill: 0.18, allowed: '#22c55e', blocked: '#ef4444', unknown: '#9ca3af' },
 		map: null,
 		raster: null
 	},
@@ -121,12 +121,62 @@ THEMES.galaxy = {
 	fx: 'galaxy',
 	ui: { 'bg': '#0a0718', 'panel': '#120d29', 'border': '#2b2152', 'text': '#ece9ff', 'muted': '#9a90c7',
 	      'btn': '#1a1438', 'hover': '#211a46', 'accent': '#a78bfa', 'accent-text': '#0a0718' },
-	overlay: { circle: '#3b82f6', circleSel: '#93c5fd', circleFill: 0.14, allowed: '#34d399', blocked: '#f472b6', unknown: '#8b86b0' },
+	overlay: { circle: '#fcd34d', circleSel: '#fef3c7', circleFill: 0.14, allowed: '#34d399', blocked: '#f472b6', unknown: '#8b86b0' },
 	map: { land: '#1b1440', water: '#05031a', landuse: '#211850', road: '#2f2468', building: '#271d5a',
 	       border: '#7c5cff', label: '#c4b5fd', waterLabel: '#5b4bb8', halo: '#05031a' },
 	raster: { 'raster-hue-rotate': 250, 'raster-saturation': -0.2, 'raster-brightness-min': 0.05, 'raster-brightness-max': 0.3 }
 };
-var THEME_ORDER = [ 'midnight', 'satellite', 'light', 'galaxy' ];
+/* military map: olive land, a grid and a radar sweep over it */
+THEMES.tactical = {
+	label: _('Tactical (military)'),
+	dark: true,
+	fx: 'tactical',
+	ui: { 'bg': '#0e110c', 'panel': '#141912', 'border': '#2e3925', 'text': '#e2e6d6', 'muted': '#97a083',
+	      'btn': '#1b2216', 'hover': '#222b1c', 'accent': '#c5d34a', 'accent-text': '#0e110c' },
+	overlay: { circle: '#f5b83d', circleSel: '#ffd98a', circleFill: 0.14, allowed: '#7fd34e', blocked: '#ff4d3a', unknown: '#7d8570' },
+	map: { land: '#252b1e', water: '#10150e', landuse: '#2a3122', road: '#38422e', building: '#2f3729',
+	       border: '#8e9d5d', label: '#b8c48d', waterLabel: '#56623f', halo: '#0b0e09' },
+	raster: { 'raster-saturation': -0.55, 'raster-hue-rotate': 40, 'raster-brightness-min': 0.12, 'raster-brightness-max': 0.4 }
+};
+/* an old sea chart: parchment, faded sea, a compass rose and its lines */
+THEMES.pirate = {
+	label: _('Treasure map (pirate)'),
+	dark: false,
+	fx: 'pirate',
+	ui: { 'bg': '#f3e6c8', 'panel': '#efdfbb', 'border': '#c8ab77', 'text': '#3a2713', 'muted': '#7a5b38',
+	      'btn': '#f8eed6', 'hover': '#ead5aa', 'accent': '#8a3b1e', 'accent-text': '#fff7e6' },
+	overlay: { circle: '#704e00', circleSel: '#a0700a', circleFill: 0.12, allowed: '#2f7d32', blocked: '#c1121f', unknown: '#7d7d72' },
+	map: { land: '#e8d2a1', water: '#a9bfb3', landuse: '#e2ca95', road: '#cdb07a', building: '#d9bf8a',
+	       border: '#8a5a2b', label: '#5a3a1a', waterLabel: '#3d5e63', halo: '#f2e3c0' },
+	raster: { 'raster-saturation': -0.6, 'raster-hue-rotate': 25, 'raster-brightness-min': 0.25, 'raster-contrast': -0.1 }
+};
+/* a winter night: snow falling, a string of lights, names glowing like lit windows */
+THEMES.winter = {
+	label: _('Winter holidays'),
+	dark: true,
+	fx: 'winter',
+	ui: { 'bg': '#0c121b', 'panel': '#111a26', 'border': '#24344a', 'text': '#eaf2fb', 'muted': '#93a7bd',
+	      'btn': '#172233', 'hover': '#1c2a3e', 'accent': '#e5484d', 'accent-text': '#ffffff' },
+	overlay: { circle: '#7dd3fc', circleSel: '#e0f2fe', circleFill: 0.14, allowed: '#34d399', blocked: '#f87171', unknown: '#8a9bb0' },
+	map: { land: '#1b2636', water: '#0a1019', landuse: '#1f2c3e', road: '#2c3c53', building: '#243347',
+	       border: '#86aed3', label: '#f6e7c1', waterLabel: '#58799b', halo: '#0a1019', glow: 'rgba(255,196,110,0.45)' },
+	raster: { 'raster-saturation': -0.7, 'raster-hue-rotate': 200, 'raster-brightness-min': 0.3, 'raster-brightness-max': 0.06 }
+};
+/* an old green-screen terminal: phosphor green, capital letters, scan lines,
+   a curved dark edge, a blinking prompt */
+THEMES.terminal = {
+	label: _('Terminal (green screen)'),
+	dark: true,
+	fx: 'terminal',
+	ui: { 'bg': '#020602', 'panel': '#041004', 'border': '#0f3a12', 'text': '#7dff8a', 'muted': '#3fae4c',
+	      'btn': '#071a08', 'hover': '#0a240c', 'accent': '#33ff4d', 'accent-text': '#021003' },
+	overlay: { circle: '#e6ffe6', circleSel: '#ffffff', circleFill: 0.12, allowed: '#33ff4d', blocked: '#ff5040', unknown: '#2f6b35' },
+	map: { land: '#031103', water: '#010401', landuse: '#041504', road: '#0b3a0f', building: '#082c0b',
+	       border: '#1fa82d', label: '#5cff6b', waterLabel: '#1f7a28', halo: '#010401', glow: 'rgba(51,255,77,0.28)',
+	       coast: '#29d93c', upper: true },
+	raster: { 'raster-saturation': -1, 'raster-brightness-min': 0.2, 'raster-brightness-max': 0.02 }
+};
+var THEME_ORDER = [ 'winter', 'midnight', 'satellite', 'light', 'galaxy', 'tactical', 'pirate', 'terminal' ];
 
 /* tiny seeded random numbers, so the stars and drips look the same on every visit */
 function seeded(seed) {
@@ -157,11 +207,114 @@ function themeFx(kind) {
 			nodes.push(E('div', { 'class': 'lf-shoot', 'style': 'top:' + (5 + r() * 45).toFixed(0) + '%;left:' + (20 + r() * 75).toFixed(0) + '%;' +
 				'animation-duration:' + (6 + r() * 6).toFixed(1) + 's;animation-delay:' + (i * 2.7 + r() * 2).toFixed(1) + 's' }));
 	}
+	else if (kind === 'tactical') {
+		nodes.push(E('div', { 'class': 'lf-fx-grid' }));
+		nodes.push(E('div', { 'class': 'lf-fx-radar' }));
+		nodes.push(E('div', { 'class': 'lf-fx-scan' }));
+		[ 'tl', 'tr', 'bl', 'br' ].forEach(function(c) { nodes.push(E('div', { 'class': 'lf-fx-corner lf-fx-' + c })); });
+	}
+	else if (kind === 'winter') {
+		nodes.push(E('div', { 'class': 'lf-fx-frost' }));
+		nodes.push(E('div', { 'class': 'lf-fx-snow lf-fx-snow1', 'style': 'background-image:' + snowTile(90, 3, 1.4) }));
+		nodes.push(E('div', { 'class': 'lf-fx-snow lf-fx-snow2', 'style': 'background-image:' + snowTile(40, 11, 2.6) + ';background-size:384px 384px' }));
+		nodes.push(E('div', { 'class': 'lf-fx-lights lf-fx-lights1', 'style': 'background-image:' + lightsStrip(0) }));
+		nodes.push(E('div', { 'class': 'lf-fx-lights lf-fx-lights2', 'style': 'background-image:' + lightsStrip(1) }));
+	}
+	else if (kind === 'terminal') {
+		nodes.push(E('div', { 'class': 'lf-fx-crt' }));
+		nodes.push(E('div', { 'class': 'lf-fx-refresh' }));
+		nodes.push(E('div', { 'class': 'lf-fx-prompt' }, [ 'root@router:~# lobbyfence watch', E('span', { 'class': 'lf-fx-cursor' }) ]));
+		nodes.push(E('div', { 'class': 'lf-fx-tube' }));
+	}
+	else if (kind === 'pirate') {
+		nodes.push(E('div', { 'class': 'lf-fx-paper', 'style': 'background-image:' + paperTile() }));
+		nodes.push(E('div', { 'class': 'lf-fx-rhumb', 'style': 'background-image:' + rhumbLines() }));
+		nodes.push(E('div', { 'class': 'lf-fx-compass', 'style': 'background-image:' + compassRose() }));
+		nodes.push(E('div', { 'class': 'lf-fx-vignette' }));
+	}
 	return nodes;
 }
-var DEFAULT_THEME = 'midnight';
 
-var WORLD_BOUNDS = [ [ -175, -75 ], [ 175, 78 ] ];      /* Fit: every continent, Antarctica included */
+function svgUrl(svg) {
+	return 'url("data:image/svg+xml,' + encodeURIComponent(svg) + '")';
+}
+
+/* a tile of snowflakes: n flakes up to `big` px across */
+function snowTile(n, seed, big) {
+	var r = seeded(seed), out = '<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512">';
+	for (var i = 0; i < n; i++)
+		out += '<circle cx="' + (r() * 512).toFixed(1) + '" cy="' + (r() * 512).toFixed(1) + '" r="' + (0.6 + r() * big).toFixed(2) +
+			'" fill="#ffffff" opacity="' + (0.35 + r() * 0.6).toFixed(2) + '"/>';
+	return svgUrl(out + '</svg>');
+}
+
+/* a string of holiday lights hanging along the top: every other bulb lit
+   (which ones: `odd`), the two strips take turns */
+function lightsStrip(odd) {
+	var cols = [ '#ff4d4d', '#ffd166', '#4ade80', '#60a5fa', '#f472b6' ], out = '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="34">';
+	out += '<path d="M0 6 Q30 22 60 6 T120 6 T180 6 T240 6" fill="none" stroke="#1b2a1f" stroke-width="1.6"/>';
+	for (var i = 0; i < 8; i++) {
+		var x = 15 + i * 30, y = 6 + (i % 2 ? 4 : 12), c = cols[(i * 3 + odd) % cols.length], on = (i % 2) === odd;
+		out += '<rect x="' + (x - 2) + '" y="' + (y - 3) + '" width="4" height="4" fill="#2b3a30"/>' +
+			(on ? '<circle cx="' + x + '" cy="' + (y + 6) + '" r="7" fill="' + c + '" opacity=".35"/>' : '') +
+			'<ellipse cx="' + x + '" cy="' + (y + 6) + '" rx="3.2" ry="4.6" fill="' + c + '" opacity="' + (on ? 1 : 0.35) + '"/>';
+	}
+	return svgUrl(out + '</svg>');
+}
+
+/* paper grain for the old chart */
+function paperTile() {
+	return svgUrl('<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256"><filter id="n"><feTurbulence type="fractalNoise" baseFrequency=".8" numOctaves="3" seed="7"/>' +
+		'<feColorMatrix values="0 0 0 0 .36 0 0 0 0 .24 0 0 0 0 .1 0 0 0 .55 0"/></filter><rect width="256" height="256" filter="url(#n)"/></svg>');
+}
+
+/* the chart's rhumb lines: 32 lines out of the compass rose's centre */
+function rhumbLines() {
+	var out = '<svg xmlns="http://www.w3.org/2000/svg" width="3000" height="3000" viewBox="-1500 -1500 3000 3000"><g stroke="#6b4423" stroke-width="1">';
+	for (var i = 0; i < 32; i++) {
+		var a = i * Math.PI / 16;
+		out += '<line x1="0" y1="0" x2="' + (1500 * Math.cos(a)).toFixed(1) + '" y2="' + (1500 * Math.sin(a)).toFixed(1) + '"' +
+			(i % 4 ? ' stroke-dasharray="6 6" opacity=".6"' : '') + '/>';
+	}
+	return svgUrl(out + '</g></svg>');
+}
+
+/* a compass rose: 16 points, a ring with the degrees, N at the top */
+function compassRose() {
+	var o = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="-100 -100 200 200">', i, a;
+	function pt(r, deg) { var t = (deg - 90) * Math.PI / 180; return (r * Math.cos(t)).toFixed(2) + ',' + (r * Math.sin(t)).toFixed(2); }
+	function point(deg, len, w, c1, c2) {
+		return '<polygon points="0,0 ' + pt(w, deg - 90) + ' ' + pt(len, deg) + '" fill="' + c1 + '"/>' +
+			'<polygon points="0,0 ' + pt(w, deg + 90) + ' ' + pt(len, deg) + '" fill="' + c2 + '"/>';
+	}
+	o += '<circle r="74" fill="none" stroke="#5a3a1a" stroke-width="1.5"/><circle r="68" fill="none" stroke="#5a3a1a" stroke-width=".8"/>';
+	for (i = 0; i < 72; i++) {
+		a = i * 5;
+		o += '<line x1="' + pt(68, a).split(',')[0] + '" y1="' + pt(68, a).split(',')[1] + '" x2="' + pt(i % 2 ? 71 : 74, a).split(',')[0] +
+			'" y2="' + pt(i % 2 ? 71 : 74, a).split(',')[1] + '" stroke="#5a3a1a" stroke-width=".7"/>';
+	}
+	for (i = 0; i < 16; i++)
+		if (i % 2) o += point(i * 22.5, 34, 5, '#c9a86b', '#8a6436');
+	for (i = 0; i < 8; i += 2)
+		o += point(i * 45 + 45, 46, 7, '#8a6436', '#e8d2a1');
+	for (i = 0; i < 4; i++)
+		o += point(i * 90, 64, 9, i ? '#5a3a1a' : '#9b3d1c', '#f2e3c0');
+	o += '<circle r="5" fill="#f2e3c0" stroke="#5a3a1a" stroke-width="1.2"/>';
+	[ [ 'N', 0 ], [ 'E', 90 ], [ 'S', 180 ], [ 'W', 270 ] ].forEach(function(l) {
+		var c = pt(88, l[1]).split(',');
+		o += '<text x="' + c[0] + '" y="' + c[1] + '" font-family="Georgia,serif" font-size="17" font-weight="bold" fill="' + (l[0] === 'N' ? '#9b3d1c' : '#5a3a1a') +
+			'" text-anchor="middle" dominant-baseline="central">' + l[0] + '</text>';
+	});
+	return svgUrl(o + '</svg>');
+}
+var DEFAULT_THEME = 'midnight';
+/* the home pin stays blue in every theme (the shapes take the theme's colour) */
+function homeColor(t) { return t.dark ? '#3b82f6' : '#2563eb'; }
+/* how wide the page grows on a wide screen: the map about as wide as LuCI's
+   column had it, and room for a wide side panel */
+var WIDE_MAX = 1340;
+
+var WORLD_BOUNDS = [ [ -180, -78 ], [ 180, 84 ] ];      /* Fit: the whole world - Greenland's north and Antarctica too */
 var FULL_BOUNDS = [ [ -180, -85 ], [ 180, 85 ] ];       /* "Zoom out completely": pole to pole */
 
 /* Antarctica has no country label in OpenStreetMap, so the basemap shows none */
@@ -191,6 +344,105 @@ function addExtraLabels(s) {
 	});
 	return s;
 }
+/* View → States: the borders of states and provinces, and these ones named by
+   their short form (the basemap has the names; the short forms are ours). Each
+   set only counts inside its country's area: the same name is a state elsewhere
+   too (Florida in Uruguay, Montana in Bulgaria, Amazonas in Colombia ...). */
+function box(w, s, e, n) { return { type: 'Polygon', coordinates: [ [ [ w, s ], [ e, s ], [ e, n ], [ w, n ], [ w, s ] ] ] }; }
+var STATE_SETS = [
+	{ /* United States and Canada (Alaska, Hawaii and Puerto Rico included) */
+	  area: box(-180, 15, -50, 85),
+	  abbr: {
+		'Alabama': 'AL', 'Alaska': 'AK', 'Arizona': 'AZ', 'Arkansas': 'AR', 'California': 'CA', 'Colorado': 'CO', 'Connecticut': 'CT',
+		'Delaware': 'DE', 'District of Columbia': 'DC', 'Florida': 'FL', 'Georgia': 'GA', 'Hawaii': 'HI', 'Idaho': 'ID', 'Illinois': 'IL',
+		'Indiana': 'IN', 'Iowa': 'IA', 'Kansas': 'KS', 'Kentucky': 'KY', 'Louisiana': 'LA', 'Maine': 'ME', 'Maryland': 'MD',
+		'Massachusetts': 'MA', 'Michigan': 'MI', 'Minnesota': 'MN', 'Mississippi': 'MS', 'Missouri': 'MO', 'Montana': 'MT',
+		'Nebraska': 'NE', 'Nevada': 'NV', 'New Hampshire': 'NH', 'New Jersey': 'NJ', 'New Mexico': 'NM', 'New York': 'NY',
+		'North Carolina': 'NC', 'North Dakota': 'ND', 'Ohio': 'OH', 'Oklahoma': 'OK', 'Oregon': 'OR', 'Pennsylvania': 'PA',
+		'Rhode Island': 'RI', 'South Carolina': 'SC', 'South Dakota': 'SD', 'Tennessee': 'TN', 'Texas': 'TX', 'Utah': 'UT',
+		'Vermont': 'VT', 'Virginia': 'VA', 'Washington': 'WA', 'West Virginia': 'WV', 'Wisconsin': 'WI', 'Wyoming': 'WY',
+		'Puerto Rico': 'PR',
+		'Alberta': 'AB', 'British Columbia': 'BC', 'Manitoba': 'MB', 'New Brunswick': 'NB', 'Newfoundland and Labrador': 'NL',
+		'Northwest Territories': 'NT', 'Nova Scotia': 'NS', 'Nunavut': 'NU', 'Ontario': 'ON', 'Prince Edward Island': 'PE',
+		'Quebec': 'QC', 'Québec': 'QC', 'Saskatchewan': 'SK', 'Yukon': 'YT'
+	  } },
+	{ /* Australia */
+	  area: box(110, -45, 155, -9),
+	  abbr: {
+		'New South Wales': 'NSW', 'Victoria': 'VIC', 'Queensland': 'QLD', 'South Australia': 'SA', 'Western Australia': 'WA',
+		'Tasmania': 'TAS', 'Northern Territory': 'NT', 'Australian Capital Territory': 'ACT'
+	  } },
+	{ /* Brazil (its outline, roughly: Colombia's and Venezuela's Amazonas stay out) */
+	  area: { type: 'Polygon', coordinates: [ [ [ -74, -12 ], [ -74, -7 ], [ -70, -4.5 ], [ -69.5, -1 ], [ -67.5, 1.2 ], [ -63.5, 1.5 ],
+		[ -62, 4.5 ], [ -60, 5.5 ], [ -50, 5 ], [ -33, -3 ], [ -33, -20 ], [ -48, -30 ], [ -54, -35 ], [ -58, -30 ], [ -58, -20 ],
+		[ -62, -16 ], [ -66, -11 ], [ -74, -12 ] ] ] },
+	  abbr: {
+		'Acre': 'AC', 'Alagoas': 'AL', 'Amapá': 'AP', 'Amazonas': 'AM', 'Bahia': 'BA', 'Ceará': 'CE', 'Federal District': 'DF',
+		'Distrito Federal': 'DF', 'Espírito Santo': 'ES', 'Goiás': 'GO', 'Maranhão': 'MA', 'Mato Grosso': 'MT',
+		'Mato Grosso do Sul': 'MS', 'Minas Gerais': 'MG', 'Pará': 'PA', 'Paraíba': 'PB', 'Paraná': 'PR', 'Pernambuco': 'PE',
+		'Piauí': 'PI', 'Rio de Janeiro': 'RJ', 'Rio Grande do Norte': 'RN', 'Rio Grande do Sul': 'RS', 'Rondônia': 'RO',
+		'Roraima': 'RR', 'Santa Catarina': 'SC', 'São Paulo': 'SP', 'Sergipe': 'SE', 'Tocantins': 'TO'
+	  } }
+];
+
+/* a state's short form: the set whose area it is in, by its English name */
+function stateAbbrExpr() {
+	var name = [ 'coalesce', [ 'get', 'name_en' ], [ 'get', 'name' ] ], text = [ 'case' ], show = [ 'any' ];
+	STATE_SETS.forEach(function(set) {
+		var match = [ 'match', name ], names = Object.keys(set.abbr);
+		names.forEach(function(n) { match.push(n, set.abbr[n]); });
+		match.push('');
+		text.push([ 'within', set.area ], match);
+		show.push([ 'all', [ 'within', set.area ], [ 'in', name, [ 'literal', names ] ] ]);
+	});
+	text.push('');
+	return { text: text, filter: [ 'all', [ '==', [ 'get', 'class' ], 'state' ], show ] };
+}
+
+/* the States layers, styled for the theme: state lines under the names, the
+   short forms on top (hidden until View → States is on) */
+function addStateLayers(s, theme, on) {
+	var src = null, like = null, firstSymbol = -1, m, ex;
+	Object.keys(s.sources || {}).forEach(function(k) {
+		if (!src && s.sources[k].type === 'vector')
+			src = k;
+	});
+	(s.layers || []).forEach(function(l, i) {
+		if (l.type === 'symbol' && firstSymbol < 0)
+			firstSymbol = i;
+		if (!like && l.type === 'symbol' && /country/.test(String(l.id).toLowerCase()) && l.layout && l.layout['text-font'])
+			like = l;
+	});
+	if (!src)
+		return s;
+	m = theme.map || (theme.satellite ? { border: '#f1f5f9', label: '#ffffff', halo: '#0b0b0c' }
+	                                  : { border: '#9aa1ab', label: '#4b5563', halo: '#ffffff' });
+	var vis = on ? 'visible' : 'none';
+	var line = {
+		id: 'lf-state-lines', type: 'line', source: src, 'source-layer': 'boundary', minzoom: 1,
+		filter: [ 'all', [ '==', [ 'get', 'admin_level' ], 4 ], [ '!=', [ 'get', 'maritime' ], 1 ] ],
+		layout: { 'visibility': vis, 'line-join': 'round' },
+		paint: { 'line-color': m.border, 'line-opacity': 0.75, 'line-dasharray': [ 3, 2 ],
+		         'line-width': [ 'interpolate', [ 'linear' ], [ 'zoom' ], 2, 0.6, 6, 1.2, 10, 1.8 ] }
+	};
+	if (firstSymbol < 0)
+		s.layers.push(line);
+	else
+		s.layers.splice(firstSymbol, 0, line);
+	if (!like || !s.glyphs)
+		return s;
+	ex = stateAbbrExpr();
+	s.layers.push({
+		id: 'lf-state-labels', type: 'symbol', source: src, 'source-layer': 'place', minzoom: 2,
+		filter: ex.filter,
+		layout: { 'visibility': vis, 'text-field': ex.text, 'text-font': like.layout['text-font'],
+		          'text-size': [ 'interpolate', [ 'linear' ], [ 'zoom' ], 2, 10, 5, 13, 8, 16 ],
+		          'text-letter-spacing': 0.08, 'text-padding': 1 },
+		paint: { 'text-color': m.label, 'text-halo-color': m.halo, 'text-halo-width': 1.4 }
+	});
+	return s;
+}
+
 var DEFAULT_RADIUS_KM = 500;
 var EARTH_KM = 6371.0088;
 var POLE_LAT = 85;
@@ -395,7 +647,15 @@ function themedStyle(base, theme) {
 			break;
 		case 'symbol':
 			p['text-color'] = r === 'water' ? m.waterLabel : m.label;
-			p['text-halo-color'] = m.halo;
+			p['text-halo-color'] = m.glow && r !== 'water' ? m.glow : m.halo;
+			if (m.glow && r !== 'water') {
+				p['text-halo-width'] = 2.2;
+				p['text-halo-blur'] = 2;
+			}
+			if (m.upper && l.layout && l.layout['text-field']) {
+				l.layout['text-transform'] = 'uppercase';
+				l.layout['text-letter-spacing'] = 0.12;
+			}
 			if ('icon-color' in p) p['icon-color'] = m.label;
 			break;
 		case 'fill-extrusion':
@@ -411,7 +671,34 @@ function themedStyle(base, theme) {
 			break;
 		}
 	});
+	if (m.coast)
+		addCoast(s, m.coast);
 	return s;
+}
+
+/* glowing coastlines: the water's edge drawn twice - a soft wide glow and a
+   thin bright line - right above the water */
+function addCoast(s, color) {
+	var src = null, at = -1;
+	Object.keys(s.sources || {}).forEach(function(k) {
+		if (!src && s.sources[k].type === 'vector')
+			src = k;
+	});
+	(s.layers || []).forEach(function(l, i) {
+		if (l.type === 'fill' && l['source-layer'] === 'water')
+			at = i;
+	});
+	if (!src || at < 0)
+		return;
+	s.layers.splice(at + 1, 0, {
+		id: 'lf-coast-glow', type: 'line', source: src, 'source-layer': 'water',
+		paint: { 'line-color': color, 'line-opacity': 0.35, 'line-blur': 3,
+		         'line-width': [ 'interpolate', [ 'linear' ], [ 'zoom' ], 1, 2.5, 6, 5 ] }
+	}, {
+		id: 'lf-coast', type: 'line', source: src, 'source-layer': 'water',
+		paint: { 'line-color': color, 'line-opacity': 0.9,
+		         'line-width': [ 'interpolate', [ 'linear' ], [ 'zoom' ], 1, 0.6, 6, 1.2 ] }
+	});
 }
 
 function rasterStyle(theme) {
@@ -535,7 +822,11 @@ var STYLE_CSS = [
 	/* the panel: wide enough for its rows (the server-test setting on one line,
 	   the status buttons in one row) with a scrollbar too - the scrollbar's room
 	   is kept, so the rows don't move when the panel starts or stops scrolling */
-	'.lf-body{display:grid;grid-template-columns:minmax(0,1fr) clamp(360px,27%,460px);gap:12px}',
+	'.lf-body{display:grid;grid-template-columns:minmax(0,1fr) clamp(360px,36%,460px);gap:12px}',
+	/* a wide panel: its small print a size up, easier to read */
+	'.lf-panel{container-type:inline-size}',
+	'@container (min-width:430px){.lf-panel>*{font-size:15px}.lf-panel .lf-sm,.lf-panel .lf-switch,.lf-panel .lf-btn.lf-sm,.lf-panel .lf-servers-table,.lf-panel .lf-search .lf-select,.lf-panel .lf-crow .lf-input{font-size:13px}' +
+		'.lf-panel .lf-sec h4{font-size:12px}.lf-panel .lf-tab{font-size:14px}}',
 	'@media (max-width:960px){.lf-body{grid-template-columns:minmax(0,1fr)}.lf-panel{height:auto!important}}',
 	'.lf-mapwrap{position:relative;height:72vh;min-height:440px;border-radius:8px;overflow:hidden;border:1px solid var(--lf-border);background:var(--lf-panel)}',
 	'.lf-panel{display:flex;flex-direction:column;height:72vh;min-height:440px;scrollbar-gutter:stable;background:var(--lf-panel);border:1px solid var(--lf-border);border-radius:8px;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--lf-border) transparent}',
@@ -610,6 +901,42 @@ var STYLE_CSS = [
 		'radial-gradient(ellipse 35% 25% at 75% 65%,rgba(236,72,153,.30),transparent 70%),' +
 		'radial-gradient(ellipse 30% 40% at 60% 20%,rgba(56,189,248,.25),transparent 70%)}',
 	'@keyframes lf-drift{from{transform:translate(0,0) scale(1)}to{transform:translate(-5%,3%) scale(1.15)}}',
+	/* Tactical: a map grid, a radar sweep, scan lines and frame corners */
+	'.lf-fx-grid{position:absolute;inset:0;background-image:linear-gradient(rgba(197,211,74,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(197,211,74,.07) 1px,transparent 1px),' +
+		'linear-gradient(rgba(197,211,74,.13) 1px,transparent 1px),linear-gradient(90deg,rgba(197,211,74,.13) 1px,transparent 1px);background-size:32px 32px,32px 32px,160px 160px,160px 160px}',
+	'.lf-fx-radar{position:absolute;left:50%;top:50%;width:150vmax;height:150vmax;margin:-75vmax 0 0 -75vmax;border-radius:50%;' +
+		'background:conic-gradient(from 0deg,rgba(197,211,74,0) 0deg,rgba(197,211,74,0) 320deg,rgba(197,211,74,.10) 355deg,rgba(197,211,74,.22) 360deg);animation:lf-radar 9s linear infinite}',
+	'@keyframes lf-radar{to{transform:rotate(360deg)}}',
+	'.lf-fx-scan{position:absolute;inset:0;background:repeating-linear-gradient(0deg,rgba(0,0,0,.12) 0 1px,transparent 1px 3px);opacity:.5}',
+	'.lf-fx-corner{position:absolute;width:26px;height:26px;border:2px solid rgba(197,211,74,.55)}',
+	'.lf-fx-tl{left:10px;top:10px;border-right:0;border-bottom:0}.lf-fx-tr{right:10px;top:10px;border-left:0;border-bottom:0}',
+	'.lf-fx-bl{left:10px;bottom:10px;border-right:0;border-top:0}.lf-fx-br{right:10px;bottom:28px;border-left:0;border-top:0}',
+	/* Treasure map: paper grain, rhumb lines out of a compass rose, burnt edges */
+	'.lf-fx-paper{position:absolute;inset:0;mix-blend-mode:multiply;opacity:.35}',
+	'.lf-fx-rhumb{position:absolute;left:-1404px;bottom:-1404px;width:3000px;height:3000px;opacity:.3}',
+	'.lf-fx-compass{position:absolute;left:16px;bottom:16px;width:160px;height:160px;background-size:100% 100%;opacity:.9;filter:drop-shadow(0 1px 1px rgba(90,58,26,.35))}',
+	'.lf-fx-vignette{position:absolute;inset:0;box-shadow:inset 0 0 70px 18px rgba(110,70,25,.45),inset 0 0 14px 3px rgba(70,40,10,.5)}',
+	'@media (max-width:600px){.lf-fx-compass{width:96px;height:96px}.lf-fx-rhumb{left:-1436px;bottom:-1436px}}',
+	/* Winter holidays: two layers of snow falling, lights along the top, frost in the corners */
+	'.lf-fx-snow{position:absolute;inset:0;background-size:512px 512px}',
+	'.lf-fx-snow1{animation:lf-snow1 26s linear infinite;opacity:.7}',
+	'.lf-fx-snow2{animation:lf-snow2 14s linear infinite;opacity:.85}',
+	'@keyframes lf-snow1{from{background-position:0 0}to{background-position:60px 512px}}',
+	'@keyframes lf-snow2{from{background-position:0 0}to{background-position:-90px 384px}}',
+	'.lf-fx-lights{position:absolute;left:0;right:0;top:0;height:34px;background-repeat:repeat-x;background-size:240px 34px}',
+	'.lf-fx-lights1{animation:lf-blink 1.6s steps(1) infinite}',
+	'.lf-fx-lights2{animation:lf-blink 1.6s steps(1) infinite reverse}',
+	'@keyframes lf-blink{0%{opacity:1}50%{opacity:0}}',
+	'.lf-fx-frost{position:absolute;inset:0;background:radial-gradient(ellipse 30% 35% at 0 100%,rgba(220,235,255,.18),transparent 70%),' +
+		'radial-gradient(ellipse 30% 35% at 100% 100%,rgba(220,235,255,.18),transparent 70%);box-shadow:inset 0 0 60px 10px rgba(180,210,255,.12)}',
+	/* Terminal: scan lines, a refresh band rolling down, a flicker, the tube's dark curved edge, a prompt */
+	'.lf-fx-crt{position:absolute;inset:0;background:repeating-linear-gradient(0deg,rgba(0,0,0,.28) 0 1px,transparent 1px 3px);animation:lf-flicker 4s steps(1) infinite}',
+	'@keyframes lf-flicker{0%{opacity:.9}3%{opacity:.75}6%{opacity:.9}50%{opacity:.85}53%{opacity:.95}100%{opacity:.9}}',
+	'.lf-fx-refresh{position:absolute;left:0;right:0;top:-20%;height:20%;background:linear-gradient(transparent,rgba(51,255,77,.06),transparent);animation:lf-roll 7s linear infinite}',
+	'@keyframes lf-roll{to{top:110%}}',
+	'.lf-fx-tube{position:absolute;inset:0;border-radius:18px;box-shadow:inset 0 0 0 2px rgba(51,255,77,.18),inset 0 0 90px 22px rgba(0,0,0,.75)}',
+	'.lf-fx-prompt{position:absolute;left:18px;bottom:16px;font:13px/1.2 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#5cff6b;text-shadow:0 0 6px rgba(51,255,77,.7);opacity:.85}',
+	'.lf-fx-cursor{display:inline-block;width:.6em;height:1.05em;margin-left:.35em;vertical-align:-.15em;background:#5cff6b;box-shadow:0 0 6px rgba(51,255,77,.8);animation:lf-blink 1.1s steps(1) infinite}',
 	'@media (prefers-reduced-motion:reduce){.lf-fx *{animation:none!important}}',
 	'.lf-mapwrap .maplibregl-popup,.lf-mapwrap .maplibregl-marker{z-index:3}',
 	'.lf-welcome{max-width:640px;max-height:calc(100% - 24px);overflow:auto}',
@@ -2014,6 +2341,7 @@ return view.extend({
 		this.borders = vo.borders !== false;          /* country borders drawn */
 		this.labels = vo.labels !== false;            /* place names on the map (off: a plain map) */
 		this.wholeWorld = vo.whole === true;          /* zoom out until the whole world is in view */
+		this.states = vo.states === true;             /* state borders and their short names */
 		this.constrainFn = function(lngLat, zoom) { return self.constrainView(lngLat, zoom); };
 		this.passFn = function(lngLat, zoom) { return { center: lngLat, zoom: zoom }; };
 		this.borderless = !!vo.borderless;            /* map fills the browser window, no frame */
@@ -2257,9 +2585,10 @@ return view.extend({
 	},
 
 	styleFor: function() {
-		if (this.theme().satellite)
-			return addExtraLabels(satelliteStyle(this.baseStyle));
-		return this.baseStyle ? addExtraLabels(themedStyle(this.baseStyle, this.theme())) : rasterStyle(this.theme());
+		var t = this.theme();
+		if (t.satellite)
+			return addStateLayers(addExtraLabels(satelliteStyle(this.baseStyle)), t, this.states);
+		return this.baseStyle ? addStateLayers(addExtraLabels(themedStyle(this.baseStyle, t)), t, this.states) : rasterStyle(t);
 	},
 
 	applyTheme: function(name, initial) {
@@ -2271,7 +2600,7 @@ return view.extend({
 		this.themeSelect.value = this.themeName;
 		Object.keys(t.ui).forEach(function(k) { self.app.style.setProperty('--lf-' + k, t.ui[k]); });
 		this.app.classList.toggle('lf-dark', !!t.dark);
-		this.homeIco.innerHTML = pinSvg(t.overlay.circle, 14, false);
+		this.homeIco.innerHTML = pinSvg(homeColor(t), 14, false);
 		if (this.fxNode && this.fxNode.getAttribute('data-fx') !== (t.fx || '')) {
 			this.fxNode.setAttribute('data-fx', t.fx || '');
 			this.fxNode.innerHTML = '';
@@ -2391,7 +2720,7 @@ return view.extend({
 			st.setProperty('--lf-wide-r', r);
 		}
 		set('0px', '0px');
-		var r = app.getBoundingClientRect(), vh = window.innerHeight || de.clientHeight, pad = 24, most = 1800;
+		var r = app.getBoundingClientRect(), vh = window.innerHeight || de.clientHeight, pad = 24, most = WIDE_MAX;
 		/* (not in view: nothing to measure by - as it was) */
 		if (!r.width || r.bottom <= 0 || r.top >= vh)
 			return set(was[0] || '0px', was[1] || '0px');
@@ -2533,6 +2862,7 @@ return view.extend({
 			self.applyLimits();
 			self.applyBorders();
 			self.applyLabels();
+			self.applyStates();
 			self.drawHome();
 			self.drawRegions();
 			self.drawDraft();
@@ -2808,6 +3138,8 @@ return view.extend({
 			this.borders, function(on) { self.setBorders(on); }));
 		this.viewMenu.appendChild(item(_('Place names'), _('Names of countries, cities, seas and so on - switch off for a plain map'),
 			this.labels, function(on) { self.setLabels(on); }));
+		this.viewMenu.appendChild(item(_('States'), _('The lines between states and provinces, and each one\'s short name (NY, CA, ON, NSW, SP ...)'),
+			this.states, function(on) { self.setStates(on); }));
 		this.viewMenu.appendChild(item(_('Whole world'), _('Zoom out until the entire world is in view, pole to pole - stays on until you switch it off (zoomed out, the map then no longer fills its whole area)'),
 			this.wholeWorld, function(on) { self.setWholeWorld(on); }));
 		this.viewMenu.style.display = '';
@@ -2815,7 +3147,7 @@ return view.extend({
 	},
 
 	saveViewOpts: function() {
-		store('viewopts', { endless: this.endless, borders: this.borders, borderless: this.borderless, labels: this.labels, whole: this.wholeWorld });
+		store('viewopts', { endless: this.endless, borders: this.borders, borderless: this.borderless, labels: this.labels, whole: this.wholeWorld, states: this.states });
 	},
 
 	setBorderless: function(on, initial) {
@@ -2856,10 +3188,31 @@ return view.extend({
 		});
 	},
 
+	setStates: function(on) {
+		this.states = !!on;
+		this.saveViewOpts();
+		this.applyStates();
+	},
+
+	/* our state lines and short names on or off; with them on, the basemap's own
+	   (long) state names make way */
+	applyStates: function() {
+		var self = this, st = this.map && this.styleReady && this.map.getStyle && this.map.getStyle();
+		if (!st || !st.layers)
+			return;
+		st.layers.forEach(function(l) {
+			if (l.id === 'lf-state-lines' || l.id === 'lf-state-labels')
+				self.map.setLayoutProperty(l.id, 'visibility', self.states ? 'visible' : 'none');
+			else if (l.type === 'symbol' && !/^lf-/.test(l.id) && /state/.test(String(l.id).toLowerCase()))
+				self.map.setLayoutProperty(l.id, 'visibility', self.labels && !self.states ? 'visible' : 'none');
+		});
+	},
+
 	setLabels: function(on) {
 		this.labels = !!on;
 		this.saveViewOpts();
 		this.applyLabels();
+		this.applyStates();
 	},
 
 	/* hide or show every name on the basemap (its text layers, our Antarctica
@@ -4766,7 +5119,7 @@ return view.extend({
 		this.homeButton.classList.toggle('lf-on', !!h);
 		if (!map || !this.styleReady || !map.getSource)
 			return;
-		var color = this.theme().overlay.circle, img = 'lf-pin-' + color.replace('#', '');
+		var color = homeColor(this.theme()), img = 'lf-pin-' + color.replace('#', '');
 		var data = { type: 'FeatureCollection', features: h ? [ { type: 'Feature',
 			properties: { label: h.label || '' }, geometry: { type: 'Point', coordinates: [ h.lon, h.lat ] } } ] : [] };
 

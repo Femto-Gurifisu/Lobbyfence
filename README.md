@@ -25,8 +25,9 @@ https://github.com/user-attachments/assets/8853105d-9a10-4cfd-ab1b-c39192d5d10d
 * Click any server on the map to **always allow** or **always block** it - the
   change takes effect on the router at once, no Save & Apply needed.
 * Full-screen map view, optionally without the side panel. On a wide screen
-  the page uses the room LuCI's themes leave empty next to their narrow column
-  (up to 1800 pixels), and the side panel grows with it.
+  the page grows a little past LuCI's narrow column (up to 1340 pixels): the
+  map stays about as wide as before, and the side panel gets the room - up to
+  460 pixels, with its small print a size up so it is easy to read.
 * Click a circle or polygon to select it, press **Delete** to remove it, or
   drag it to move it.
 * **Home:** set your location by ZIP / postal code, place name or street
@@ -43,11 +44,21 @@ https://github.com/user-attachments/assets/8853105d-9a10-4cfd-ab1b-c39192d5d10d
   servers.
 * Zones can be created and deleted right on the map (deleting also removes
   the zone's learned servers on the router).
-* Map styles: Midnight (black & grey, the default), Satellite (Sentinel-2
-  imagery, sharp Esri close-ups, borders and place names), Light, Galaxy
-  (deep-space colours with drifting nebulae, moving and twinkling stars and
-  shooting stars). The effects never get in the way of clicks and stop if your
-  system asks for reduced motion.
+* Map styles: Winter holidays (falling snow, a string of twinkling lights,
+  names glowing like lit windows), Midnight (black & grey, the default),
+  Satellite (Sentinel-2 imagery, sharp Esri close-ups, borders and place
+  names), Light, Galaxy (deep-space colours with drifting nebulae, moving and
+  twinkling stars and shooting stars), Tactical (a military map: olive land, a
+  map grid, a radar sweep and frame corners), Treasure map (an old sea chart:
+  parchment, a faded sea, a compass rose with its rhumb lines and burnt edges)
+  and Terminal (an old green screen: glowing coastlines, names in capitals,
+  scan lines, a curved dark edge and a blinking prompt). Your circles and
+  polygons take each style's own colour - ice blue in winter, silver on
+  Midnight, amber on Satellite and Tactical, gold on Galaxy, bronze on the
+  treasure map, white on Terminal - picked to stand out from the map and from
+  the server dots. The effects
+  never get in the way of clicks and stop if your system asks for reduced
+  motion.
 * **Open for server tests** (off by default): when a zone sees more than a set
   number of servers at once (a game testing data centres at login), all of
   them are let through for a few seconds, then your region applies again.
@@ -217,7 +228,7 @@ above the map, with the steps for your browser); the icon opens straight to
 the map.
 
 **Which version do I have?** The map page's Status section shows it next to
-its heading - *LobbyFence 1.4.1 · up to date*, or *version 1.4.2 is out -
+its heading - *LobbyFence 1.4.2 · up to date*, or *version 1.4.3 is out -
 update* with a link to the latest release. To know that, your
 browser (not the router) asks GitHub for the newest release, at most twice a
 day; nothing else is sent. From the command line: `lobbyfence version`.
@@ -1050,9 +1061,12 @@ lobbyfence debug [clear]            the debug report; "clear" forgets the crash 
   test suite checks that the map and the router agree point for point.
 * **View menu** on the map: *Borderless* (the map fills the browser window
   without a frame - Esc leaves it), *Endless map* (keep scrolling sideways; the
-  world repeats - off by default), *Country borders* (on by default), and *Zoom out completely* (pole to
-  pole). The choices are remembered in your browser.
-* **Fit** shows the whole world and stays that way (also after Save & Apply)
+  world repeats - off by default), *Country borders* (on by default), *Place
+  names*, *States* (off by default: the lines between states and provinces,
+  and the short names of the US states, Canada's provinces, Australia's states
+  and Brazil's states - NY, ON, NSW, SP ...) and *Whole world* (pole to pole).
+  The choices are remembered in your browser.
+* **Fit** shows the whole world - Greenland's north and Antarctica too - and stays that way (also after Save & Apply)
   until you pan or zoom yourself. Otherwise the map keeps the view you left it
   in; it never jumps to a circle on its own. Click a circle's number in the
   panel to zoom to it.

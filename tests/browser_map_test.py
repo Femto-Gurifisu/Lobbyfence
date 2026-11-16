@@ -229,7 +229,7 @@ def main():
         page.route("https://api.github.com/repos/Femto-Gurifisu/Lobbyfence/releases/latest", github)
 
         fresh = {"globals": {".name": "globals", ".type": "globals", "enabled": "0"}}
-        world = [[-175, -75], [175, 78]]
+        world = [[-180, -78], [180, 84]]
 
         # ---- 0. LobbyFence's version in the Status section (also before the first zone), with the newest one on GitHub
         vst = {"version": "1.1.0", "enabled": True, "active": True, "updated": 1, "interval": 20, "zones": []}
@@ -571,7 +571,7 @@ def main():
         check("LuCI's change counter refreshed", page.evaluate("window.__changesInit || 0") >= 1)
         # clear shapes: no fill unless selected; handles only on the selected shape
         fill = json.dumps(page.evaluate("window.__map.layers['lf-circle-fill'].paint['fill-opacity']"))
-        check("saved shapes are a see-through blue", fill.replace(" ", "").endswith(",0.22,0.1]"), fill)
+        check("saved shapes are see-through", fill.replace(" ", "").endswith(",0.22,0.1]"), fill)
         page.locator(".lf-poly").nth(idx_free + 1).click()
         nverts = page.evaluate("window.__markers.filter(m => !m.removed && m.o.element.classList.contains('lf-vertex')).length")
         check("only the selected shape shows handles", nverts == len(polys_now()[idx_free + 1]), nverts)
@@ -615,7 +615,7 @@ def main():
         check("Delete key removes the selected shape", shapes() == [n_c, n_p - 1] and page.evaluate("window.view.selected") is None)
         page.wait_for_timeout(600)
         check("deletion saved", len(page.evaluate("window.__saved.call_of_duty_mobile.polygon || []")) == n_p - 1)
-        page.locator(".lf-crow").first.click()
+        page.locator(".lf-crow").first.click(position={"x": 4, "y": 4})
         page.keyboard.press("Escape")
         check("Esc deselects", page.evaluate("window.view.selected") is None)
         page.keyboard.press("Backspace")
@@ -675,7 +675,7 @@ def main():
         menu = page.locator(".lf-menu")
         check("View menu opens", menu.is_visible())
         checks = page.evaluate("[...document.querySelectorAll('.lf-menu .lf-mitem')].map(l => [l.innerText.trim(), l.querySelector('input').checked])")
-        check("menu: Country borders and Place names ticked", checks == [["Borderless", False], ["Endless map", False], ["Country borders", True], ["Place names", True], ["Whole world", False]], checks)
+        check("menu: Country borders and Place names ticked", checks == [["Borderless", False], ["Endless map", False], ["Country borders", True], ["Place names", True], ["States", False], ["Whole world", False]], checks)
         # place names off: every basemap name layer hidden, LobbyFence's own layers untouched
         page.evaluate("""() => { const st = window.__map.getStyle(); st.layers.push({ id: 'place_city', type: 'symbol' }, { id: 'water_name', type: 'symbol' },
             { id: 'lf-label-continent', type: 'symbol' }, { id: 'lf-home', type: 'symbol' }); }""")
@@ -687,6 +687,24 @@ def main():
         menu.get_by_text("Place names").click()
         lay = page.evaluate("window.__map.layout || {}")
         check("...and back on", lay.get("place_city.visibility") == "visible", lay)
+        # States: our state lines and short names on, the basemap's long state names make way
+        page.evaluate("""() => { const st = window.__map.getStyle(); st.layers.push({ id: 'place_state', type: 'symbol' },
+            { id: 'lf-state-lines', type: 'line' }, { id: 'lf-state-labels', type: 'symbol' }); }""")
+        menu.get_by_text("States").click()
+        lay = page.evaluate("window.__map.layout || {}")
+        check("States on: state lines and short names shown, the basemap's own state names hidden",
+              lay.get("lf-state-lines.visibility") == "visible" and lay.get("lf-state-labels.visibility") == "visible"
+              and lay.get("place_state.visibility") == "none" and lay.get("place_city.visibility") == "visible", lay)
+        check("...remembered", json.loads(page.evaluate("localStorage.getItem('lobbyfence.viewopts')")).get("states") is True)
+        menu.get_by_text("Place names").click()
+        lay = page.evaluate("window.__map.layout || {}")
+        check("...the short names stay with Place names off (a switch of their own)",
+              lay.get("lf-state-labels.visibility") == "visible" and lay.get("place_city.visibility") == "none" and lay.get("place_state.visibility") == "none", lay)
+        menu.get_by_text("Place names").click()
+        menu.get_by_text("States").click()
+        lay = page.evaluate("window.__map.layout || {}")
+        check("States off: ours hidden, the basemap's state names back",
+              lay.get("lf-state-lines.visibility") == "none" and lay.get("lf-state-labels.visibility") == "none" and lay.get("place_state.visibility") == "visible", lay)
         menu.get_by_text("Place names").click()
         menu.get_by_text("Endless map").click()
         check("endless can be switched on", page.evaluate("window.__map.worldCopies") is True)
@@ -703,7 +721,7 @@ def main():
         page.keyboard.press("Escape")
         check("Esc leaves borderless", page.locator(".lf-app.lf-borderless").count() == 0)
         opts = json.loads(page.evaluate("localStorage.getItem('lobbyfence.viewopts')"))
-        check("view options remembered", opts == {"endless": True, "borders": True, "borderless": False, "labels": False, "whole": True}, opts)
+        check("view options remembered", opts == {"endless": True, "borders": True, "borderless": False, "labels": False, "whole": True, "states": False}, opts)
         page.evaluate("localStorage.removeItem('lobbyfence.viewopts')")
         page.locator("button", has_text="Fit").click()
         page.evaluate("window.view.handleSave()")
@@ -1356,17 +1374,19 @@ def main():
         page.set_viewport_size({"width": 2100, "height": 900})
         page.wait_for_timeout(150)
         w = wide()
-        check("a wide window, the page in a 1000 pixel column: the map page takes the room next to it (1800 pixels at most)",
-              w["width"] == 1800 and w["left"] >= 24 and w["right"] <= w["vw"] - 24 and w["scroll"] <= w["vw"], w)
-        check("...and the panel grows with it", w["panel"] > narrow["panel"] and 440 <= w["panel"] <= 460, [narrow, w])
+        check("a wide window, the page in a 1000 pixel column: the page grows (1340 pixels at most - the map about as wide as before)",
+              w["width"] == 1340 and w["left"] >= 24 and w["right"] <= w["vw"] - 24 and w["scroll"] <= w["vw"], w)
+        check("...with the panel at its widest", w["panel"] == 460, [narrow, w])
+        fs = page.evaluate("[getComputedStyle(document.querySelector('.lf-panel > *')).fontSize, getComputedStyle(document.querySelector('.lf-panel .lf-sm') || document.body).fontSize]")
+        check("...its print a size up, easier to read", fs == ["15px", "13px"], fs)
         if SHOTS:
             page.screenshot(path=str(SHOTS / "wide-window.png"))
         # a menu at the side (as some themes have): the page stays clear of it
         page.evaluate("""() => { const m = document.createElement('div'); m.id = 'sidemenu';
-            m.style.cssText = 'position:fixed;left:0;top:0;bottom:0;width:300px;background:#345;z-index:5'; document.body.appendChild(m); }""")
+            m.style.cssText = 'position:fixed;left:0;top:0;bottom:0;width:450px;background:#345;z-index:5'; document.body.appendChild(m); }""")
         page.evaluate("window.view.fitWide()")
         w = wide()
-        check("a menu at the side: the page grows up to it, not under it", 316 <= w["left"] <= 340 and w["right"] <= w["vw"] - 24 and w["width"] > 1000, w)
+        check("a menu at the side: the page grows up to it, not under it", 466 <= w["left"] <= 490 and w["right"] <= w["vw"] - 24 and w["width"] > 1000, w)
         page.evaluate("document.getElementById('sidemenu').style.width = '540px'; window.view.fitWide()")
         w = wide()
         check("...and not at all on that side when the menu reaches the page", w["left"] == 550 and w["right"] > 1550, w)
@@ -1380,7 +1400,7 @@ def main():
         page.evaluate("document.body.classList.add('modal-overlay-active'); document.getElementById('root').style.maxWidth = '900px'; window.view.fitWide()")
         held = page.evaluate("getComputedStyle(document.querySelector('.lf-app')).getPropertyValue('--lf-wide-l')")
         page.evaluate("document.body.classList.remove('modal-overlay-active'); document.getElementById('root').style.maxWidth = '1000px'; window.view.fitWide()")
-        check("while a window is open the page's width is left alone", held.strip() == "400px", held)
+        check("while a window is open the page's width is left alone", held.strip() == "170px", held)
         page.evaluate("() => { const r = document.getElementById('root'); r.style.maxWidth = ''; r.style.margin = ''; }")
         page.set_viewport_size({"width": 1400, "height": 900})
         page.wait_for_timeout(150)
@@ -1727,6 +1747,13 @@ def main():
         check("Light theme: app no longer dark", page.locator(".lf-app.lf-dark").count() == 0)
         check("Light theme: overlay colours swapped",
               "#2563eb" in json.dumps(page.evaluate("window.__map.layers['lf-circle-line'].paint['line-color']")))
+        page.locator(".lf-bar select").last.select_option("terminal")
+        page.wait_for_function("window.__map.layers['lf-circle-line'] && JSON.stringify(window.__map.layers['lf-circle-line'].paint['line-color']).includes('#e6ffe6')")
+        check("Terminal theme: the shapes in its own colour, the home pin still blue",
+              "#e6ffe6" in json.dumps(page.evaluate("window.__map.layers['lf-circle-fill'].paint['fill-color']"))
+              and page.evaluate("window.__map.getLayer('lf-home') ? window.__map.getLayer('lf-home').layout['icon-image'] : 'lf-pin-3b82f6'") == "lf-pin-3b82f6")
+        page.locator(".lf-bar select").last.select_option("light")
+        page.wait_for_function("window.__map.layers['lf-circle-line'] && JSON.stringify(window.__map.layers['lf-circle-line'].paint['line-color']).includes('#2563eb')")
         check("theme switch keeps the camera", page.evaluate("window.__map.calls.slice(-1)[0][0]") == "flyTo")
         check("theme remembered", page.evaluate("localStorage.getItem('lobbyfence.theme')") == '"light"')
         if SHOTS:

@@ -47,7 +47,7 @@ const stubs = {
 };
 const HELPERS = [ 'distanceKm', 'destination', 'circleRing', 'wrapLon', 'parseCircles', 'formatCircle', 'parseServers',
 	'validAddress', 'parsePorts', 'portRanges', 'inRanges', 'rangesSize', 'newerVersion', 'sectionName', 'createZone', 'loadMaplibre', 'importModule', 'MAPLIBRE_BASES',
-	'themedStyle', 'rasterStyle', 'THEMES', 'THEME_ORDER', 'DEFAULT_THEME', 'flag', 'ago', 'ringBounds',
+	'themedStyle', 'rasterStyle', 'addStateLayers', 'STATE_SETS', 'themeFx', 'THEMES', 'THEME_ORDER', 'DEFAULT_THEME', 'flag', 'ago', 'ringBounds',
 	'PRESETS', 'PRESET_GROUPS', 'DEFAULT_PRESET', 'presetById', 'presetSummary', 'burstAdvice', 'presetOn', 'needsPlatform', 'PLATFORMS', 'isMac', 'validDevice',
 	'mercY', 'normalizePolygon', 'inPolygon', 'parsePolygons', 'formatPolygon', 'v4num', 'v6groups', 'cidrMatch', 'inList',
 	'edgeKind', 'alignedKind', 'straightenPolygon', 'mercArea', 'satelliteStyle',
@@ -531,7 +531,8 @@ const inDrawn = (ring, lon, lat) => [ -360, 0, 360 ].some((k) => inRing(ring, lo
 		assert.strictEqual(ctx.saving, false);
 	});
 	await check('Satellite replaces Slate; satellite style keeps only borders and place names', () => {
-		assert.deepStrictEqual(h.THEME_ORDER, [ 'midnight', 'satellite', 'light', 'galaxy' ]);
+		assert.deepStrictEqual(h.THEME_ORDER, [ 'winter', 'midnight', 'satellite', 'light', 'galaxy', 'tactical', 'pirate', 'terminal' ]);
+		assert(!h.THEMES.sonar && !h.THEMES.neon, 'Sonar and Neon left out');
 		assert(!h.THEMES.blood, 'Blood theme removed');
 		assert(!h.THEMES.slate);
 		const base = { version: 8, glyphs: 'g', sources: { openmaptiles: { type: 'vector' } }, layers: [
@@ -559,6 +560,71 @@ const inDrawn = (ring, lon, lat) => [ -360, 0, 360 ].some((k) => inRing(ring, lo
 		const lat = st.sources['lf-labels'].data.features[0].geometry.coordinates[1];
 		assert(lat > h.WORLD_BOUNDS[0][1] && lat < -60, 'label inside the Fit view');
 	});
+	await check('Fit shows the whole world: Greenland\'s north and Antarctica', () => {
+		assert(h.WORLD_BOUNDS[1][1] >= 83.6 && h.WORLD_BOUNDS[0][1] <= -75, JSON.stringify(h.WORLD_BOUNDS));
+		assert(h.WORLD_BOUNDS[0][0] === -180 && h.WORLD_BOUNDS[1][0] === 180);
+	});
+	await check('States: state lines under the names, short names from the basemap\'s state points', () => {
+		const base = { version: 8, glyphs: 'g', sources: { ne: { type: 'raster' }, openmaptiles: { type: 'vector' } }, layers: [
+			{ id: 'background', type: 'background' }, { id: 'boundary_2', type: 'line', paint: {} },
+			{ id: 'place_state', type: 'symbol', layout: { 'text-font': [ 'Noto Sans Regular' ] } },
+			{ id: 'place_country_major', type: 'symbol', layout: { 'text-font': [ 'Noto Sans Bold' ] }, paint: {} } ] };
+		const st = h.addStateLayers(JSON.parse(JSON.stringify(base)), h.THEMES.midnight, false);
+		const ids = st.layers.map((l) => l.id);
+		assert.deepStrictEqual(ids, [ 'background', 'boundary_2', 'lf-state-lines', 'place_state', 'place_country_major', 'lf-state-labels' ]);
+		const line = st.layers[2], lab = st.layers[5];
+		assert(line.source === 'openmaptiles' && line['source-layer'] === 'boundary' && JSON.stringify(line.filter).includes('"admin_level"],4'));
+		assert(lab['source-layer'] === 'place' && lab.layout['text-font'][0] === 'Noto Sans Bold');
+		assert.strictEqual(line.layout.visibility, 'none', 'off until switched on');
+		assert.strictEqual(h.addStateLayers(JSON.parse(JSON.stringify(base)), h.THEMES.midnight, true).layers[5].layout.visibility, 'visible');
+		assert.strictEqual(line.paint['line-color'], h.THEMES.midnight.map.border);
+		assert.strictEqual(h.addStateLayers(JSON.parse(JSON.stringify(base)), h.THEMES.light, true).layers[2].paint['line-color'], '#9aa1ab', 'Light: a grey of its own');
+		// the short forms: by the set whose area the state is in, then its English name
+		const text = lab.layout['text-field'];
+		assert.strictEqual(text[0], 'case');
+		const sets = [];
+		for (let i = 1; i < text.length - 1; i += 2) sets.push([ text[i][1], text[i + 1] ]);
+		const inPoly = (poly, lon, lat) => inRing(poly.coordinates[0], lon, lat);
+		const abbr = (lon, lat, n) => { for (const [ area, m ] of sets) if (inPoly(area, lon, lat)) { for (let i = 2; i < m.length - 1; i += 2) if (m[i] === n) return m[i + 1]; return ''; } return ''; };
+		assert.strictEqual(abbr(-77.6, 40.9, 'Pennsylvania'), 'PA'); assert.strictEqual(abbr(-71.8, 52, 'Québec'), 'QC');
+		assert.strictEqual(abbr(-155.5, 19.8, 'Hawaii'), 'HI'); assert.strictEqual(abbr(-150, 64, 'Alaska'), 'AK'); assert.strictEqual(abbr(-66.5, 18.2, 'Puerto Rico'), 'PR');
+		assert.strictEqual(abbr(146.9, -32.2, 'New South Wales'), 'NSW'); assert.strictEqual(abbr(-48.6, -22.3, 'São Paulo'), 'SP');
+		assert.strictEqual(abbr(-64.5, -4, 'Amazonas'), 'AM', 'Brazil\'s Amazonas'); assert.strictEqual(abbr(-61.3, 2.1, 'Roraima'), 'RR');
+		assert.strictEqual(abbr(-70.5, -9, 'Acre'), 'AC'); assert.strictEqual(abbr(-53.5, -29.5, 'Rio Grande do Sul'), 'RS');
+		assert.strictEqual(abbr(-71.6, -1.4, 'Amazonas'), '', 'Colombia\'s Amazonas: none');
+		assert.strictEqual(abbr(-65.8, 3.5, 'Amazonas'), '', 'Venezuela\'s Amazonas: none');
+		assert.strictEqual(abbr(-56.1, -33.8, 'Florida'), '', 'Uruguay\'s Florida: none');
+		assert.strictEqual(abbr(23.2, 43.4, 'Montana'), '', 'Bulgaria\'s Montana: none');
+		assert.strictEqual(abbr(11.5, 48.8, 'Bavaria'), '');
+		const us = [ 'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY' ];
+		const vals = Object.values(h.STATE_SETS[0].abbr);
+		us.forEach((a) => assert(vals.includes(a), a));
+		assert.strictEqual(Object.keys(h.STATE_SETS[2].abbr).length, 28, 'Brazil: 26 states and the Federal District (two spellings)');
+		// no vector source (the raster fallback): nothing added
+		assert.strictEqual(h.addStateLayers({ version: 8, sources: { osm: { type: 'raster' } }, layers: [] }, h.THEMES.midnight, true).layers.length, 0);
+	});
+	await check('Tactical and Treasure map themes: their decorations', () => {
+		assert(h.THEMES.tactical.dark && !h.THEMES.pirate.dark);
+		assert.strictEqual(h.THEMES.tactical.fx, 'tactical'); assert.strictEqual(h.THEMES.pirate.fx, 'pirate');
+		assert.strictEqual(h.THEMES.winter.fx, 'winter'); assert.strictEqual(h.THEMES.terminal.fx, 'terminal');
+		// glowing names: a blurred halo in the glow colour; sea names keep the plain halo
+		const base = { version: 8, sources: {}, layers: [ { id: 'place_city', type: 'symbol', paint: {} }, { id: 'water_name', type: 'symbol', paint: {} } ] };
+		const w = h.themedStyle(base, h.THEMES.winter);
+		assert.strictEqual(w.layers[0].paint['text-halo-color'], h.THEMES.winter.map.glow);
+		assert(w.layers[0].paint['text-halo-blur'] > 0);
+		assert.strictEqual(w.layers[1].paint['text-halo-color'], h.THEMES.winter.map.halo);
+		assert(!('text-halo-blur' in h.themedStyle(base, h.THEMES.midnight).layers[0].paint), 'other themes: no glow');
+		// Terminal: names in capitals and glowing coastlines right above the water
+		const vb = { version: 8, sources: { openmaptiles: { type: 'vector' } }, layers: [
+			{ id: 'background', type: 'background' }, { id: 'water', type: 'fill', 'source-layer': 'water', paint: {} },
+			{ id: 'road', type: 'line', paint: {} }, { id: 'place_city', type: 'symbol', layout: { 'text-field': '{name}' }, paint: {} } ] };
+		const tm = h.themedStyle(vb, h.THEMES.terminal);
+		assert.deepStrictEqual(tm.layers.map((l) => l.id), [ 'background', 'water', 'lf-coast-glow', 'lf-coast', 'road', 'place_city' ]);
+		assert.strictEqual(tm.layers[5].layout['text-transform'], 'uppercase');
+		assert.strictEqual(tm.layers[3].paint['line-color'], h.THEMES.terminal.map.coast);
+		assert.strictEqual(h.themedStyle(vb, h.THEMES.midnight).layers.length, 4, 'others: no coastlines');
+		assert(!('text-transform' in h.themedStyle(vb, h.THEMES.winter).layers[3].layout), 'others: names as they are');
+	});
 	await check('dots fade as a server goes quiet', () => {
 		const ctx = { zone: 'z', range: 'active', circles: { z: [] }, polygons: { z: [] }, countries: [], rules: { allow: [], block: [] },
 			servers: h.parseServers('1.1.1.1 in 10 10 DE 1\n2.2.2.2 in 20 20 FR 1\n'),
@@ -575,8 +641,20 @@ const inDrawn = (ring, lon, lat) => [ -360, 0, 360 ].some((k) => inRing(ring, lo
 		assert.strictEqual(v.openLeft.call(ctx), 0);
 		assert.strictEqual(v.openLeft.call({ openUntil: 0 }), 0);
 	});
-	await check('shapes are blue in every theme', () => {
-		h.THEME_ORDER.forEach((k) => assert(/^#(3b82f6|2563eb)$/.test(h.THEMES[k].overlay.circle), k));
+	await check('shapes in each theme\'s own colour, clear against the map and unlike the server dots', () => {
+		const rgb = (c) => [ 1, 3, 5 ].map((i) => parseInt(c.substr(i, 2), 16));
+		const lum = (c) => { const [ r, g, b ] = rgb(c).map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+		const contrast = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+		const dist = (a, b) => { const p = rgb(a), q = rgb(b); return Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]); };
+		const colours = new Set();
+		h.THEME_ORDER.forEach((k) => {
+			const t = h.THEMES[k], o = t.overlay;
+			assert(/^#[0-9a-f]{6}$/.test(o.circle) && /^#[0-9a-f]{6}$/.test(o.circleSel), k);
+			colours.add(o.circle);
+			[ 'allowed', 'blocked', 'unknown' ].forEach((d) => assert(dist(o.circle, o[d]) > 90, k + ': shapes too close to the ' + d + ' dots'));
+			if (t.map) [ 'land', 'water' ].forEach((m) => assert(contrast(o.circle, t.map[m]) >= 3, k + ': shapes hard to see on ' + m + ' (' + contrast(o.circle, t.map[m]).toFixed(2) + ')'));
+		});
+		assert(colours.size >= 7, 'the themes have their own shape colours');
 	});
 	await check('address lists: comments, separators, junk, duplicates', () => {
 		const r = h.parseAddressList('# LobbyFence whitelist\n80.20.0.1, 80.20.0.2;  2a00:1450::/32 # relay\nnot-an-ip 80.20.0.1\r\n10.0.0.0/8\n');
