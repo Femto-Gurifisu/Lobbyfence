@@ -7,6 +7,7 @@ pin), themes, the globe and the View menu are checked on the real renderer.
     (the dist directory of a maplibre-gl release, e.g. from its GitHub dist.zip)
 """
 import json
+import math
 import pathlib
 import sys
 
@@ -30,6 +31,50 @@ def serve_dist(route):
         return route.fulfill(status=404, body="")
     ctype = "text/css" if name.endswith(".css") else "text/javascript"
     route.fulfill(content_type=ctype, body=f.read_bytes(), headers={"Access-Control-Allow-Origin": "*"})
+
+
+def globe_edge_gaps(page, lngs):
+    """The globe turned to each longitude, small, and its outline measured row by row against the circle it should
+    be: the most any row falls short of it (pixels - 0 when whole), and the map's padding on the panel's side."""
+    import io
+    from PIL import Image
+    worst, where, shot = 0, None, None
+    pad = page.evaluate("window.view.map.getPadding().right || 0")
+    # (the map itself: the page's own layers - shapes, servers, the pin - hidden meanwhile, their edges aren't the globe's)
+    hidden = page.evaluate("""(() => { const m = window.view.map, ids = m.getStyle().layers.map(l => l.id)
+            .filter(id => id.startsWith('lf-') && m.getLayoutProperty(id, 'visibility') !== 'none');
+        ids.forEach(id => m.setLayoutProperty(id, 'visibility', 'none')); return ids; })()""")
+    for lng in lngs:
+        page.evaluate("lng => window.view.map.jumpTo({ center: [lng, 5], zoom: 1.2, bearing: 0, pitch: 0 })", lng)
+        page.wait_for_function("window.view.map.loaded() && window.view.map.areTilesLoaded()", timeout=15000)
+        page.wait_for_timeout(250)
+        g = page.evaluate("""(() => { const m = window.view.map, c = m.getCanvas().getBoundingClientRect(), p = m.project(m.getCenter()),
+            n = parseInt(getComputedStyle(document.querySelector('.lf-app')).getPropertyValue('--lf-space').trim().slice(1), 16);
+            return { left: c.left, top: c.top, w: c.width, h: c.height, x: p.x, y: p.y, space: [n >> 16, (n >> 8) & 255, n & 255] }; })()""")
+        im = Image.open(io.BytesIO(page.screenshot(clip={"x": g["left"], "y": g["top"], "width": g["w"], "height": g["h"]}))).convert("RGB")
+        px, W, H = im.load(), im.size[0], im.size[1]
+        globe = lambda x, y: sum(abs(a - b) for a, b in zip(px[x, y], g["space"])) > 18
+        cx = int(round(g["x"]))
+        col = [y for y in range(H) if globe(cx, y)]
+        if not col:
+            worst, where = 999, (lng, "no globe")
+            break
+        top, bot = col[0], col[-1]
+        r, cy = (bot - top) / 2.0, (bot + top) / 2.0
+        lo, hi = max(0, int(cx - r - 30)), min(W - 1, int(cx + r + 30))
+        for y in range(int(cy - 0.85 * r), int(cy + 0.85 * r), 3):
+            half = math.sqrt(r * r - (y - cy) ** 2)
+            xs = [x for x in range(lo, hi + 1) if globe(x, y)]
+            if not xs:
+                worst, where = 999, (lng, "row %d empty" % y)
+                break
+            short = max(xs[0] - (cx - half), (cx + half) - xs[-1])   # (the edge left of / right of where it should be)
+            if short > worst:
+                worst, where, shot = short, (lng, y, xs[0], xs[-1], round(cx - half), round(cx + half)), im
+    page.evaluate("ids => ids.forEach(id => window.view.map.setLayoutProperty(id, 'visibility', 'visible'))", hidden)
+    if SHOTS and shot:
+        shot.save(str(SHOTS / "real-globe-edge.png"))   # (where it fell shortest)
+    return {"worst": round(worst, 1), "at": where, "pad": pad}
 
 
 def main():
@@ -115,76 +160,172 @@ def main():
         page.wait_for_timeout(1500)
         proj = page.evaluate("(window.view.map.getProjection && window.view.map.getProjection() || {}).type")
         check("real MapLibre: globe projection", proj == "globe", proj)
+        # around the globe: space that sets it apart - its sea is the colour of the flat map's surroundings, so with
+        # those around it the globe melted into the background (a user's recording)
+        bgjs = """(() => { const a = document.querySelector('.lf-app'), cs = getComputedStyle(a), hex = (h) => { const n = parseInt(h.slice(1), 16);
+            return 'rgb(' + (n >> 16) + ', ' + ((n >> 8) & 255) + ', ' + (n & 255) + ')'; };
+            return { bg: getComputedStyle(document.querySelector('.lf-mapwrap')).backgroundColor, space: hex(cs.getPropertyValue('--lf-space').trim()),
+                     sea: hex(cs.getPropertyValue('--lf-sea').trim()), globe: a.classList.contains('lf-globe') }; })()"""
+        bg = page.evaluate(bgjs)
+        check("real MapLibre: around the globe, space that sets it apart - not the sea colour", bg["globe"] and bg["bg"] == bg["space"] and bg["space"] != bg["sea"], bg)
+        # labels on a spinning globe: placed afresh every frame - with MapLibre's fade between placements names from the
+        # far side showed through, in the wrong places, for a moment (a user's recording)
+        check("real MapLibre: on the globe, labels placed on every frame (no fade between placements)", page.evaluate("window.view.map._fadeDuration") == 0)
+        # the globe's edge on the panel's side, turning it: whole - with the view off-centre (clear of the panel) MapLibre
+        # left out the tiles at the edge there and a slice of the globe went missing as it turned (a user's recording)
+        fixed = page.evaluate("""(() => { const t = window.view.map._camera.transform, v = t && t._verticalPerspectiveTransform;
+            return !!(v && Object.getPrototypeOf(v).lfFullDepth); })()""")
+        check("real MapLibre: the globe's tiles worked out with the view off-centre (the fix is in place)", fixed)
+        gaps = globe_edge_gaps(page, range(-150, 180, 15))
+        check("real MapLibre: the globe's edge whole all the way round as it turns, panel open (no slice missing)",
+              gaps["pad"] > 0 and gaps["worst"] <= 3, gaps)
         if SHOTS:
             page.screenshot(path=str(SHOTS / "real-globe.png"))
         page.get_by_role("button", name="Globe").click()
         page.wait_for_timeout(800)
+        bg = page.evaluate(bgjs)
+        check("real MapLibre: ...the flat map again: the sea past the world's edge", not bg["globe"] and bg["bg"] == bg["sea"], bg)
+        check("real MapLibre: ...and labels fading in and out again", page.evaluate("window.view.map._fadeDuration") == 300)
 
         page.locator("button", has_text="View").click()
         page.locator(".lf-menu").get_by_text("Endless map").click()
         page.locator(".lf-menu").get_by_text("Country borders").click()
-        # normal use: zooming out stops where the map still fills its whole area (no unused space)
-        fills = """() => { const m = window.view.map, c = m.getContainer(), w = c.clientWidth, h = c.clientHeight;
-            const l = m.project([-180, 0]).x, r = m.project([180, 0]).x, t = m.project([0, 85]).y, b = m.project([0, -85]).y;
-            /* (with the endless map the world repeats left and right: only top to bottom must be filled) */
-            return [(window.view.endless || (l <= 2 && r >= w - 2)) && t <= 2 && b >= h - 2, [l, r, t, b, w, h].map(Math.round), m.getZoom(), window.view.endless]; }"""
+        # Zoomed out as far as it goes, the whole world is in view - Greenland's north to Antarctica (WORLD_BOUNDS), all the
+        # way round - as big as it fits in the part of the map in view (the panel over the map's corner covers the rest:
+        # the map's padding). That is Fit's view too. A world smaller than the part in view sits in its middle (sea around
+        # it); a bigger one never shows empty space at its edges.
+        whole = """() => { const m = window.view.map, c = m.getContainer(), w = c.clientWidth - (m.getPadding().right || 0), h = c.clientHeight;
+            const l = m.project([-180, 0]).x, r = m.project([180, 0]).x, t = m.project([0, 84]).y, b = m.project([0, -78]).y;
+            const endless = window.view.endless, ws = r - l;
+            return [(endless || (l >= -1 && r <= w + 1)) && t >= -1 && b <= h + 1 && (ws >= w - 3 || b - t >= h - 3)
+                    && (endless || ws >= w - 3 || Math.abs((l + r) / 2 - w / 2) < 2), [l, r, t, b, w, h].map(Math.round), m.getZoom(), m.getMinZoom()]; }"""
+        proper = """() => { const m = window.view.map, c = m.getContainer(), w = c.clientWidth - (m.getPadding().right || 0), h = c.clientHeight;
+            const l = m.project([-180, 0]).x, r = m.project([180, 0]).x, t = m.project([0, 85.0511]).y, b = m.project([0, -85.0511]).y;
+            const okx = window.view.endless || (r - l > w ? l <= 2 && r >= w - 2 : Math.abs((l + r) / 2 - w / 2) < 2);
+            const oky = b - t > h ? t <= 2 && b >= h - 2 : Math.abs((t + b) / 2 - h / 2) < 2;
+            return [okx && oky, [l, r, t, b, w, h].map(Math.round), m.getZoom()]; }"""
         page.evaluate("window.view.map.zoomTo(-2, { duration: 0 })")
-        r = page.evaluate(fills)
-        check("real MapLibre: zooming out normally, the map always fills its area", r[0], r)
+        page.wait_for_timeout(300)
+        r = page.evaluate(whole)
+        check("real MapLibre: zoomed out as far as it goes, the whole world is in view (Greenland to Antarctica, all the way round)", r[0], r)
+        page.evaluate("window.view.map.zoomTo(-2, { duration: 0 })")
+        r2 = page.evaluate(whole)
+        check("real MapLibre: ...and no further (the world does not shrink past that)", r2[0] and abs(r2[2] - r[2]) < 0.01, [r, r2])
         # the bug from a user's recording: endless map off after scrolling sideways left an empty strip
         # (the world half off-screen) until the next zoom - now put right at once
-        page.evaluate("window.view.map.jumpTo({ center: [150, 0], zoom: 1.2 })")
+        page.evaluate("window.view.setEndless(true)")
+        page.evaluate("window.view.map.jumpTo({ center: [150, 0], zoom: 2.2 })")
         page.wait_for_timeout(300)
         page.evaluate("window.view.setEndless(false)")
         page.wait_for_timeout(300)
-        r = page.evaluate(fills)
+        r = page.evaluate(proper)
         check("real MapLibre: endless map off after scrolling sideways - no empty strip, without touching the map", r[0], r)
-        page.evaluate("window.view.setEndless(true)")
-        page.locator(".lf-menu").get_by_text("Whole world").click()
-        page.wait_for_timeout(1200)
-        z = page.evaluate("window.view.map.getZoom()")
-        check("real MapLibre: Whole world zooms out", z < 1.5, z)
-        # the WHOLE world in view (MapLibre's own limit kept it filling the map area: poles cut off)
-        world = """() => { const m = window.view.map, c = m.getContainer(), w = c.clientWidth, h = c.clientHeight;
-            const l = m.project([-180, 0]).x, r = m.project([180, 0]).x, t = m.project([0, 85]).y, b = m.project([0, -85]).y;
-            return [l >= -1 && r <= w + 1 && t >= -1 && b <= h + 1 && (r - l >= w - 3 || b - t >= h - 3), [l, r, t, b, w, h].map(Math.round), m.getZoom(), m.getMinZoom()]; }"""
-        r = page.evaluate(world)
-        check("real MapLibre: Whole world - the entire world is in view (pole to pole, all 360 degrees)", r[0], r)
-        page.evaluate("window.view.map.zoomTo(-2, { duration: 0 })")
-        r2 = page.evaluate(world)
-        check("real MapLibre: no zooming out past that (the world does not shrink further)", r2[0] and abs(r2[2] - r[2]) < 0.01 and abs(r2[3] - r[2]) < 0.01, r2)
-        page.evaluate("window.view.map.zoomTo(3, { duration: 0 })")
-        page.wait_for_timeout(300)
+        # the map area changes size (borderless, panel) while zoomed out all the way: still the whole world, at once
         page.evaluate("window.view.map.zoomTo(-2, { duration: 0 })")
         page.wait_for_timeout(300)
-        r = page.evaluate(world)
-        check("real MapLibre: Whole world stays on - zoomed in and out again, the whole world again", r[0] and page.evaluate("window.view.wholeWorld === true"), r)
-        # the map area changes size (borderless, panel): applied at once, still the whole world
-        page.evaluate("window.view.setEndless(false); window.view.setBorderless(true)")
+        page.evaluate("window.view.setBorderless(true)")
         page.wait_for_timeout(900)
-        r = page.evaluate(world)
-        check("real MapLibre: Whole world + borderless on: fitted to the bigger area at once", r[0], r)
+        r = page.evaluate(whole)
+        check("real MapLibre: zoomed out, borderless on: the whole world fitted to the bigger area at once", r[0], r)
         page.evaluate("window.view.setBorderless(false); window.view.setPanel(false)")
         page.wait_for_timeout(900)
-        r = page.evaluate(world)
+        r = page.evaluate(whole)
         check("real MapLibre: ...borderless off, panel hidden: fitted again at once", r[0], r)
         page.evaluate("window.view.setPanel(true)")
         page.wait_for_timeout(900)
         page.set_viewport_size({"width": 390, "height": 844})
         page.wait_for_timeout(900)
-        r = page.evaluate(world)
+        r = page.evaluate(whole)
         check("real MapLibre: on a phone too (the world is wider than the screen at zoom 0)", r[0] and r[2] < 0, r)
         if SHOTS:
             page.screenshot(path=str(SHOTS / "real-zoomout-phone.png"))
         page.set_viewport_size({"width": 1400, "height": 900})
         page.wait_for_timeout(900)
-        page.evaluate("window.view.toggleViewMenu(true)")
-        page.locator(".lf-menu").get_by_text("Whole world").click()
-        page.wait_for_timeout(600)
-        page.evaluate("window.view.map.zoomTo(-2, { duration: 0 })")
-        r = page.evaluate(fills)
-        check("real MapLibre: Whole world off - the map fills its area again", r[0] and page.evaluate("window.view.wholeWorld === false"), r)
+        check("real MapLibre: no Whole world in the View menu (zoomed out, the whole world is in view anyway)",
+              page.evaluate("window.view.toggleViewMenu(true), [...document.querySelectorAll('.lf-menu .lf-mitem')].every(l => !/Whole world/.test(l.innerText))"))
         page.keyboard.press("Escape")
+        # Fit: the whole world, as big as it fits in the part in view, in its middle
+        seen = """() => { const m = window.view.map, c = m.getContainer(), pad = m.getPadding().right || 0;
+            const w = c.clientWidth, h = c.clientHeight, v = w - pad, l = m.project([-180, 0]).x, r = m.project([180, 0]).x;
+            const t = m.project([0, 84]).y, u = m.project([0, -78]).y, p = document.querySelector('.lf-panel'), pr = p.getBoundingClientRect(),
+                  cr = c.getBoundingClientRect(), at = document.querySelector('.maplibregl-ctrl-attrib').getBoundingClientRect(),
+                  nav = document.querySelector('.maplibregl-ctrl-zoom-in').getBoundingClientRect();
+            return { w, h, pad, zoom: m.getZoom(), fit: window.view.fitWorld, ws: Math.round(r - l),
+                     whole: l >= -1 && r <= v + 1 && t >= -1 && u <= h + 1 && (r - l >= v - 3 || u - t >= h - 3),
+                     centred: Math.abs((l + r) / 2 - v / 2) < 2, sides: r - l < v - 3,
+                     over: p.offsetParent !== null && getComputedStyle(p).position === 'absolute', panel: Math.round(pr.width),
+                     inview: pad === 0 || Math.abs(cr.right - pr.left + 10 - pad) <= 2,
+                     attrib: at.right <= cr.right - pad + 1, navleft: nav.left - cr.left < 60,
+                     sea: getComputedStyle(document.querySelector('.lf-mapwrap')).backgroundColor }; }"""
+        seawater = """(() => { const c = (window.view.theme().map || {}).water || '#0b1622', n = parseInt(c.slice(1), 16);
+                  return 'rgb(' + (n >> 16) + ', ' + ((n >> 8) & 255) + ', ' + (n & 255) + ')'; })()"""
+        page.evaluate("window.view.fitWorldView(false)")
+        page.wait_for_timeout(600)
+        r = page.evaluate(seen)
+        check("real MapLibre: the panel over the map's corner (%d px); the map leaves the part under it out" % r["panel"],
+              r["over"] and r["pad"] == r["panel"] + 20 and r["inview"], r)
+        check("real MapLibre: ...Fit: the whole world, Greenland to Antarctica, as big as it fits in the part in view (%dx%d), in its middle"
+              % (r["w"] - r["pad"], r["h"]), r["whole"] and r["centred"] and r["fit"], r)
+        check("real MapLibre: ...the map's credits are not under the panel, the zoom buttons top left", r["attrib"] and r["navleft"], r)
+        if SHOTS:
+            page.screenshot(path=str(SHOTS / "real-fit-page.png"))
+        page.evaluate("window.view.map.zoomTo(-2, { duration: 0 }, { originalEvent: {} })")
+        page.wait_for_timeout(300)
+        r2 = page.evaluate(seen)
+        check("real MapLibre: ...zooming out goes no further than Fit: Fit and the zoomed-out map are one and the same",
+              abs(r2["zoom"] - r["zoom"]) < 0.01 and r2["whole"], [r, r2])
+        # folding the panel away: the whole map in view, Fit (still in effect) fits the world to all of it
+        page.evaluate("window.view.fitWorldView(false)")
+        page.locator(".lf-ptab").click()
+        page.wait_for_timeout(700)
+        r = page.evaluate(seen)
+        check("real MapLibre: the panel folded away: no padding, Fit fits the world to the whole map, in its middle",
+              r["pad"] == 0 and r["whole"] and r["centred"] and r["fit"] and r["attrib"], r)
+        check("real MapLibre: ...the space at its sides (a map wider than the world is tall) is the style's sea, not the panel colour",
+              r["sides"] and r["sea"] == page.evaluate(seawater), r)
+        page.locator(".lf-ptab").click()
+        page.wait_for_timeout(700)
+        r = page.evaluate(seen)
+        check("real MapLibre: ...back: Fit fits the part in view again", r["pad"] == r["panel"] + 20 and r["whole"] and r["centred"] and r["fit"], r)
+        # the full window / borderless on a wide screen: the map spans it, the panel over its corner, the world in the middle
+        page.set_viewport_size({"width": 2100, "height": 1000})
+        page.evaluate("window.view.setBorderless(true)")
+        page.wait_for_timeout(900)
+        page.evaluate("window.view.fitWorldView(false)")
+        page.wait_for_timeout(600)
+        r = page.evaluate(seen)
+        check("real MapLibre: a wide screen, borderless (%dx%d map, %d px panel over it): Fit shows the whole world, sea at its sides"
+              % (r["w"], r["h"], r["panel"]), r["over"] and r["whole"] and r["centred"] and r["sides"] and r["fit"], r)
+        if SHOTS:
+            page.screenshot(path=str(SHOTS / "real-fit-wide-panel.png"))
+        page.set_viewport_size({"width": 2400, "height": 1000})
+        page.evaluate("window.view.setPanel(false)")
+        page.wait_for_timeout(900)
+        r = page.evaluate(seen)
+        check("real MapLibre: ...wider still, the panel hidden (Fit stays in effect): the whole world in the middle", r["pad"] == 0 and r["whole"] and r["centred"] and r["fit"], r)
+        if SHOTS:
+            page.screenshot(path=str(SHOTS / "real-fit-wide.png"))
+        # zoomed in by hand, then out again: back to the whole world, no further
+        page.evaluate("window.view.map.zoomTo(3, { duration: 0 }, { originalEvent: {} })")
+        page.wait_for_timeout(400)
+        r = page.evaluate(proper)
+        check("real MapLibre: zoomed in by hand: no empty space at the edges", r[0] and page.evaluate("window.view.fitWorld === false"), r)
+        page.evaluate("window.view.map.zoomTo(-2, { duration: 0 })")
+        page.wait_for_timeout(400)
+        r = page.evaluate(whole)
+        check("real MapLibre: ...zoomed out again: the whole world", r[0], r)
+        page.set_viewport_size({"width": 1400, "height": 900})
+        page.evaluate("window.view.setBorderless(false); window.view.setPanel(true)")
+        page.wait_for_timeout(900)
+        page.set_viewport_size({"width": 390, "height": 844})
+        page.wait_for_timeout(900)
+        page.evaluate("window.view.fitWorldView(false)")
+        page.wait_for_timeout(600)
+        r = page.evaluate(seen)
+        check("real MapLibre: a phone: the panel below the map (not over it), Fit shows the whole world across the screen",
+              not r["over"] and r["pad"] == 0 and r["whole"] and r["fit"], r)
+        page.set_viewport_size({"width": 1400, "height": 900})
+        page.wait_for_timeout(900)
         page.get_by_role("button", name="Draw polygon").click()
         for lng, lat in [(-10, 0), (12, 3), (10, 20), (-12, 17)]:
             page.evaluate("([lng, lat]) => { const m = window.view.map; m.fire('click', { lngLat: { lng, lat }, point: m.project([lng, lat]) }); }", [lng, lat])

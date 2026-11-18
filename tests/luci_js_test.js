@@ -51,7 +51,7 @@ const HELPERS = [ 'distanceKm', 'destination', 'circleRing', 'wrapLon', 'parseCi
 	'PRESETS', 'PRESET_GROUPS', 'DEFAULT_PRESET', 'presetById', 'presetSummary', 'burstAdvice', 'presetOn', 'needsPlatform', 'PLATFORMS', 'isMac', 'validDevice',
 	'mercY', 'normalizePolygon', 'inPolygon', 'parsePolygons', 'formatPolygon', 'v4num', 'v6groups', 'cidrMatch', 'inList',
 	'edgeKind', 'alignedKind', 'straightenPolygon', 'mercArea', 'satelliteStyle',
-	'parseAddressList', 'deviceLabel', 'RANGES', 'addExtraLabels', 'WORLD_BOUNDS',
+	'parseAddressList', 'deviceLabel', 'RANGES', 'addExtraLabels', 'WORLD_BOUNDS', 'spaceColor', 'mixHex',
 	'zoneDevices', 'zoneTypes', 'typePorts', 'presetPorts', 'samePorts', 'setZoneDevices', 'zoneTypePorts', 'portsText' ];
 
 // even-odd point in polygon on plain lon/lat (what the map draws in mercator)
@@ -619,8 +619,14 @@ const inDrawn = (ring, lon, lat) => [ -360, 0, 360 ].some((k) => inRing(ring, lo
 			{ id: 'background', type: 'background' }, { id: 'water', type: 'fill', 'source-layer': 'water', paint: {} },
 			{ id: 'road', type: 'line', paint: {} }, { id: 'place_city', type: 'symbol', layout: { 'text-field': '{name}' }, paint: {} } ] };
 		const tm = h.themedStyle(vb, h.THEMES.terminal);
-		assert.deepStrictEqual(tm.layers.map((l) => l.id), [ 'background', 'water', 'lf-coast-glow', 'lf-coast', 'road', 'place_city' ]);
-		assert.strictEqual(tm.layers[5].layout['text-transform'], 'uppercase');
+		assert.deepStrictEqual(tm.layers.map((l) => l.id), [ 'background', 'water', 'lf-coast-glow', 'lf-coast', 'lf-coast-dateline', 'road', 'place_city' ]);
+		assert.strictEqual(tm.layers[6].layout['text-transform'], 'uppercase');
+		// the sea's cut along the date line (an edge of the water too) painted over in the sea's colour, both sides of the world
+		assert.strictEqual(tm.layers[4].paint['line-color'], h.THEMES.terminal.map.water);
+		const dl = tm.sources['lf-dateline'].data.geometry.coordinates;
+		assert.deepStrictEqual(dl.map((l) => l[0][0]), [ 180, 180, -180, -180 ]);
+		assert(dl.every((l) => l[0][0] === l[1][0]), 'straight along the line');
+		assert(!dl.some((l) => Math.min(l[0][1], l[1][1]) < -16.9 && Math.max(l[0][1], l[1][1]) > -16.4), 'Fiji left alone');
 		assert.strictEqual(tm.layers[3].paint['line-color'], h.THEMES.terminal.map.coast);
 		assert.strictEqual(h.themedStyle(vb, h.THEMES.midnight).layers.length, 4, 'others: no coastlines');
 		assert(!('text-transform' in h.themedStyle(vb, h.THEMES.winter).layers[3].layout), 'others: names as they are');
@@ -655,6 +661,20 @@ const inDrawn = (ring, lon, lat) => [ -360, 0, 360 ].some((k) => inRing(ring, lo
 			if (t.map) [ 'land', 'water' ].forEach((m) => assert(contrast(o.circle, t.map[m]) >= 3, k + ': shapes hard to see on ' + m + ' (' + contrast(o.circle, t.map[m]).toFixed(2) + ')'));
 		});
 		assert(colours.size >= 7, 'the themes have their own shape colours');
+	});
+	await check('the globe stands out from the space around it in every theme (its sea is the flat map\'s surroundings)', () => {
+		const rgb = (c) => [ 1, 3, 5 ].map((i) => parseInt(c.substr(i, 2), 16));
+		const lum = (c) => { const [ r, g, b ] = rgb(c).map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+		const contrast = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+		assert.strictEqual(h.mixHex('#000000', '#ffffff', 0.5), '#808080');
+		assert.strictEqual(h.mixHex('#102030', '#102030', 0.7), '#102030');
+		h.THEME_ORDER.forEach((k) => {
+			const t = h.THEMES[k], sp = h.spaceColor(t), sea = (t.map && t.map.water) || t.sea || '#0b1622';
+			assert(/^#[0-9a-f]{6}$/.test(sp), k + ': ' + sp);
+			assert(contrast(sp, sea) >= 1.3, k + ': the globe\'s sea melts into the space (' + contrast(sp, sea).toFixed(2) + ')');
+			if (t.map) assert(contrast(sp, t.map.land) >= 1.25, k + ': its land melts into the space (' + contrast(sp, t.map.land).toFixed(2) + ')');
+		});
+		assert.strictEqual(h.THEMES.light.sea, '#c2c8ca', 'Light: the basemap\'s own sea past the world\'s edge, not a dark strip');
 	});
 	await check('address lists: comments, separators, junk, duplicates', () => {
 		const r = h.parseAddressList('# LobbyFence whitelist\n80.20.0.1, 80.20.0.2;  2a00:1450::/32 # relay\nnot-an-ip 80.20.0.1\r\n10.0.0.0/8\n');

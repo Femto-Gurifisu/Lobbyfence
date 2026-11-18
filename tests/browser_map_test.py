@@ -648,13 +648,13 @@ def main():
         page.get_by_role("button", name="Full screen").click()
         check("full screen fills the window", page.locator(".lf-app.lf-full").count() == 1 and
               page.evaluate("document.querySelector('.lf-app').getBoundingClientRect().height") >= 890)
-        page.get_by_role("button", name="Panel").click()
+        page.get_by_role("button", name="Panel", exact=True).click()
         check("panel can be hidden for a map-only view", page.locator(".lf-app.lf-nopanel").count() == 1 and not page.locator(".lf-panel").is_visible())
         page.wait_for_timeout(150)
         check("map resized after layout changes", page.evaluate("window.__map.resized || 0") >= 1)
         if SHOTS:
             page.screenshot(path=str(SHOTS / "fullscreen-nopanel.png"))
-        page.get_by_role("button", name="Panel").click()
+        page.get_by_role("button", name="Panel", exact=True).click()
         if SHOTS:
             page.screenshot(path=str(SHOTS / "fullscreen.png"))
         page.get_by_role("button", name="Exit full screen").click()
@@ -675,7 +675,8 @@ def main():
         menu = page.locator(".lf-menu")
         check("View menu opens", menu.is_visible())
         checks = page.evaluate("[...document.querySelectorAll('.lf-menu .lf-mitem')].map(l => [l.innerText.trim(), l.querySelector('input').checked])")
-        check("menu: Country borders and Place names ticked", checks == [["Borderless", False], ["Endless map", False], ["Country borders", True], ["Place names", True], ["States", False], ["Whole world", False]], checks)
+        check("menu: Country borders and Place names ticked (no Whole world: zoomed out, the whole world is in view anyway)",
+              checks == [["Borderless", False], ["Endless map", False], ["Country borders", True], ["Place names", True], ["States", False]], checks)
         # place names off: every basemap name layer hidden, LobbyFence's own layers untouched
         page.evaluate("""() => { const st = window.__map.getStyle(); st.layers.push({ id: 'place_city', type: 'symbol' }, { id: 'water_name', type: 'symbol' },
             { id: 'lf-label-continent', type: 'symbol' }, { id: 'lf-home', type: 'symbol' }); }""")
@@ -712,16 +713,12 @@ def main():
         check("borderless fills the window without a frame",
               page.evaluate("getComputedStyle(document.querySelector('.lf-app')).position") == "fixed" and
               page.evaluate("getComputedStyle(document.querySelector('.lf-app')).paddingTop") == "0px")
-        menu.get_by_text("Whole world").click()
-        check("Whole world on: zooms out pole to pole", calls(page, "fitBounds")[-1] == [[-180, -85], [180, 85]])
-        check("...and stays on (a switch in the menu, not a one-off button)",
-              menu.is_visible() and page.evaluate("[...document.querySelectorAll('.lf-menu .lf-mitem')].pop().querySelector('input').checked"))
         page.keyboard.press("Escape")
         check("Esc closes the View menu first", not menu.is_visible())
         page.keyboard.press("Escape")
         check("Esc leaves borderless", page.locator(".lf-app.lf-borderless").count() == 0)
         opts = json.loads(page.evaluate("localStorage.getItem('lobbyfence.viewopts')"))
-        check("view options remembered", opts == {"endless": True, "borders": True, "borderless": False, "labels": False, "whole": True, "states": False}, opts)
+        check("view options remembered", opts == {"endless": True, "borders": True, "borderless": False, "labels": False, "states": False}, opts)
         page.evaluate("localStorage.removeItem('lobbyfence.viewopts')")
         page.locator("button", has_text="Fit").click()
         page.evaluate("window.view.handleSave()")
@@ -1366,8 +1363,13 @@ def main():
 
         # ---- 6c. a wide window: LuCI keeps its pages in a narrow column - the map page takes the free room next to it
         def wide():
-            return page.evaluate("""() => { const a = document.querySelector('.lf-app').getBoundingClientRect(), p = document.querySelector('.lf-panel').getBoundingClientRect();
-                return { left: Math.round(a.left), right: Math.round(a.right), width: Math.round(a.width), panel: Math.round(p.width),
+            return page.evaluate("""() => { const a = document.querySelector('.lf-app').getBoundingClientRect(), pn = document.querySelector('.lf-panel'), p = pn.getBoundingClientRect(),
+                    m = document.querySelector('.lf-mapwrap').getBoundingClientRect(), b = document.querySelector('.lf-body').getBoundingClientRect(),
+                    t = document.querySelector('.lf-ptab'), tr = t.getBoundingClientRect();
+                return { left: Math.round(a.left), right: Math.round(a.right), width: Math.round(a.width), panel: Math.round(p.width), mapw: Math.round(m.width), maph: Math.round(m.height),
+                         body: Math.round(b.width), pos: getComputedStyle(pn).position, over: p.top >= m.top + 8 && p.right <= m.right - 8 && p.bottom <= m.bottom - 8,
+                         tab: getComputedStyle(t).display !== 'none' ? [Math.round(tr.right), Math.round(tr.top), t.textContent] : null, pl: Math.round(p.left), mr: Math.round(m.right),
+                         padr: getComputedStyle(document.querySelector('.lf-app')).getPropertyValue('--lf-padr').trim(),
                          vw: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth }; }""")
         narrow = wide()
         page.evaluate("() => { const r = document.getElementById('root'); r.style.maxWidth = '1000px'; r.style.margin = '0 auto'; }")
@@ -1376,7 +1378,10 @@ def main():
         w = wide()
         check("a wide window, the page in a 1000 pixel column: the page grows (1340 pixels at most - the map about as wide as before)",
               w["width"] == 1340 and w["left"] >= 24 and w["right"] <= w["vw"] - 24 and w["scroll"] <= w["vw"], w)
-        check("...with the panel at its widest", w["panel"] == 460, [narrow, w])
+        check("...the map uses the whole width; the panel floats over its top-right corner, at least as wide as before",
+              w["mapw"] == w["body"] and w["pos"] == "absolute" and w["over"] and 440 <= w["panel"] <= 470, [narrow, w])
+        check("...a tab on the panel's edge folds it away; the map leaves the part under the panel out (its padding)",
+              w["tab"] is not None and abs(w["tab"][0] - w["pl"]) <= 1 and w["tab"][2] == "\u25b8" and w["padr"] == "%dpx" % (w["panel"] + 20), w)
         fs = page.evaluate("[getComputedStyle(document.querySelector('.lf-panel > *')).fontSize, getComputedStyle(document.querySelector('.lf-panel .lf-sm') || document.body).fontSize]")
         check("...its print a size up, easier to read", fs == ["15px", "13px"], fs)
         if SHOTS:
@@ -1401,7 +1406,25 @@ def main():
         held = page.evaluate("getComputedStyle(document.querySelector('.lf-app')).getPropertyValue('--lf-wide-l')")
         page.evaluate("document.body.classList.remove('modal-overlay-active'); document.getElementById('root').style.maxWidth = '1000px'; window.view.fitWide()")
         check("while a window is open the page's width is left alone", held.strip() == "170px", held)
-        page.evaluate("() => { const r = document.getElementById('root'); r.style.maxWidth = ''; r.style.margin = ''; }")
+        page.evaluate("() => { const r = document.getElementById('root'); r.style.maxWidth = ''; r.style.margin = ''; window.view.fitWide(); }")
+        # a page as wide as the window (FreshTomato, Merlin, DD-WRT): the map spans it, the panel floats over its corner;
+        # its tab folds it away into the corner and brings it back
+        page.wait_for_timeout(300)
+        w = wide()
+        check("a page as wide as the window: the map spans it, the panel over its top-right corner",
+              w["mapw"] == w["body"] and w["pos"] == "absolute" and w["over"] and w["panel"] == 470, w)
+        if SHOTS:
+            page.screenshot(path=str(SHOTS / "wide-page.png"))
+        page.locator(".lf-ptab").click()
+        page.wait_for_timeout(200)
+        w2 = wide()
+        check("...its tab folds the panel away: the tab stays in the map's corner, the whole map in view (no padding)",
+              page.evaluate("window.view.panelHidden") is True and w2["tab"] is not None and abs(w2["tab"][0] - (w2["mr"] - 11)) <= 2
+              and w2["tab"][2] == "\u25c2 Panel" and w2["padr"] == "0px", w2)
+        page.locator(".lf-ptab").click()
+        page.wait_for_timeout(200)
+        w3 = wide()
+        check("...and brings it back", page.evaluate("window.view.panelHidden") is False and w3["over"] and w3["padr"] == "%dpx" % (w3["panel"] + 20), w3)
         page.set_viewport_size({"width": 1400, "height": 900})
         page.wait_for_timeout(150)
         w = wide()
@@ -1844,7 +1867,7 @@ def main():
         last = page.evaluate("""(() => { const p = document.querySelector('.lf-panel').getBoundingClientRect(),
             l = document.querySelector('.lf-list').getBoundingClientRect(); return [l.bottom <= p.bottom + 1, l.height]; })()""")
         check("scrolling down reaches the end of the server list", last[0] and last[1] >= 160, last)
-        secs = page.evaluate("[...document.querySelectorAll('.lf-panel > .lf-sec')].map(s => s.getBoundingClientRect().height)")
+        secs = page.evaluate("[...document.querySelectorAll('.lf-panel .lf-sec')].map(s => s.getBoundingClientRect().height)")
         check("no section is squashed", all(h == 0 or h > 30 for h in secs), secs)
 
         # ---- 7a+. phone-sized screen: nothing sticks out sideways

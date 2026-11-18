@@ -285,7 +285,8 @@ def main():
         # Save & Apply from LuCI's own footer: a shape drawn just before must be saved first, then applied
         page.get_by_role("button", name="Add circle").click()
         canvas = page.locator(".maplibregl-canvas").bounding_box()
-        page.mouse.click(canvas["x"] + canvas["width"] * 0.7, canvas["y"] + canvas["height"] * 0.4)
+        # (in the part of the map in view: the panel floats over its right side)
+        page.mouse.click(canvas["x"] + canvas["width"] * 0.35, canvas["y"] + canvas["height"] * 0.4)
         n_sets = len(state["sets"])
         page.locator(".cbi-page-actions").get_by_text("Save & Apply", exact=True).first.click()   # at once, before the auto-save
         try:

@@ -112,6 +112,7 @@ var THEMES = {
 		      'btn': '#ffffff', 'hover': '#eef2f7', 'accent': '#3273dc', 'accent-text': '#ffffff' },
 		overlay: { circle: '#2563eb', circleSel: '#1e40af', circleFill: 0.12, allowed: '#1f9d55', blocked: '#d33a3a', unknown: '#9ca3af' },
 		map: null,
+		sea: '#c2c8ca',                     /* (the basemap's own sea) */
 		raster: null
 	}
 };
@@ -310,12 +311,35 @@ function compassRose() {
 var DEFAULT_THEME = 'midnight';
 /* the home pin stays blue in every theme (the shapes take the theme's colour) */
 function homeColor(t) { return t.dark ? '#3b82f6' : '#2563eb'; }
+
+/* a colour k of the way from a to b (#rrggbb) */
+function mixHex(a, b, k) {
+	var x = parseInt(a.slice(1), 16), y = parseInt(b.slice(1), 16);
+	return '#' + [ 16, 8, 0 ].map(function(sh) {
+		var u = (x >> sh) & 255, v = (y >> sh) & 255;
+		return ('0' + Math.round(u + (v - u) * k).toString(16)).slice(-2);
+	}).join('');
+}
+
+/* Around the globe: space that sets it apart - its sea is the colour of the
+   flat map's surroundings (--lf-sea), so the globe would melt into them. A dark
+   style gets space a little lighter than its land, a light one space a good
+   deal darker than its sea. */
+function spaceColor(t) {
+	var m = t.map;
+	if (t.space)
+		return t.space;
+	return t.dark ? mixHex(m ? m.land : t.ui.panel, t.ui.text, 0.12) : mixHex((m && m.water) || t.sea || t.ui.panel, t.ui.text, 0.45);
+}
 /* how wide the page grows on a wide screen: the map about as wide as LuCI's
    column had it, and room for a wide side panel */
 var WIDE_MAX = 1340;
+/* a panel this wide (below the map on a narrower screen) shows its parts
+   side by side */
+var PANEL_TWO = 760;
+var LABEL_FADE = 300;                                    /* ms: map labels fading in and out (MapLibre's own default) */
 
-var WORLD_BOUNDS = [ [ -180, -78 ], [ 180, 84 ] ];      /* Fit: the whole world - Greenland's north and Antarctica too */
-var FULL_BOUNDS = [ [ -180, -85 ], [ 180, 85 ] ];       /* "Zoom out completely": pole to pole */
+var WORLD_BOUNDS = [ [ -180, -78 ], [ 180, 84 ] ];      /* the whole world - Greenland's north and Antarctica too */
 
 /* Antarctica has no country label in OpenStreetMap, so the basemap shows none */
 var EXTRA_LABELS = { type: 'FeatureCollection', features: [
@@ -596,6 +620,54 @@ function loadMaplibre() {
 	return maplibrePromise;
 }
 
+/* The globe's edge on the panel's side. MapLibre (this release) picks the map
+ * tiles in view with a view volume whose far end it pulls in to the horizon -
+ * by one corner's angle for all four corners. With the view off-centre (the
+ * map's padding, which keeps the middle of the view clear of the panel) the
+ * corners' angles differ: that far end tilted towards the camera on the
+ * panel's side, the tiles at the globe's edge there were left out, and a slice
+ * of the globe went missing as it turned. Off-centre, the volume keeps its
+ * full depth instead - the horizon is still checked tile by tile, as before;
+ * centred, MapLibre's own. (Its insides, of the one release the page loads -
+ * MAPLIBRE_VERSION, checked by its SHA-256 - and left alone if not found.) */
+function fixGlobeTiles(map) {
+	var tr = map && map._camera && map._camera.transform,
+	    vt = tr && tr._verticalPerspectiveTransform,
+	    proto = vt && Object.getPrototypeOf(vt), calc;
+	if (!proto || typeof proto._calcMatrices !== 'function')
+		return false;
+	if (!proto.lfFullDepth) {
+		calc = proto._calcMatrices;
+		proto._calcMatrices = function() {
+			var r = calc.apply(this, arguments), inv, f, off, m;
+			try {
+				inv = this._globeViewProjMatrixF64Inverted;
+				f = this._cachedFrustum;
+				off = this.centerOffset;
+				if (inv && f && off && (off.x || off.y) && f.constructor &&
+				    typeof f.constructor.fromInvProjectionMatrix === 'function') {
+					/* (built as MapLibre builds it - depth flipped - less the horizon) */
+					m = Array.prototype.slice.call(inv);
+					m[8] = -m[8]; m[9] = -m[9]; m[10] = -m[10]; m[11] = -m[11];
+					this._cachedFrustum = f.constructor.fromInvProjectionMatrix(m, 1, 0, undefined, true);
+				}
+			}
+			catch (e) {
+				this._cachedFrustum = f || this._cachedFrustum;   /* (MapLibre's own, then) */
+			}
+			return r;
+		};
+		proto.lfFullDepth = true;
+	}
+	/* (the globe now in view: worked out again, this way) */
+	try {
+		if (typeof tr._calcMatrices === 'function')
+			tr._calcMatrices();
+	}
+	catch (e) {}
+	return true;
+}
+
 function loadBaseStyle() {
 	if (!baseStylePromise)
 		baseStylePromise = fetch(MAP_STYLE).then(function(res) {
@@ -672,13 +744,19 @@ function themedStyle(base, theme) {
 		}
 	});
 	if (m.coast)
-		addCoast(s, m.coast);
+		addCoast(s, m.coast, m.water);
 	return s;
 }
 
 /* glowing coastlines: the water's edge drawn twice - a soft wide glow and a
-   thin bright line - right above the water */
-function addCoast(s, color) {
+   thin bright line - right above the water. The map's sea is cut in two along
+   the date line (180 degrees) from Fiji down to Antarctica, and that cut is an
+   edge of the water too: it glowed as a line down the middle of the Pacific.
+   Painted over in the sea's own colour there - open sea all the way, Fiji's
+   islands (on the line) left out. */
+var DATE_LINE_SEA = [ [ 62, -15.5 ], [ -17.5, -85 ] ];
+
+function addCoast(s, color, water) {
 	var src = null, at = -1;
 	Object.keys(s.sources || {}).forEach(function(k) {
 		if (!src && s.sources[k].type === 'vector')
@@ -698,6 +776,16 @@ function addCoast(s, color) {
 		id: 'lf-coast', type: 'line', source: src, 'source-layer': 'water',
 		paint: { 'line-color': color, 'line-opacity': 0.9,
 		         'line-width': [ 'interpolate', [ 'linear' ], [ 'zoom' ], 1, 0.6, 6, 1.2 ] }
+	});
+	if (!water)
+		return;
+	s.sources['lf-dateline'] = { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: {
+		type: 'MultiLineString', coordinates: [ 180, -180 ].reduce(function(a, lon) {
+			return a.concat(DATE_LINE_SEA.map(function(r) { return [ [ lon, r[0] ], [ lon, r[1] ] ]; }));
+		}, []) } } };
+	s.layers.splice(at + 3, 0, {
+		id: 'lf-coast-dateline', type: 'line', source: 'lf-dateline',
+		paint: { 'line-color': water, 'line-width': [ 'interpolate', [ 'linear' ], [ 'zoom' ], 1, 6, 6, 9 ] }
 	});
 }
 
@@ -823,12 +911,21 @@ var STYLE_CSS = [
 	   the status buttons in one row) with a scrollbar too - the scrollbar's room
 	   is kept, so the rows don't move when the panel starts or stops scrolling */
 	'.lf-body{display:grid;grid-template-columns:minmax(0,1fr) clamp(360px,36%,460px);gap:12px}',
+	/* the panel's content: the status, lag simulator and region, then the servers
+	   (whose list reaches down to the panel's bottom). A panel that wide (below the
+	   map on a tablet) shows the two side by side. (A layout of its own inside the
+	   panel: the panel itself, the size container, never changes how it lays out -
+	   Chrome then left the servers out until something else changed) */
+	'.lf-pcols{display:flex;flex-direction:column;flex:1 0 auto}',
+	'.lf-pservers{display:flex;flex-direction:column;flex:1 0 auto}',
+	'@container (min-width:' + PANEL_TWO + 'px){.lf-pcols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.lf-pinfo{border-right:1px solid var(--lf-border)}}',
 	/* a wide panel: its small print a size up, easier to read */
 	'.lf-panel{container-type:inline-size}',
 	'@container (min-width:430px){.lf-panel>*{font-size:15px}.lf-panel .lf-sm,.lf-panel .lf-switch,.lf-panel .lf-btn.lf-sm,.lf-panel .lf-servers-table,.lf-panel .lf-search .lf-select,.lf-panel .lf-crow .lf-input{font-size:13px}' +
 		'.lf-panel .lf-sec h4{font-size:12px}.lf-panel .lf-tab{font-size:14px}}',
 	'@media (max-width:960px){.lf-body{grid-template-columns:minmax(0,1fr)}.lf-panel{height:auto!important}}',
-	'.lf-mapwrap{position:relative;height:72vh;min-height:440px;border-radius:8px;overflow:hidden;border:1px solid var(--lf-border);background:var(--lf-panel)}',
+	'.lf-mapwrap{position:relative;height:72vh;min-height:440px;border-radius:8px;overflow:hidden;border:1px solid var(--lf-border);background:var(--lf-sea,var(--lf-panel))}',
+	'.lf-app.lf-globe .lf-mapwrap{background:var(--lf-space,var(--lf-panel))}',
 	'.lf-panel{display:flex;flex-direction:column;height:72vh;min-height:440px;scrollbar-gutter:stable;background:var(--lf-panel);border:1px solid var(--lf-border);border-radius:8px;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--lf-border) transparent}',
 	'@media (max-width:700px){.lf-mapwrap{height:60vh;min-height:300px}}',
 	/* stacked layout (map above, panel below): the panel is part of the page, not a box
@@ -990,6 +1087,24 @@ var STYLE_CSS = [
 	'@media (max-width:960px){.lf-app.lf-full .lf-body{grid-template-rows:minmax(0,1fr) auto}.lf-app.lf-full .lf-panel{max-height:38vh}}',
 	'.lf-app.lf-nopanel .lf-body{grid-template-columns:minmax(0,1fr)}',
 	'.lf-app.lf-nopanel .lf-panel{display:none}',
+	/* a wide screen: the map uses the whole width and the panel floats over its
+	   top-right corner (at least 440 pixels: its print a size up, see the
+	   container query above), folding away into a tab there - above what covers the
+	   map (the welcome card's shade), usable as when it was beside the map. The
+	   map leaves the part under the panel out of Fit, zooming out and zooming
+	   to a shape (fitPanel); its credits and cards move out from under it. (A
+	   narrower screen: the panel below the map, as part of the page.) */
+	'.lf-ptab{display:none}',
+	'@media (min-width:961px){' +
+		'.lf-body{position:relative;grid-template-columns:minmax(0,1fr)}' +
+		'.lf-app .lf-panel{position:absolute;top:10px;right:10px;bottom:10px;z-index:6;width:clamp(440px,34%,470px);height:auto;min-height:0;box-shadow:0 10px 30px rgba(0,0,0,.4)}' +
+		'.lf-app.lf-borderless .lf-panel{border-radius:8px;border-width:1px}' +
+		'.lf-app .lf-ptab{display:flex;align-items:center;gap:6px;position:absolute;top:10px;right:10px;z-index:6;margin:0;padding:6px 10px;border-radius:8px;box-shadow:0 4px 14px rgba(0,0,0,.3);background:var(--lf-panel)}' +
+		'.lf-app:not(.lf-nopanel) .lf-ptab{right:calc(var(--lf-padr,0px) - 10px);border-radius:8px 0 0 8px;border-right:0;padding:6px 8px}' +
+		'.lf-app .lf-mapwrap .maplibregl-ctrl-bottom-right{right:var(--lf-padr,0px)}' +
+		'.lf-app .lf-mapwrap .lf-prompt{left:calc((100% - var(--lf-padr,0px)) / 2);max-width:calc(100% - 24px - var(--lf-padr,0px))}' +
+		'.lf-app .lf-mapwrap .lf-message,.lf-app .lf-mapwrap .lf-overlay{padding-right:calc(16px + var(--lf-padr,0px))}' +
+	'}',
 	'.lf-seg{display:inline-flex;border:1px solid var(--lf-border);border-radius:6px;overflow:hidden}',
 	'.lf-app .lf-seg .lf-btn{border:0;border-radius:0;border-right:1px solid var(--lf-border)}',
 	'.lf-app .lf-seg .lf-btn:last-child{border-right:0}',
@@ -2340,7 +2455,6 @@ return view.extend({
 		this.endless = vo.endless === true;           /* the world repeats left and right (off by default) */
 		this.borders = vo.borders !== false;          /* country borders drawn */
 		this.labels = vo.labels !== false;            /* place names on the map (off: a plain map) */
-		this.wholeWorld = vo.whole === true;          /* zoom out until the whole world is in view */
 		this.states = vo.states === true;             /* state borders and their short names */
 		this.constrainFn = function(lngLat, zoom) { return self.constrainView(lngLat, zoom); };
 		this.passFn = function(lngLat, zoom) { return { center: lngLat, zoom: zoom }; };
@@ -2386,7 +2500,7 @@ return view.extend({
 		}, _('Delete zone'));
 		this.fitButton = E('button', {
 			'class': 'lf-btn',
-			'title': _('Show the whole world and keep it that way'),
+			'title': _('Show the whole world, Greenland to Antarctica - and keep it that way'),
 			'click': function(ev) { ev.preventDefault(); self.fitWorldView(true); }
 		}, _('Fit'));
 		this.globeButton = E('button', {
@@ -2505,15 +2619,25 @@ return view.extend({
 			]),
 			this.notice,
 			E('div', { 'class': 'lf-body' }, [
-				E('div', { 'class': 'lf-mapwrap' }, [ this.mapNode, this.fxNode = E('div', { 'class': 'lf-fx' }), this.message, this.overlay ]),
-				E('div', { 'class': 'lf-panel' }, [
-					this.statusSec,
-					this.lagSec,
-					this.regionSec,
-					this.tabsNode,
-					E('div', { 'class': 'lf-search' }, [ this.searchInput, this.countrySelect, this.rangeSelect, this.forgetButton ]),
-					this.listNode
-				])
+				this.mapWrap = E('div', { 'class': 'lf-mapwrap' }, [ this.mapNode, this.fxNode = E('div', { 'class': 'lf-fx' }), this.message, this.overlay ]),
+				this.panelNode = E('div', { 'class': 'lf-panel' }, [
+					E('div', { 'class': 'lf-pcols' }, [
+						E('div', { 'class': 'lf-pinfo' }, [
+							this.statusSec,
+							this.lagSec,
+							this.regionSec
+						]),
+						E('div', { 'class': 'lf-pservers' }, [
+							this.tabsNode,
+							E('div', { 'class': 'lf-search' }, [ this.searchInput, this.countrySelect, this.rangeSelect, this.forgetButton ]),
+							this.listNode
+						])
+					])
+				]),
+				this.panelTab = E('button', {
+					'class': 'lf-btn lf-ptab', 'type': 'button',
+					'click': function(ev) { ev.preventDefault(); self.setPanel(self.panelHidden); }
+				})
 			])
 		]);
 
@@ -2526,7 +2650,7 @@ return view.extend({
 
 		document.addEventListener('keydown', function(ev) { self.onKey(ev); });
 		window.addEventListener('resize', function() { self.fitWide(); });
-		this.waitForAttach().then(function() { self.fitWide(); });
+		this.waitForAttach().then(function() { self.fitWide(); self.watchPanel(); });
 		[ 'fullscreenchange', 'webkitfullscreenchange' ].forEach(function(t) {
 			document.addEventListener(t, function() {
 				var fsEl = document.fullscreenElement || document.webkitFullscreenElement;
@@ -2599,6 +2723,10 @@ return view.extend({
 			store('theme', this.themeName);
 		this.themeSelect.value = this.themeName;
 		Object.keys(t.ui).forEach(function(k) { self.app.style.setProperty('--lf-' + k, t.ui[k]); });
+		/* past the world's edge (a map area wider or taller than the world) the
+		   map shows the style's sea, not an empty strip */
+		self.app.style.setProperty('--lf-sea', (t.map && t.map.water) || t.sea || '#0b1622');
+		self.app.style.setProperty('--lf-space', spaceColor(t));
 		this.app.classList.toggle('lf-dark', !!t.dark);
 		this.homeIco.innerHTML = pinSvg(homeColor(t), 14, false);
 		if (this.fxNode && this.fxNode.getAttribute('data-fx') !== (t.fx || '')) {
@@ -2704,9 +2832,49 @@ return view.extend({
 		window.setTimeout(function() { self.fitWide(); if (self.map) self.map.resize(); }, 60);
 	},
 
+	/* The panel over the map (a wide screen): the map's camera leaves the part
+	   under it out - Fit, zooming out and zooming to a shape use what is still
+	   in view - and its credits move out from under it. Again whenever the
+	   panel or the map changes size, or the panel is folded away or back. */
+	watchPanel: function() {
+		var self = this, queued = false;
+		function later() {
+			if (queued) return;
+			queued = true;
+			/* (in the next frame: a change made while the browser reports sizes
+			   would only be reported again) */
+			window.requestAnimationFrame(function() { queued = false; self.fitPanel(); });
+		}
+		if (typeof window.ResizeObserver === 'function') {
+			this.panelWatch = new window.ResizeObserver(later);
+			this.panelWatch.observe(this.mapWrap);
+			this.panelWatch.observe(this.panelNode);
+		}
+		window.addEventListener('resize', later);
+		this.fitPanel();
+	},
+
+	fitPanel: function() {
+		var p = this.panelNode, map = this.map, pad = 0, now;
+		if (!this.app || !p)
+			return;
+		if (!this.panelHidden && p.offsetWidth > 0 && window.getComputedStyle(p).position === 'absolute')
+			pad = p.offsetWidth + 20;
+		this.app.style.setProperty('--lf-padr', pad + 'px');
+		if (!map || typeof map.setPadding !== 'function')
+			return;
+		now = map.getPadding() || {};
+		if ((now.right || 0) === pad && !(now.left || now.top || now.bottom))
+			return;
+		map.setPadding({ top: 0, bottom: 0, left: 0, right: pad });
+		this.applyLimits();
+		if (this.fitWorld)
+			this.fitWorldView(false);
+	},
+
 	/* On a wide screen LuCI's themes keep the page in a narrow column and leave
 	   the rest of the window empty: the map page takes that room too (up to
-	   1800 pixels) - as far as the window goes, nothing would cut it off and
+	   WIDE_MAX pixels) - as far as the window goes, nothing would cut it off and
 	   nothing else is there (a menu at the side stays clear). The panel grows
 	   with it. The other firmwares' pages are as wide as the window already. */
 	fitWide: function() {
@@ -2760,7 +2928,13 @@ return view.extend({
 			store('nopanel', this.panelHidden);
 		this.app.classList.toggle('lf-nopanel', this.panelHidden);
 		this.panelButton.classList.toggle('lf-on', !this.panelHidden);
-		window.setTimeout(function() { if (self.map) self.map.resize(); }, 60);
+		if (this.panelTab) {
+			this.panelTab.textContent = this.panelHidden ? '\u25c2 ' + _('Panel') : '\u25b8';
+			this.panelTab.title = this.panelHidden ? _('Show the panel') : _('Fold the panel away');
+			this.panelTab.setAttribute('aria-expanded', String(!this.panelHidden));
+		}
+		this.fitPanel();
+		window.setTimeout(function() { if (self.map) self.map.resize(); self.fitPanel(); }, 60);
 	},
 
 	onKey: function(ev) {
@@ -2815,6 +2989,7 @@ return view.extend({
 				minZoom: 0,
 				renderWorldCopies: this.endless,
 				attributionControl: { compact: true },
+				fadeDuration: this.globe ? 0 : LABEL_FADE,
 				dragRotate: false,
 				pitchWithRotate: false,
 				/* phones / tablets: one finger moves the map, two fingers zoom; the page
@@ -2832,7 +3007,9 @@ return view.extend({
 		if (this.map.touchPitch) this.map.touchPitch.disable();
 		/* (for the page tests: the map behind this element) */
 		try { Object.defineProperty(this.mapNode, 'lfMap', { value: this.map, configurable: true }); } catch (e) {}
-		this.map.addControl(new ml.NavigationControl({ showCompass: false }), 'top-right');
+		/* (top-left: the panel and its tab are at the top right) */
+		this.map.addControl(new ml.NavigationControl({ showCompass: false }), 'top-left');
+		this.fitPanel();
 
 		this.map.on('error', function(ev) {
 			noteError('map', (ev && ev.error && ev.error.message) || 'map error');
@@ -2922,10 +3099,10 @@ return view.extend({
 		this.map.on('resize', function() {
 			var floor = self.atFloor;
 			self.applyLimits();
-			if (self.wholeWorld && !self.globe && floor)
+			if (self.fitWorld)
+				self.fitWorldView(false);
+			else if (floor && !self.globe)
 				self.map.jumpTo({ zoom: self.fitZoom() });
-			else if (self.fitWorld)
-				self.map.fitBounds(WORLD_BOUNDS, { padding: 8, duration: 0 });
 		});
 	},
 
@@ -2996,26 +3173,36 @@ return view.extend({
 
 	/* ----------------------------------------------------- camera */
 
-	/* Camera limits. Normal use: MapLibre's own - the map always fills its
-	   area (with the endless map off the world fills it in width and height,
-	   so zoomed out the poles - on a phone the Americas' west and East Asia -
-	   are off screen). "Whole world" (View menu, stays on until switched off):
-	   you can zoom out until the entire world is in view, pole to pole and all
-	   the way round. */
+	/* Camera limits (the flat map): zoomed out as far as it goes, the whole
+	   world is in view - Greenland's north to Antarctica, all the way round -
+	   which is Fit's view too. On a map wider than the world is tall (the full
+	   window, full screen, borderless) the space at its sides is sea; a world
+	   bigger than the map never shows empty space at its edges. All of it in the
+	   part of the map in view: the panel over the map covers the rest
+	   (viewSize). The globe: MapLibre's own limits. */
 
-	/* the zoom where the whole world just fits the map area (-2 at the least) */
+	/* the part of the map in view: all of it, less what the panel covers (the
+	   map's padding) */
+	viewSize: function() {
+		var node = this.mapNode, W = node ? node.clientWidth : 0, H = node ? node.clientHeight : 0;
+		var pad = (this.map && typeof this.map.getPadding === 'function') ? this.map.getPadding() : null;
+		if (pad) {
+			W -= (pad.left || 0) + (pad.right || 0);
+			H -= (pad.top || 0) + (pad.bottom || 0);
+		}
+		return { W: Math.max(0, W), H: Math.max(0, H) };
+	},
+
+	/* the zoom where the whole world (WORLD_BOUNDS, all the way round) just fits
+	   the part in view (-2 at the least) */
 	fitZoom: function() {
-		var node = this.mapNode, W = node ? node.clientWidth : 0, H = node ? node.clientHeight : 0;
-		return (W > 0 && H > 0) ? Math.max(-2, Math.log(Math.min(W, H) / 512) / Math.LN2) : -2;
+		var v = this.viewSize(), W = v.W, H = v.H, span = mercY(WORLD_BOUNDS[1][1]) - mercY(WORLD_BOUNDS[0][1]);
+		/* (the world is 512 * 2^zoom pixels wide, 2 pi in Mercator units) */
+		return (W > 0 && H > 0) ? Math.max(-2, Math.log(Math.min(W, H * 2 * Math.PI / span) / 512) / Math.LN2) : -2;
 	},
 
-	/* the zoom where the world just fills the map area (MapLibre's own lowest) */
-	fillZoom: function() {
-		var node = this.mapNode, W = node ? node.clientWidth : 0, H = node ? node.clientHeight : 0;
-		return (W > 0 && H > 0) ? Math.max(0, Math.log(Math.max(W, H) / 512) / Math.LN2) : 0;
-	},
-
-	wholeMinZoom: function() { return Math.floor(this.fitZoom() * 1000) / 1000; },
+	/* (a hair below: the camera at Fit counts as zoomed out all the way) */
+	floorZoom: function() { return Math.floor(this.fitZoom() * 1000) / 1000; },
 
 	/* Put the limits in force now and apply them to the camera AT ONCE.
 	   MapLibre only checks them on the next move: after switching the endless
@@ -3025,40 +3212,24 @@ return view.extend({
 		var map = this.map, on;
 		if (!map || typeof map.setTransformConstrain !== 'function')
 			return;
-		on = this.wholeWorld && !this.globe;
-		map.setMinZoom(on ? this.wholeMinZoom() : 0);
+		on = !this.globe;
+		map.setMinZoom(on ? this.floorZoom() : 0);
 		/* (a change of the constraint makes MapLibre check the camera right away;
 		   it is also lost when the projection changes) */
 		map.setTransformConstrain(this.passFn);
 		map.setTransformConstrain(on ? this.constrainFn : null);
 	},
 
-	setWholeWorld: function(on) {
-		var map = this.map;
-		this.wholeWorld = !!on;
-		this.saveViewOpts();
-		this.applyLimits();
-		if (!this.wholeWorld || !map)
-			return;
-		/* switched on: show the whole world now */
-		this.fitWorld = false;
-		if (this.globe || typeof map.setTransformConstrain !== 'function')
-			map.fitBounds(FULL_BOUNDS, { padding: 0, duration: 400 });
-		else
-			map.easeTo({ center: [ 0, 0 ], zoom: this.fitZoom(), duration: 400 });
-		this.saveView();
-	},
-
-	/* the camera's limits with "Whole world" on: no further out than the whole
-	   world fitting; a world smaller than the map area stays centred, a bigger
-	   one never shows empty space at its edges */
+	/* the flat map's limits: no further out than the whole world fitting; a
+	   world smaller than the part in view stays centred in it (the sea around
+	   it), a bigger one never shows empty space at its edges */
 	constrainView: function(lngLat, zoom) {
-		var map = this.map, ml = this.ml, node = this.mapNode, W = node ? node.clientWidth : 0, H = node ? node.clientHeight : 0;
+		var map = this.map, ml = this.ml, v = this.viewSize(), W = v.W, H = v.H;
 		var lng = lngLat.lng, lat = Math.max(-85.0511, Math.min(85.0511, lngLat.lat)), ws, x, y, n;
 		zoom = Math.max(map ? map.getMinZoom() : -2, Math.min(map ? map.getMaxZoom() : 22, +zoom));
 		if (!(W > 0 && H > 0))
 			return { center: new ml.LngLat(lng, lat), zoom: zoom };
-		zoom = Math.max(zoom, this.fitZoom());
+		zoom = Math.max(zoom, this.floorZoom());
 		ws = 512 * Math.pow(2, zoom);
 		y = (1 - mercY(lat) / Math.PI) / 2 * ws;
 		y = ws <= H ? ws / 2 : Math.max(H / 2, Math.min(ws - H / 2, y));
@@ -3072,10 +3243,29 @@ return view.extend({
 		return { center: new ml.LngLat(lng, lat), zoom: zoom };
 	},
 
+	/* Fit's camera: the whole world - Greenland's north to Antarctica, all the
+	   way round - as big as it fits in the part of the map in view, in its
+	   middle */
+	fitCamera: function() {
+		var v = this.viewSize(), yN = mercY(WORLD_BOUNDS[1][1]), yS = mercY(WORLD_BOUNDS[0][1]);
+		if (!(v.W > 0 && v.H > 0))
+			return null;
+		return { center: [ 0, toDeg(Math.atan(Math.sinh((yN + yS) / 2))) ], zoom: this.fitZoom() };
+	},
+
 	fitWorldView: function(animate) {
+		var cam;
 		this.fitWorld = true;
-		if (this.map)
-			this.map.fitBounds(WORLD_BOUNDS, { padding: 8, duration: animate ? 400 : 0 });
+		if (this.map) {
+			/* (no camera limits of our own in this MapLibre: its fitBounds, which it limits itself) */
+			cam = (this.globe || typeof this.map.setTransformConstrain !== 'function') ? null : this.fitCamera();
+			if (!cam)
+				this.map.fitBounds(WORLD_BOUNDS, { padding: 8, duration: animate ? 400 : 0 });
+			else if (animate)
+				this.map.easeTo({ center: cam.center, zoom: cam.zoom, duration: 400 });
+			else
+				this.map.jumpTo(cam);
+		}
 		this.saveView();
 	},
 
@@ -3140,14 +3330,12 @@ return view.extend({
 			this.labels, function(on) { self.setLabels(on); }));
 		this.viewMenu.appendChild(item(_('States'), _('The lines between states and provinces, and each one\'s short name (NY, CA, ON, NSW, SP ...)'),
 			this.states, function(on) { self.setStates(on); }));
-		this.viewMenu.appendChild(item(_('Whole world'), _('Zoom out until the entire world is in view, pole to pole - stays on until you switch it off (zoomed out, the map then no longer fills its whole area)'),
-			this.wholeWorld, function(on) { self.setWholeWorld(on); }));
 		this.viewMenu.style.display = '';
 		this.viewButton.classList.add('lf-on');
 	},
 
 	saveViewOpts: function() {
-		store('viewopts', { endless: this.endless, borders: this.borders, borderless: this.borderless, labels: this.labels, whole: this.wholeWorld, states: this.states });
+		store('viewopts', { endless: this.endless, borders: this.borders, borderless: this.borderless, labels: this.labels, states: this.states });
 	},
 
 	setBorderless: function(on, initial) {
@@ -3233,20 +3421,32 @@ return view.extend({
 		store('globe', this.globe);
 		this.applyProjection();
 		this.applyLimits();
-		/* (MapLibre swaps the projection a moment later: the limits once more then,
-		   and back out to the whole world if that is where the map was) */
+		/* (MapLibre swaps the projection a moment later: the limits once more then -
+		   the globe zoomed out further than the flat map goes comes back to the
+		   whole world) */
 		if (this.map && typeof this.map.once === 'function')
 			this.map.once('idle', function() {
 				self.applyLimits();
-				if (self.wholeWorld && !self.globe && self.map.getZoom() <= self.fillZoom() + 0.05)
-					self.map.jumpTo({ zoom: self.fitZoom() });
+				if (self.fitWorld && !self.globe)
+					self.fitWorldView(false);
 			});
 	},
 
 	applyProjection: function() {
 		this.globeButton.classList.toggle('lf-on', this.globe);
-		if (this.map && this.styleReady && typeof this.map.setProjection === 'function')
+		this.app.classList.toggle('lf-globe', this.globe);
+		/* Labels on the globe: placed afresh on every frame. MapLibre places them
+		   only once the last change has faded in (LABEL_FADE), and a spinning
+		   globe meanwhile showed names from its far side, and in the wrong
+		   places, for a moment. On the flat map they fade in and out as usual.
+		   (MapLibre has no setter for it: its own setting, where there is one.) */
+		if (this.map && '_fadeDuration' in this.map)
+			this.map._fadeDuration = this.globe ? 0 : LABEL_FADE;
+		if (this.map && this.styleReady && typeof this.map.setProjection === 'function') {
 			this.map.setProjection({ type: this.globe ? 'globe' : 'mercator' });
+			if (this.globe)
+				fixGlobeTiles(this.map);
+		}
 	},
 
 	/* ------------------------------------------------- drawing */

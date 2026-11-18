@@ -24,10 +24,14 @@ https://github.com/user-attachments/assets/8853105d-9a10-4cfd-ab1b-c39192d5d10d
   service is running, and tests the geolocation API on demand.
 * Click any server on the map to **always allow** or **always block** it - the
   change takes effect on the router at once, no Save & Apply needed.
-* Full-screen map view, optionally without the side panel. On a wide screen
-  the page grows a little past LuCI's narrow column (up to 1340 pixels): the
-  map stays about as wide as before, and the side panel gets the room - up to
-  460 pixels, with its small print a size up so it is easy to read.
+* Full-screen map view. On a wide screen the map uses the whole width, and
+  the side panel floats over its top-right corner (with its small print a size
+  up, so it is easy to read); the tab on its edge folds it away into the corner
+  and brings it back, as does the *Panel* button. Fit, zooming out and zooming
+  to a shape use the part of the map the panel leaves in view, and the map's
+  zoom buttons sit at the top left. On a narrower screen the panel is below the
+  map. On OpenWrt the page also grows a little past LuCI's narrow column (up to
+  1340 pixels).
 * Click a circle or polygon to select it, press **Delete** to remove it, or
   drag it to move it.
 * **Home:** set your location by ZIP / postal code, place name or street
@@ -1064,9 +1068,13 @@ lobbyfence debug [clear]            the debug report; "clear" forgets the crash 
   world repeats - off by default), *Country borders* (on by default), *Place
   names*, *States* (off by default: the lines between states and provinces,
   and the short names of the US states, Canada's provinces, Australia's states
-  and Brazil's states - NY, ON, NSW, SP ...) and *Whole world* (pole to pole).
-  The choices are remembered in your browser.
-* **Fit** shows the whole world - Greenland's north and Antarctica too - and stays that way (also after Save & Apply)
+  and Brazil's states - NY, ON, NSW, SP ...). The choices are remembered in
+  your browser.
+* **Fit** shows the whole world - Greenland's north to Antarctica, all the way
+  round - as big as it fits in the map (the part beside the panel), in its
+  middle. That is also as far out as you can zoom. On a map wider than the
+  world is tall (the full window, full screen, borderless) the space at its
+  sides is sea; *Endless map* fills it with the map repeating instead. It stays that way (also after Save & Apply)
   until you pan or zoom yourself. Otherwise the map keeps the view you left it
   in; it never jumps to a circle on its own. Click a circle's number in the
   panel to zoom to it.
