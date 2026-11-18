@@ -3232,7 +3232,11 @@ return view.extend({
 		zoom = Math.max(zoom, this.floorZoom());
 		ws = 512 * Math.pow(2, zoom);
 		y = (1 - mercY(lat) / Math.PI) / 2 * ws;
-		y = ws <= H ? ws / 2 : Math.max(H / 2, Math.min(ws - H / 2, y));
+		/* (a map taller than the whole world - roughly square beside the panel
+		   on OpenWrt's page: the world at the bottom, the room left over above
+		   it - against the Arctic sea, in the sea's colour - not a strip of sea
+		   under Antarctica's land) */
+		y = ws <= H ? ws - H / 2 : Math.max(H / 2, Math.min(ws - H / 2, y));
 		n = Math.PI * (1 - 2 * y / ws);
 		lat = toDeg(Math.atan(0.5 * (Math.exp(n) - Math.exp(-n))));
 		if (!this.endless) {

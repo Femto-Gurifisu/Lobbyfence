@@ -256,7 +256,8 @@ def main():
                      over: p.offsetParent !== null && getComputedStyle(p).position === 'absolute', panel: Math.round(pr.width),
                      inview: pad === 0 || Math.abs(cr.right - pr.left + 10 - pad) <= 2,
                      attrib: at.right <= cr.right - pad + 1, navleft: nav.left - cr.left < 60,
-                     sea: getComputedStyle(document.querySelector('.lf-mapwrap')).backgroundColor }; }"""
+                     sea: getComputedStyle(document.querySelector('.lf-mapwrap')).backgroundColor,
+                     floor: m.unproject([(c.clientWidth - pad) / 2, c.clientHeight - 1]).lat > -85.04 }; }"""
         seawater = """(() => { const c = (window.view.theme().map || {}).water || '#0b1622', n = parseInt(c.slice(1), 16);
                   return 'rgb(' + (n >> 16) + ', ' + ((n >> 8) & 255) + ', ' + (n & 255) + ')'; })()"""
         page.evaluate("window.view.fitWorldView(false)")
@@ -317,13 +318,22 @@ def main():
         page.set_viewport_size({"width": 1400, "height": 900})
         page.evaluate("window.view.setBorderless(false); window.view.setPanel(true)")
         page.wait_for_timeout(900)
+        # the map beside the panel taller than the whole world is (OpenWrt's page on a tall screen): the room left over
+        # goes above it, against the Arctic sea - not a strip of sea under Antarctica's land (a user's recording)
+        page.set_viewport_size({"width": 1300, "height": 1246})
+        page.wait_for_timeout(900)
+        page.evaluate("window.view.fitWorldView(false)")
+        page.wait_for_timeout(600)
+        r = page.evaluate(seen)
+        check("real MapLibre: a map taller than the world beside the panel (%dx%d): Fit's whole world, Antarctica down to the map's bottom edge"
+              % (r["w"] - r["pad"], r["h"]), r["whole"] and r["fit"] and r["floor"], r)
         page.set_viewport_size({"width": 390, "height": 844})
         page.wait_for_timeout(900)
         page.evaluate("window.view.fitWorldView(false)")
         page.wait_for_timeout(600)
         r = page.evaluate(seen)
         check("real MapLibre: a phone: the panel below the map (not over it), Fit shows the whole world across the screen",
-              not r["over"] and r["pad"] == 0 and r["whole"] and r["fit"], r)
+              not r["over"] and r["pad"] == 0 and r["whole"] and r["fit"] and r["floor"], r)
         page.set_viewport_size({"width": 1400, "height": 900})
         page.wait_for_timeout(900)
         page.get_by_role("button", name="Draw polygon").click()
