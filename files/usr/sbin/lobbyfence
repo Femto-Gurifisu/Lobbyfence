@@ -7,7 +7,7 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-LF_VERSION="1.4.4"
+LF_VERSION="1.4.5"
 LF_TABLE="lobbyfence"
 LF_SHARE="${LF_SHARE:-/usr/share/lobbyfence}"
 LF_RUN="${LF_RUN:-/tmp/lobbyfence}"
@@ -721,8 +721,21 @@ geo_lookup() { # file with addresses -> appends to cache, returns 1 on failure
 	return 0
 }
 
+# The addresses still to be located are worked out into a file of this pass's
+# own and only then put in place as $LF_RUN/pending (what the status and the
+# debug report count): a learning loop on an Asus router lost that file while
+# it was still at work - sed, awk and the shell then said "no such file", the
+# rest of that pass's lookups were skipped.
 locate() {
-	local t="$1" b=0 budget n last known
+	local t="$1" b=0 budget n last known P="$LF_RUN/pending.$$"
+	locate_run "$t"
+	[ -f "$P" ] && mv -f "$P" "$LF_RUN/pending"
+	rm -f "$P.tmp"
+	return 0
+}
+
+locate_run() {
+	local t="$1"
 	# only look for unlocated servers when there is something to find: new
 	# servers this pass, lookups still waiting, or hourly (for the weekly retries)
 	last="$(cat "$LF_RUN/pending.at" 2>/dev/null)"; is_uint "$last" || last=0
@@ -731,9 +744,9 @@ locate() {
 	fi
 	echo "$t" > "$LF_RUN/pending.at"
 	cat "$LF_STATE"/*.ips 2>/dev/null > "$LF_RUN/all.tmp"
-	lfawk pending -v now="$t" -v retry="$GEO_RETRY" "$LF_STATE/geo.cache" "$LF_RUN/all.tmp" > "$LF_RUN/pending"
+	lfawk pending -v now="$t" -v retry="$GEO_RETRY" "$LF_STATE/geo.cache" "$LF_RUN/all.tmp" > "$P"
 	rm -f "$LF_RUN/all.tmp"
-	n="$(lines "$LF_RUN/pending")"
+	n="$(lines "$P")"; is_uint "$n" || n=0
 	[ "$n" -gt 0 ] || return 0
 	# known locations first, no lookup for those: the ones this router kept or
 	# imported from another router (import-servers), then the game servers
@@ -748,14 +761,13 @@ locate() {
 	fi
 	if [ -n "$known" ]; then
 		# (data_dir and LF_RUN are plain paths without spaces)
-		lfawk shared_hit "$LF_RUN/pending" $known > "$LF_RUN/shared.hit"
+		lfawk shared_hit "$P" $known > "$LF_RUN/shared.hit"
 		if [ -s "$LF_RUN/shared.hit" ]; then
 			cat "$LF_RUN/shared.hit" >> "$LF_STATE/geo.cache"
-			awk 'NR == FNR { h[$1] = 1; next } !($1 in h)' "$LF_RUN/shared.hit" "$LF_RUN/pending" > "$LF_RUN/pending.tmp" && \
-				mv "$LF_RUN/pending.tmp" "$LF_RUN/pending"
+			awk 'NR == FNR { h[$1] = 1; next } !($1 in h)' "$LF_RUN/shared.hit" "$P" > "$P.tmp" && mv "$P.tmp" "$P"
 			log info "located $(lines "$LF_RUN/shared.hit") server address(es) from known locations (no lookup)"
 			mark_dirty new
-			n="$(lines "$LF_RUN/pending")"
+			n="$(lines "$P")"; is_uint "$n" || n=0
 		fi
 		rm -f "$LF_RUN/shared.hit"
 	fi
@@ -763,7 +775,7 @@ locate() {
 	[ "$n" -gt 0 ] || return 0
 	budget="$(geo_budget)"
 	while [ "$b" -lt "$G_MAX_BATCHES" ] && [ "$budget" -gt 0 ]; do
-		sed -n "$((b * 100 + 1)),$((b * 100 + 100))p" "$LF_RUN/pending" > "$LF_RUN/batch"
+		sed -n "$((b * 100 + 1)),$((b * 100 + 100))p" "$P" > "$LF_RUN/batch"
 		[ -s "$LF_RUN/batch" ] || break
 		geo_lookup "$LF_RUN/batch" "$t" || break
 		b=$((b + 1)); budget=$((budget - 1))

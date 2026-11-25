@@ -1612,6 +1612,7 @@ def main():
         sm = page.locator("#modal")
         page.wait_for_function("document.querySelectorAll('.lf-servers-game').length >= 1")
         check("the window offers Send to LobbyFence", sm.locator(".lf-servers-share").is_visible() and not sm.locator(".lf-servers-sharebox").is_visible())
+        check("every zone set to a listed game (Apex): no notice about servers that never go", sm.locator(".lf-servers-unshared").count() == 0)
         sm.locator(".lf-servers-share").click()
         info = sm.locator(".lf-servers-shareinfo").inner_text()
         check("first it says what will be sent and what is left out, nothing sent yet",
@@ -1677,9 +1678,15 @@ def main():
         check("an older router: no once-a-day choice", not sm.locator(".lf-servers-autorow").is_visible())
         sm.get_by_role("button", name="Close").click()
         page.evaluate("""() => { const now = Math.floor(Date.now() / 1000);
-            window.__share = { auto: 0, last: now - 3600, last_ok: 1, last_n: 7, next: 0, pending: 4, sent: 7, now: now }; window.__shareCalls = []; }""")
+            window.__share = { auto: 0, last: now - 3600, last_ok: 1, last_n: 7, next: 0, pending: 4, sent: 7, now: now }; window.__shareCalls = [];
+            window.__gameWas = uciState.game.game; uciState.game.game = 'any_udp'; }""")
         page.get_by_role("button", name="Servers file…").click()
         page.wait_for_function("document.querySelector('.lf-servers-autorow') && document.querySelector('.lf-servers-autorow').style.display !== 'none'")
+        note = sm.locator(".lf-servers-unshared")
+        check("a zone set to Any game: the window says its servers are never sent, and how to change that",
+              note.count() == 1 and "Nothing is sent from your zones" in note.inner_text() and "\u201cGame\u201d" in note.inner_text()
+              and "Change" in note.inner_text(), note.all_inner_texts())
+        page.evaluate("() => { if (window.__gameWas === undefined) delete uciState.game.game; else uciState.game.game = window.__gameWas; }")
         row = sm.locator(".lf-servers-autorow")
         check("the once-a-day choice shows what was sent and what is waiting, off",
               not sm.locator(".lf-servers-auto").is_checked() and "sent 7 server(s)" in row.inner_text()

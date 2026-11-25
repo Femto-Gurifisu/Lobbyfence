@@ -187,6 +187,16 @@ t "export: ...and so is a kept or imported one" \
 	"$(ra export /tmp/lf_gc.$$ /tmp/lf_gn.$$ /tmp/lf_gp.$$ /tmp/lf_gs.$$ /tmp/lf_gb2.$$ | grep -v '^#' | tr '\n' '|')"
 t "export: each game and address once, whatever it came from" "" \
 	"$(ra export /tmp/lf_gc.$$ /tmp/lf_gn.$$ /tmp/lf_gp.$$ /tmp/lf_gs.$$ /tmp/lf_gb2.$$ | awk '$1 == "game" { g = $2; next } /^[0-9]/ { print g, $1 }' | sort | uniq -d)"
+# a zone set to Apex picks up a server already filed under another game (kept / imported,
+# or in the list LobbyFence comes with): it stays that game's, not a "new" Apex server
+printf '8.8.8.8 37.75 -97.82 US 100\n9.9.9.9 47.1 8.5 CH 100\n4.4.4.4 10 20 FR 100\n5.5.5.5 1 2 DE 100\n' > /tmp/lf_gc3.$$
+printf 'apex 9.9.9.9 600\napex 4.4.4.4 600\napex 5.5.5.5 600\napex 8.8.8.8 600\n' > /tmp/lf_gp3.$$
+printf '4.4.4.4 10 20 FR 50 fortnite own\n8.8.8.8 37.75 -97.82 US 50 apex\n8.8.8.8 37.75 -97.82 US 50 fortnite own\n' > /tmp/lf_gs3.$$
+printf 'lobbyfence-servers 1\ngame cod Call of Duty\n5.5.5.5 1 2 DE 1\n' > /tmp/lf_gb3.$$
+t "export: a zone's server already filed under another game stays that game's (not new for the zone's game); one under both stays in both" \
+	"lobbyfence-servers 1|game apex Apex|9.9.9.9 47.1 8.5 CH 600|8.8.8.8 37.75 -97.82 US 600 imported|game fortnite Fortnite EU|4.4.4.4 10 20 FR 50|8.8.8.8 37.75 -97.82 US 50|" \
+	"$(ra export /tmp/lf_gc3.$$ /tmp/lf_gn.$$ /tmp/lf_gp3.$$ /tmp/lf_gs3.$$ /tmp/lf_gb3.$$ | grep -v '^#' | tr '\n' '|')"
+rm -f /tmp/lf_gc3.$$ /tmp/lf_gp3.$$ /tmp/lf_gs3.$$ /tmp/lf_gb3.$$
 t "export: says what the file is (comments for whoever opens it)" "yes" \
 	"$(ra export -v when=today /tmp/lf_gc.$$ /tmp/lf_gn.$$ /tmp/lf_gp.$$ /tmp/lf_gs.$$ | grep -q '^# exported today' && echo yes)"
 t "shared_in: checked line by line - private, off-globe, broken and future-dated entries" \

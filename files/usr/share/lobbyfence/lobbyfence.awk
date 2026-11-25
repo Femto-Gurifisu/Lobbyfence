@@ -870,6 +870,13 @@ function ex_add(g, line,   ip) {
 	if (!(g in exn)) { exo[++nexo] = g; exn[g] = 0 }
 	exl[g, ++exn[g]] = line
 }
+# a zone's server already known under some other game than g (and not under g itself)
+function ex_elsewhere(g, line,   ip, k) {
+	ip = line; sub(/ .*/, "", ip)
+	k = ex_known[ip]
+	if (k == "" || index(k, " " g " ")) return 0
+	return 1
+}
 # a server of a game for the export, saying where it came from: a servers file imported
 # here ("imported" - also once the device has played on it, or when this router had found
 # it before) or else this router. The ones in the list LobbyFence comes with (for that
@@ -897,13 +904,14 @@ op == "export" && FILENAME == ARGV[4] {
 	if (NF >= 6 && $6 ~ /^[a-z0-9_]+$/ && is_public_host($1) && is_num($2) && is_num($3)) {
 		ex_sg[++ex_sn] = $6; ex_sl[ex_sn] = $1 " " $2 " " $3 " " $4 " " $5
 		if ($7 != "own") ex_imp[$6 SUBSEP $1] = 1
+		ex_known[$1] = ex_known[$1] " " $6 " "
 	}
 	next
 }
 op == "export" {
 	sub(/\r$/, "")
 	if ($1 == "game") ex_bg = $2
-	else if (ex_bg != "" && $1 ~ /^[0-9]/) ex_bi[ex_bg SUBSEP $1] = 1
+	else if (ex_bg != "" && $1 ~ /^[0-9]/) { ex_bi[ex_bg SUBSEP $1] = 1; ex_known[$1] = ex_known[$1] " " ex_bg " " }
 	next
 }
 op == "shared_in" {
@@ -1088,8 +1096,11 @@ END {
 		if (statf != "") print (bad + 0) > statf
 	} else if (op == "export") {
 		# the zones' servers first (their last-seen times), then the kept / imported
-		# ones no zone has now - each game and address once
-		for (i = 1; i <= ex_zn; i++) ex_put(ex_zg[i], ex_zl[i])
+		# ones no zone has now - each game and address once. A zone's server already
+		# filed under another game (kept, imported or in the list LobbyFence comes
+		# with) stays that game's: games can share ports, and a zone set to one
+		# game can pick up another game's servers while the device plays that.
+		for (i = 1; i <= ex_zn; i++) if (!ex_elsewhere(ex_zg[i], ex_zl[i])) ex_put(ex_zg[i], ex_zl[i])
 		for (i = 1; i <= ex_sn; i++) ex_put(ex_sg[i], ex_sl[i])
 		print "# LobbyFence servers - each game's servers and where they are, so another"
 		print "# router can import them and skip looking them up (LobbyFence -> Servers file)."

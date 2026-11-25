@@ -102,6 +102,22 @@ c0="$(calls)"
 lf apitest >/dev/null 2>&1
 [ "$(calls)" -gt "$c0" ] && pass "files left by an older version are ignored" || fail "stuck on old files"
 
+# something else removes $LF_RUN/pending while a pass is looking servers up (seen on
+# an Asus router: "sed / awk: pending: No such file", "[: bad number" and the pass's
+# other lookups skipped): the pass works on its own file and finishes all its batches
+rm -f "$W/run/geo.backoff" "$W/run/geo.calls" "$W/run/pending" "$W/run/pending.at"; touch "$W/geo.log.reset"
+awk 'BEGIN { for (i = 0; i < 300; i++) printf "%d.%d.%d.%d\n", 120 + int(i / 256) % 50, 9, i % 256, 77 }' > "$W/seen"
+rm -f "$W/bin/curl"
+printf '#!/bin/sh\nrm -f "%s/run/pending"\nexec /usr/bin/curl "$@"\n' "$W" > "$W/bin/curl"; chmod +x "$W/bin/curl"
+c0="$(calls)"; : > "$W/stderr.pend"
+lf cycle 2>>"$W/stderr.pend"
+c1="$(calls)"
+rm -f "$W/bin/curl"; ln -s /usr/bin/curl "$W/bin/curl"
+[ $((c1 - c0)) -ge 3 ] && ! grep -q "pending\|bad number" "$W/stderr.pend" && [ -f "$W/run/pending" ] \
+	&& pass "the waiting list removed from under a pass: its lookups still made ($((c1 - c0))), no errors, the list put back" \
+	|| fail "pending removed mid-pass: $((c1 - c0)) lookups, errors: $(head -c 300 "$W/stderr.pend")"
+ls "$W/run"/pending.[0-9]* >/dev/null 2>&1 && fail "a pass's own waiting list was left behind: $(ls "$W/run"/pending.*)" || pass "no pass's own waiting list left behind"
+
 # a hostile answer (plain HTTP: anyone on the way can answer): endless and fast,
 # or a byte now and then forever - cut at 1 MB and 30 s, with curl and with
 # BusyBox wget (whose -T only limits silence)

@@ -52,7 +52,7 @@ const HELPERS = [ 'distanceKm', 'destination', 'circleRing', 'wrapLon', 'parseCi
 	'mercY', 'normalizePolygon', 'inPolygon', 'parsePolygons', 'formatPolygon', 'v4num', 'v6groups', 'cidrMatch', 'inList',
 	'edgeKind', 'alignedKind', 'straightenPolygon', 'mercArea', 'satelliteStyle',
 	'parseAddressList', 'deviceLabel', 'RANGES', 'addExtraLabels', 'WORLD_BOUNDS', 'spaceColor', 'mixHex',
-	'zoneDevices', 'zoneTypes', 'typePorts', 'presetPorts', 'samePorts', 'setZoneDevices', 'zoneTypePorts', 'portsText' ];
+	'execList', 'zoneDevices', 'zoneTypes', 'typePorts', 'presetPorts', 'samePorts', 'setZoneDevices', 'zoneTypePorts', 'portsText' ];
 
 // even-odd point in polygon on plain lon/lat (what the map draws in mercator)
 function inRing(ring, lon, lat) {
@@ -82,6 +82,33 @@ const inDrawn = (ring, lon, lat) => [ -360, 0, 360 ].some((k) => inRing(ring, lo
 	await check('MapLibre pinned to an exact version on two CDNs', () => {
 		assert.strictEqual(h.MAPLIBRE_BASES.length, 2);
 		h.MAPLIBRE_BASES.forEach((b) => assert(/maplibre-gl@\d+\.\d+\.\d+\/dist$/.test(b), b));
+	});
+
+	await check('a long address list goes to the router in runs rpcd takes (under 1024 characters, under 255 words), in order, all of it', async () => {
+		const calls = [];
+		stubs.fs.exec = (cmd, args) => { calls.push([ cmd, args ]); return Promise.resolve({ code: 0, stdout: 'ok' }); };
+		const ips = [];
+		for (let i = 0; i < 400; i++) ips.push('203.' + (i % 250) + '.' + (i * 7 % 250) + '.' + (100 + i % 150));
+		ips.push('2001:db8:1234:5678:9abc:def0:1234:5678');
+		const out = await h.execList('/usr/sbin/lobbyfence', [ 'remove-servers', 'call_of_duty' ], ips);
+		assert(calls.length > 1 && out.length === calls.length, calls.length);
+		calls.forEach(([ cmd, args ]) => {
+			assert.deepStrictEqual(args.slice(0, 2), [ 'remove-servers', 'call_of_duty' ]);
+			assert((cmd + ' ' + args.join(' ')).length < 1024, (cmd + ' ' + args.join(' ')).length);
+			assert(args.length + 1 < 255);
+		});
+		assert.deepStrictEqual([].concat(...calls.map((c) => c[1].slice(2))), ips);
+		// no addresses (a whole list): one run
+		calls.length = 0;
+		await h.execList('/usr/sbin/lobbyfence', [ 'remove-servers', 'apex' ], []);
+		assert.deepStrictEqual(calls, [ [ '/usr/sbin/lobbyfence', [ 'remove-servers', 'apex' ] ] ]);
+		// a run that fails stops the rest, and is the last answer
+		calls.length = 0;
+		stubs.fs.exec = (cmd, args) => { calls.push(args); return Promise.resolve({ code: calls.length === 2 ? 1 : 0 }); };
+		const bad = await h.execList('/usr/sbin/lobbyfence', [ 'forget', 'z1' ], ips);
+		assert.strictEqual(calls.length, 2);
+		assert.strictEqual(bad[bad.length - 1].code, 1);
+		delete stubs.fs.exec;
 	});
 
 	await check('distance Frankfurt-Paris ~ 479 km', () => {

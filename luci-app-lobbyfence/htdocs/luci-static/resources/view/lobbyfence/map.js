@@ -620,6 +620,37 @@ function loadMaplibre() {
 	return maplibrePromise;
 }
 
+/* The router command with a long list of addresses after it, in as many runs
+ * as it takes. OpenWrt's rpcd refuses a command whose words come to 1024
+ * characters or more, or 255 words ("Permission denied"): about 60
+ * addresses - deleting a few hundred chosen servers at once did nothing.
+ * One run after another; the first that fails stops the rest. Resolves to
+ * every run's answer, in order. */
+var EXEC_LINE_MAX = 1000, EXEC_ARGS_MAX = 250;
+
+function execList(cmd, head, items) {
+	var runs = [], run = [], len = cmd.length + head.join(' ').length + 1;
+	(items || []).forEach(function(it) {
+		it = String(it);
+		if (run.length && (len + 1 + it.length >= EXEC_LINE_MAX || head.length + run.length + 2 >= EXEC_ARGS_MAX)) {
+			runs.push(run);
+			run = [];
+			len = cmd.length + head.join(' ').length + 1;
+		}
+		run.push(it);
+		len += 1 + it.length;
+	});
+	runs.push(run);
+	var out = [];
+	return runs.reduce(function(p, r) {
+		return p.then(function(last) {
+			if (last && last.code !== 0)
+				return last;
+			return fs.exec(cmd, head.concat(r)).then(function(res) { out.push(res); return res; });
+		});
+	}, Promise.resolve(null)).then(function() { return out; });
+}
+
 /* The globe's edge on the panel's side. MapLibre (this release) picks the map
  * tiles in view with a view volume whose far end it pulls in to the horizon -
  * by one corner's angle for all four corners. With the view off-centre (the
@@ -4028,7 +4059,8 @@ return view.extend({
 
 	forget: function(ips) {
 		var self = this;
-		return fs.exec('/usr/sbin/lobbyfence', [ 'forget', this.zone ].concat(ips)).then(function(res) {
+		return execList('/usr/sbin/lobbyfence', [ 'forget', this.zone ], ips).then(function(all) {
+			var res = all[all.length - 1] || {};
 			if (res.code !== 0)
 				ui.addNotification(null, E('p', {}, (res.stderr || res.stdout || '').trim() || _('Could not forget the servers.')), 'error');
 			if (self.popup) self.popup.remove();
@@ -4190,8 +4222,8 @@ return view.extend({
 	/* allow / block / unlist via the router - takes effect immediately */
 	setRule: function(action, ips) {
 		var self = this, zone = this.zone;
-		return fs.exec('/usr/sbin/lobbyfence', [ action, zone ].concat(ips)).then(function(res) {
-			var out = null;
+		return execList('/usr/sbin/lobbyfence', [ action, zone ], ips).then(function(all) {
+			var res = all[all.length - 1] || {}, out = null;
 			try { out = JSON.parse((res.stdout || '').trim()); } catch (e) {}
 			if (!out || !out.ok) {
 				var msg = (res.stderr || res.stdout || '').trim();
@@ -4965,7 +4997,7 @@ return view.extend({
 					var ips = picked();
 					return { ask: _('Click again to delete %d server(s)').format(ips.length),
 						explain: _('This deletes the %d chosen server(s) from the %s list - and from the zones set to %s (they are learned again if they show up). The rest of the list stays.').format(ips.length, g.name, g.name),
-						args: [ 'remove-servers', g.id ].concat(ips) };
+						head: [ 'remove-servers', g.id ], ips: ips };
 				});
 				delSel.disabled = true;
 				listNode.appendChild(E('details', { 'class': 'lf-servers-game', 'data-game': g.id }, [
@@ -4981,14 +5013,14 @@ return view.extend({
 						confirmButton('lf-servers-remove', _('Remove this list'), function() {
 							return { ask: _('Click again to delete %d server(s)').format(g.rows.length),
 								explain: _('This deletes the %s list: its kept and imported locations, and the servers learned by zones set to %s (they are learned and looked up again while you play). Whitelists, blacklists and regions stay.').format(g.name, g.name),
-								args: [ 'remove-servers', g.id ] };
+								head: [ 'remove-servers', g.id ], ips: [] };
 						})
 					])
 				]));
 			});
 		}
 		/* a delete button that asks once more first (a second click within 6 s);
-		   what(): { ask, explain, args } for the router's remove-servers */
+		   what(): { ask, explain, head, ips } for the router's remove-servers */
 		function confirmButton(cls, text, what) {
 			var armed = null, timer = null, b;
 			b = E('button', { 'class': 'cbi-button cbi-button-negative ' + cls, 'click': function(ev) {
@@ -5002,16 +5034,19 @@ return view.extend({
 					timer = window.setTimeout(function() { armed = null; armedN--; b.textContent = b.label; }, 6000);
 					return;
 				}
-				var args = armed.args;
+				var job = armed;
 				window.clearTimeout(timer);
 				armed = null;
 				armedN--;
 				setBusy(true);
 				stateNode.textContent = _('Removing…');
-				fs.exec('/usr/sbin/lobbyfence', args).then(function(r) {
+				execList('/usr/sbin/lobbyfence', job.head, job.ips).then(function(all) {
+					var r = all[all.length - 1];
 					if (!r || r.code !== 0)
 						throw new Error(r && (r.stderr || r.stdout) || _('no answer'));
-					stateNode.textContent = String(r.stdout || '').trim();
+					stateNode.textContent = all.length > 1
+						? _('Removed %d chosen server(s).').format(job.ips.length)
+						: String(r.stdout || '').trim();
 					return load(openGame()).catch(function() {});
 				}).catch(function(err) { fail(_('Could not remove it: %s'), err); }).then(function() { setBusy(false); });
 			} }, text);
@@ -5184,6 +5219,23 @@ return view.extend({
 				(s.more ? ' ' + _('%d more than fit in one go - send again later for those.').format(s.more) : '');
 			shareBox.style.display = '';
 		} }, _('Send to LobbyFence…'));
+		/* zones whose finds never go: Any game, Custom, a peer-to-peer game - which game
+		   their servers are for is not known, and the list everyone gets must be right */
+		function unsharedNote() {
+			var zs = uci.sections('lobbyfence', 'zone').filter(function(z) {
+				return z.enabled !== '0' && !shareableGame(z.game || '');
+			});
+			if (!zs.length)
+				return '';
+			var names = zs.map(function(z) { return '\u201c' + (z.label || z['.name']) + '\u201d'; }).join(', ');
+			var all = zs.length === uci.sections('lobbyfence', 'zone').filter(function(z) { return z.enabled !== '0'; }).length;
+			return E('p', { 'class': 'lf-servers-unshared', 'style': 'font-size:90%;margin:6px 0;padding:6px 8px;border-left:3px solid #e0a030;background:rgba(224,160,48,.1)' }, [
+				E('strong', {}, all ? _('Nothing is sent from your zones as they are set now.') : _('Not every zone\'s servers are sent.')), ' ',
+				(zs.length === 1 ? _('Zone %s is set to Any game, Custom ports or a game played peer-to-peer.')
+					: _('Zones %s are set to Any game, Custom ports or a game played peer-to-peer.')).format(names), ' ',
+				_('LobbyFence cannot tell which game the servers they find are for, so it never sends them - the shared server list has to be right. To send them, choose the game you play as the zone\'s game (Change… next to Game).')
+			]);
+		}
 		/* ...or by itself once a day (the router sends what is new: lobbyfence share-servers) */
 		var autoBox = E('input', { 'type': 'checkbox', 'class': 'lf-servers-auto' });
 		var autoState = E('span', { 'class': 'lf-muted lf-servers-autostate', 'style': 'font-size:90%' }, '');
@@ -5233,7 +5285,8 @@ return view.extend({
 		var shareRow = E('div', { 'class': 'lf-servers-sharerow', 'style': 'margin:8px 0 4px' }, [
 			share, ' ',
 			E('span', { 'class': 'lf-muted', 'style': 'font-size:90%' }, _('Send the game servers you found, so everyone gets them in the next version.')),
-			autoRow
+			autoRow,
+			unsharedNote()
 		]);
 		buttons = [ dl, cp, im, ps, share, shareGo ];
 		input.addEventListener('change', function() {
