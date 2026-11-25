@@ -567,14 +567,25 @@ const inDrawn = (ring, lon, lat) => [ -360, 0, 360 ].some((k) => inRing(ring, lo
 			{ id: 'boundary_country', type: 'line', paint: {} }, { id: 'place_city', type: 'symbol', layout: { 'icon-image': 'x' } },
 			{ id: 'road_label', type: 'symbol' }, { id: 'poi_label', type: 'symbol' } ] };
 		const st = h.satelliteStyle(base);
-		assert.deepStrictEqual(st.layers.map((l) => l.id), [ 'satellite', 'satellite-hd', 'boundary_country', 'place_city' ]);
+		assert.deepStrictEqual(st.layers.map((l) => l.id), [ 'satellite', 'satellite-hd', 'lf-polar-fade', 'boundary_country', 'place_city' ]);
+		// the photo's top edge (85 N) fading into the sea past it - beside the panel the room above the world was a dark
+		// fallback blue and the photo ended in a hard line under it (a user's recording)
+		const fade = st.layers[2], strips = st.sources['lf-polar'].data.features;
+		assert(fade.type === 'fill' && fade.paint['fill-color'] === h.THEMES.satellite.sea && fade.paint['fill-antialias'] === false, 'fade in the sea colour, no lines between strips');
+		assert(strips.length === 12 && strips.every((f, i) => i === 0 || f.properties.a < strips[i - 1].properties.a), 'strips, more of the sea towards the edge');
+		assert(strips[0].properties.a > 0.98 && strips[11].properties.a < 0.02, 'all but solid at the edge, nothing at its foot');
+		const lats = strips.map((f) => f.geometry.coordinates[0].map((c) => c[1]));
+		assert(Math.abs(Math.max(...lats[0]) - 85.0511) < 0.001 && Math.abs(Math.min(...lats[11]) - 84.4) < 0.001, 'from 84.4 N (open sea all round) to the edge');
+		assert(lats.every((l, i) => i === 0 || Math.abs(Math.max(...l) - Math.min(...lats[i - 1])) < 1e-9), 'strips edge to edge');
+		assert(strips.every((f) => { const lo = f.geometry.coordinates[0].map((c) => c[0]); return Math.min(...lo) === -180 && Math.max(...lo) === 180; }), 'all the way round');
 		assert(/World_Imagery/.test(st.sources['satellite-hd'].tiles[0]) && st.sources['satellite-hd'].maxzoom >= 19 && /Esri/.test(st.sources['satellite-hd'].attribution),
 			'sharp imagery when zoomed in');
 		assert(st.layers[1].minzoom <= 10 && st.layers[0].maxzoom > st.layers[1].minzoom, 'the two imageries overlap, no gap');
 		assert(/eox\.at/.test(st.sources.satellite.tiles[0]) && /Copernicus/.test(st.sources.satellite.attribution));
-		assert.strictEqual(st.layers[3].paint['text-color'], '#ffffff');
-		assert(!('icon-image' in st.layers[3].layout));
-		assert.deepStrictEqual(h.satelliteStyle(null).layers.map((l) => l.id), [ 'satellite', 'satellite-hd' ], 'works without the vector style');
+		const city = st.layers.find((l) => l.id === 'place_city');
+		assert.strictEqual(city.paint['text-color'], '#ffffff');
+		assert(!('icon-image' in city.layout));
+		assert.deepStrictEqual(h.satelliteStyle(null).layers.map((l) => l.id), [ 'satellite', 'satellite-hd', 'lf-polar-fade' ], 'works without the vector style');
 	});
 	await check('Antarctica gets a label in the theme\'s country-label style; Fit includes it', () => {
 		const base = { version: 8, glyphs: 'g', sources: {}, layers: [
@@ -702,6 +713,7 @@ const inDrawn = (ring, lon, lat) => [ -360, 0, 360 ].some((k) => inRing(ring, lo
 			if (t.map) assert(contrast(sp, t.map.land) >= 1.25, k + ': its land melts into the space (' + contrast(sp, t.map.land).toFixed(2) + ')');
 		});
 		assert.strictEqual(h.THEMES.light.sea, '#c2c8ca', 'Light: the basemap\'s own sea past the world\'s edge, not a dark strip');
+		assert.strictEqual(h.THEMES.satellite.sea, '#15233e', 'Satellite: the imagery\'s own sea past the world\'s edge (its Arctic fill), not a dark fallback');
 	});
 	await check('address lists: comments, separators, junk, duplicates', () => {
 		const r = h.parseAddressList('# LobbyFence whitelist\n80.20.0.1, 80.20.0.2;  2a00:1450::/32 # relay\nnot-an-ip 80.20.0.1\r\n10.0.0.0/8\n');

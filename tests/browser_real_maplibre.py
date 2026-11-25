@@ -23,6 +23,39 @@ check = T.check
 
 STYLE = {"version": 8, "sources": {}, "layers": [{"id": "background", "type": "background", "paint": {"background-color": "#ddd"}}]}
 
+# the satellite imagery: a stand-in all in the lightest blue the real imagery's Arctic fill gets (#1a2a4a, north of
+# Canada) - the worst case where the photo's top edge meets the sea past it
+SAT_TILE = (0x1a, 0x2a, 0x4a)
+
+
+def solid_png(rgb):
+    import io
+    from PIL import Image
+    b = io.BytesIO()
+    Image.new("RGB", (256, 256), rgb).save(b, "PNG")
+    return b.getvalue()
+
+
+def satellite_seam(page):
+    """Satellite on a map taller than the world: the rows from the room above the world down through the photo's top
+    edge, each averaged across the part in view (clear of the zoom buttons and the panel)."""
+    import io
+    from PIL import Image
+    g = page.evaluate("""(() => { const m = window.view.map, c = m.getCanvas().getBoundingClientRect(),
+        n = parseInt(getComputedStyle(document.querySelector('.lf-app')).getPropertyValue('--lf-sea').trim().slice(1), 16);
+        return { left: c.left, top: c.top, w: c.width, h: c.height, pad: m.getPadding().right || 0,
+                 edge: m.project([0, 85.0511]).y, fade: m.project([0, 84.4]).y, sea: [n >> 16, (n >> 8) & 255, n & 255] }; })()""")
+    im = Image.open(io.BytesIO(page.screenshot(clip={"x": g["left"], "y": g["top"], "width": g["w"], "height": g["h"]}))).convert("RGB")
+    px = im.load()
+    xs = range(80, int(g["w"] - g["pad"]) - 20, 7)
+    row = lambda y: [round(sum(px[x, y][k] for x in xs) / len(xs)) for k in range(3)]
+    far = lambda a, b: max(abs(p - q) for p, q in zip(a, b))
+    edge, fade = int(round(g["edge"])), int(round(g["fade"]))
+    rows = [row(y) for y in range(max(0, edge - 8), min(im.size[1], fade + 8))]
+    return {"room": edge, "fade_px": fade - edge, "sea": g["sea"], "band": row(max(0, edge // 2)), "edge": row(edge + 1),
+            "photo": row(fade + 4), "step": max(far(rows[i], rows[i + 1]) for i in range(len(rows) - 1)),
+            "band_off": far(row(max(0, edge // 2)), g["sea"]), "edge_off": far(row(edge + 1), g["sea"]), "photo_off": far(row(fade + 4), SAT_TILE)}
+
 
 def serve_dist(route):
     name = route.request.url.split("/dist/")[1].split("?")[0]
@@ -88,7 +121,8 @@ def main():
         page.route("https://unpkg.com/maplibre-gl@*/dist/*", serve_dist)
         page.route("https://tiles.openfreemap.org/styles/positron",
                    lambda r: r.fulfill(content_type="application/json", body=json.dumps(STYLE), headers={"Access-Control-Allow-Origin": "*"}))
-        page.route("https://tiles.maps.eox.at/**", lambda r: r.abort())
+        sat_png = solid_png(SAT_TILE)
+        page.route("https://tiles.maps.eox.at/**", lambda r: r.fulfill(content_type="image/png", body=sat_png, headers={"Access-Control-Allow-Origin": "*"}))
         page.route("https://server.arcgisonline.com/**", lambda r: r.abort())
         page.route("https://tile.openstreetmap.org/**", lambda r: r.abort())
         page.route("https://api.github.com/repos/Femto-Gurifisu/Lobbyfence/releases/latest", lambda r: r.fulfill(content_type="application/json", body='{"tag_name": "v1.1.0"}', headers={"Access-Control-Allow-Origin": "*"}))   # (the page asks GitHub for the newest version)
@@ -327,6 +361,27 @@ def main():
         r = page.evaluate(seen)
         check("real MapLibre: a map taller than the world beside the panel (%dx%d): Fit's whole world, Antarctica down to the map's bottom edge"
               % (r["w"] - r["pad"], r["h"]), r["whole"] and r["fit"] and r["floor"], r)
+        # ...Satellite there: the room above the world is the imagery's own sea, and the photo's top edge fades into it -
+        # no line where the photo ends (a user's recording: a hard line under a band of darker, greyer blue)
+        page.locator(".lf-bar select").last.select_option("satellite")
+        page.wait_for_function("window.view.map.getLayer('satellite') && window.view.map.loaded() && window.view.map.areTilesLoaded()", timeout=15000)
+        page.evaluate("window.view.fitWorldView(false)")
+        page.wait_for_timeout(900)
+        s = satellite_seam(page)
+        check("real MapLibre: Satellite beside the panel: the room above the world (%d px) in the imagery's own sea, the photo fading into it - no line"
+              % s["room"], s["room"] > 30 and s["fade_px"] >= 8 and s["band_off"] <= 2 and s["edge_off"] <= 2 and s["photo_off"] <= 2 and s["step"] <= 3, s)
+        if SHOTS:
+            page.screenshot(path=str(SHOTS / "real-satellite-panel.png"))
+        page.get_by_role("button", name="Globe").click()
+        page.wait_for_timeout(1200)
+        vis = page.evaluate("window.view.map.getLayer('lf-polar-fade') && window.view.map.getLayoutProperty('lf-polar-fade', 'visibility')")
+        check("real MapLibre: ...on the globe no fade (MapLibre stretches the photo's top row over the pole)", vis == "none", vis)
+        page.get_by_role("button", name="Globe").click()
+        page.wait_for_timeout(1200)
+        vis = page.evaluate("window.view.map.getLayer('lf-polar-fade') && window.view.map.getLayoutProperty('lf-polar-fade', 'visibility')")
+        check("real MapLibre: ...the flat map again: the fade back", vis == "visible", vis)
+        page.locator(".lf-bar select").last.select_option("midnight")
+        page.wait_for_function("!window.view.map.getLayer('lf-polar-fade') && window.view.map.getLayer('lf-home')", timeout=15000)
         page.set_viewport_size({"width": 390, "height": 844})
         page.wait_for_timeout(900)
         page.evaluate("window.view.fitWorldView(false)")

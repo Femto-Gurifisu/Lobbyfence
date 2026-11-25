@@ -103,6 +103,15 @@ var THEMES = {
 		      'btn': '#1f2024', 'hover': '#1d1e22', 'accent': '#fbbf24', 'accent-text': '#111214' },
 		overlay: { circle: '#fbbf24', circleSel: '#fde68a', circleFill: 0.18, allowed: '#22c55e', blocked: '#ef4444', unknown: '#9ca3af' },
 		map: null,
+		/* the imagery's own sea where the world ends: past Sentinel-2's reach (84
+		   degrees north) EOX fills the Arctic with flat sea, #121f37 to #172845
+		   around the world - this is about its average - and the open ocean along
+		   the date line is close to it too (a dark fallback there before: beside
+		   the panel the photo ended in a hard line under a band of other blue) */
+		sea: '#15233e',
+		/* around the globe: a grey a little lighter than the other dark styles',
+		   so the photo's sea at the globe's edge stands out from it too */
+		space: '#393a3d',
 		raster: null
 	},
 	light: {
@@ -847,16 +856,44 @@ var SATELLITE_HD_SOURCE = {
 };
 var SATELLITE_HD_FROM = 10;   /* zoom where the close-up imagery takes over */
 
+/* The imagery's top edge (85 degrees north) fading into the sea past it - the
+   room above the world beside the panel, in the same colour: no line where
+   the photo ends, whatever shade of the Arctic fill meets it. Strips from 84.4
+   degrees north up, open sea all round (land ends at 83.7), each a little more
+   of the sea's colour: even steps on the map, on a smooth curve. Without
+   antialiasing, which would draw a faint line between strips. */
+var POLAR_FADE_FROM = 84.4, POLAR_FADE_STEPS = 12;
+
+function polarFade() {
+	var feats = [], top = Math.PI, bot = mercY(POLAR_FADE_FROM), i, a, ring, lon, lat0, lat1;
+	var lat = function(y) { return Math.round(toDeg(Math.atan(Math.sinh(y))) * 1e5) / 1e5; };
+	for (i = 0; i < POLAR_FADE_STEPS; i++) {
+		lat0 = lat(top - (top - bot) * i / POLAR_FADE_STEPS);
+		lat1 = lat(top - (top - bot) * (i + 1) / POLAR_FADE_STEPS);
+		a = 1 - (i + 0.5) / POLAR_FADE_STEPS;
+		ring = [];
+		for (lon = -180; lon <= 180; lon += 45) ring.push([ lon, lat1 ]);
+		for (lon = 180; lon >= -180; lon -= 45) ring.push([ lon, lat0 ]);
+		ring.push(ring[0]);
+		feats.push({ type: 'Feature', properties: { a: Math.round(a * a * (3 - 2 * a) * 1000) / 1000 },
+		             geometry: { type: 'Polygon', coordinates: [ ring ] } });
+	}
+	return { type: 'FeatureCollection', features: feats };
+}
+
 /* satellite photos, with country borders and place names from the vector style on top */
 function satelliteStyle(base) {
 	var s = {
 		version: 8,
 		sources: { satellite: JSON.parse(JSON.stringify(SATELLITE_SOURCE)),
-		           'satellite-hd': JSON.parse(JSON.stringify(SATELLITE_HD_SOURCE)) },
+		           'satellite-hd': JSON.parse(JSON.stringify(SATELLITE_HD_SOURCE)),
+		           'lf-polar': { type: 'geojson', data: polarFade() } },
 		layers: [ { id: 'satellite', type: 'raster', source: 'satellite', maxzoom: SATELLITE_HD_FROM + 1 },
 		          { id: 'satellite-hd', type: 'raster', source: 'satellite-hd', minzoom: SATELLITE_HD_FROM,
 		            paint: { 'raster-opacity': [ 'interpolate', [ 'linear' ], [ 'zoom' ], SATELLITE_HD_FROM, 0, SATELLITE_HD_FROM + 1, 1 ],
-		                     'raster-fade-duration': 150 } } ]
+		                     'raster-fade-duration': 150 } },
+		          { id: 'lf-polar-fade', type: 'fill', source: 'lf-polar', maxzoom: SATELLITE_HD_FROM,
+		            paint: { 'fill-color': THEMES.satellite.sea, 'fill-opacity': [ 'get', 'a' ], 'fill-antialias': false } } ]
 	};
 	if (!base)
 		return s;
@@ -3482,6 +3519,11 @@ return view.extend({
 			if (this.globe)
 				fixGlobeTiles(this.map);
 		}
+		/* the satellite photo's top edge fading into the sea past it: the flat map
+		   only - the globe stretches the photo's top row over the pole, and a
+		   ring of the fade's colour would show at 85 degrees north there */
+		if (this.map && this.styleReady && this.map.getLayer('lf-polar-fade'))
+			this.map.setLayoutProperty('lf-polar-fade', 'visibility', this.globe ? 'none' : 'visible');
 	},
 
 	/* ------------------------------------------------- drawing */

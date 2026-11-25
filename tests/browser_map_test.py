@@ -1802,7 +1802,20 @@ def main():
         page.wait_for_function("window.__map.style.layers[0].id === 'satellite'")
         st = page.evaluate("window.__map.style")
         check("Satellite: imagery with borders and place names on top",
-              "eox.at" in st["sources"]["satellite"]["tiles"][0] and [l["id"] for l in st["layers"]] == ["satellite", "satellite-hd"], [l["id"] for l in st["layers"]])
+              "eox.at" in st["sources"]["satellite"]["tiles"][0] and [l["id"] for l in st["layers"]] == ["satellite", "satellite-hd", "lf-polar-fade"], [l["id"] for l in st["layers"]])
+        # beside the panel the map is taller than the world and the room above it showed a dark fallback blue, the photo
+        # ending in a hard line under it (a user's recording): the imagery's own sea there, the photo's top fading into it
+        sea = page.evaluate("getComputedStyle(document.querySelector('.lf-app')).getPropertyValue('--lf-sea').trim()")
+        fade = next(l for l in st["layers"] if l["id"] == "lf-polar-fade")
+        strips = st["sources"]["lf-polar"]["data"]["features"]
+        lats = [(max(c[1] for c in f["geometry"]["coordinates"][0]), min(c[1] for c in f["geometry"]["coordinates"][0])) for f in strips]
+        alphas = [f["properties"]["a"] for f in strips]
+        check("Satellite: past the world's edge the imagery's own sea (#15233e), not a dark fallback", sea == "#15233e", sea)
+        check("Satellite: the photo's top edge fades into that sea - strips from 84.4 N up to the world's edge, the last one all but solid",
+              fade["paint"]["fill-color"] == sea and fade["paint"]["fill-antialias"] is False and len(strips) == 12
+              and abs(lats[0][0] - 85.0511) < 0.001 and abs(lats[-1][1] - 84.4) < 0.001
+              and all(abs(lats[i][1] - lats[i + 1][0]) < 1e-9 for i in range(11))
+              and alphas[0] > 0.98 and alphas[-1] < 0.02 and all(alphas[i] > alphas[i + 1] for i in range(11)), [lats[0], lats[-1], alphas])
         check("Satellite: dark controls", page.locator(".lf-app.lf-dark").count() == 1)
         if SHOTS:
             page.screenshot(path=str(SHOTS / "satellite.png"))
