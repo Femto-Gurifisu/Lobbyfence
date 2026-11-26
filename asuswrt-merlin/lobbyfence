@@ -28,6 +28,14 @@ export LF_RUN="${LF_RUN:-/tmp/lobbyfence}"
 export LF_CONF_STAGED="${LF_CONF_STAGED:-$LF_RUN/staged.conf}"
 export LF_LEASES="${LF_LEASES:-/var/lib/misc/dnsmasq.leases}"
 export LF_DATA_DEFAULT="${LF_DATA_DEFAULT:-$LF_HOME/data}"
+# the router's time zone: a script the router starts by itself (firewall-start)
+# can run without it, and every time it writes (its log) would then be UTC
+if [ -z "${TZ:-}" ]; then
+	TZ="$(cat "${LF_ETC_TZ:-/etc/TZ}" 2>/dev/null)"
+	[ -n "$TZ" ] || TZ="$( { tr '\0' '\n' < /proc/1/environ; } 2>/dev/null | sed -n 's/^TZ=//p' | head -n 1)"
+	[ -n "$TZ" ] || TZ="$(nvram get time_zone_x 2>/dev/null)"
+	if [ -n "$TZ" ]; then export TZ; else unset TZ; fi
+fi
 MAIN="${LF_MAIN:-$LF_HOME/bin/lobbyfence-main}"
 SELF="$LF_HOME/lobbyfence"
 WWWUSER="${LF_WWWUSER:-/www/user}"

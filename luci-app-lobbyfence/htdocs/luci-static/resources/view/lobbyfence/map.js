@@ -4514,6 +4514,9 @@ return view.extend({
 		if (st && st.offload && DDWRT)
 			sec.appendChild(line(t.blocked, E('span', { 'class': 'lf-warn' },
 				_('The SFE fast path is on: a connection that is already running skips the filter after its first 128 packets. New servers are still checked. For full filtering set Setup → Basic Setup → Shortcut Forwarding Engine to CTF (or Disable).')), 'lf-sm'));
+		else if (st && st.offload && MERLIN)
+			sec.appendChild(line(t.blocked, E('span', { 'class': 'lf-warn' },
+				_('The router\'s hardware acceleration is on, and LobbyFence can\'t keep the game\'s connections out of it on this firmware: once a match runs, its packets skip LobbyFence, so the packet counts, "active now" and the lag simulator miss them. Servers are still learned and blocked. The Debug… report says why.')), 'lf-sm'));
 		else if (st && st.offload)
 			sec.appendChild(line(t.blocked, E('span', { 'class': 'lf-warn' }, st.conntrack
 				? _('Flow offloading is on - blocked connections are cut, but turning it off (Network → Firewall) is more reliable.')
@@ -4687,14 +4690,21 @@ return view.extend({
 			sec.appendChild(lineMsg(t.unknown, _('Set some extra ping, jitter or loss - with all at 0 nothing changes.')));
 		else if (this.pendingApply || this.saving || !lag.on)
 			sec.appendChild(lineMsg(t.unknown, _('Press Save & Apply to start it.')));
-		else if (lag.active)
+		else if (lag.active) {
+			/* ASUS: lf-lagd although the router has netem - say why (QoS, mostly), not just in a tooltip */
+			var lagdWhy = MERLIN && st && st.lag_kind && st.lag_kind !== 'netem' && st.lag_why ? ({
+				busy: _('QoS (or the bandwidth limiter) is using the router\'s connection, so netem can\'t add the lag. LobbyFence\'s own helper (lf-lagd) adds it instead - QoS doesn\'t get in its way.')
+			}[st.lag_why] || _('netem couldn\'t be used on this router (%s), so LobbyFence\'s own helper (lf-lagd) adds the lag instead. The Debug… report says why.').format(st.lag_why)) : '';
 			sec.appendChild(lineMsg('#f59e0b', [ E('strong', {}, _('Active (%s): +%d ms ping, ±%d ms jitter, %s loss').format(
 				{ both: _('both ways'), down: _('download only'), up: _('upload only') }[lag.dir || 'both'] || lag.dir,
 				lag.delay, lag.jitter, String(lag.loss) + ' %')),
 				MERLIN && st && st.lag_kind ? E('span', { 'class': 'lf-muted', 'title': st.lag_kind === 'netem'
 					? _('The kernel\'s own network emulator (netem) adds the lag.')
-					: _('LobbyFence\'s helper (lf-lagd) adds the lag - this router has no netem LobbyFence can use.') },
+					: lagdWhy || _('LobbyFence\'s helper (lf-lagd) adds the lag - this router has no netem LobbyFence can use.') },
 					' · ' + (st.lag_kind === 'netem' ? 'netem' : 'lf-lagd')) : '' ]));
+			if (lagdWhy)
+				sec.appendChild(E('div', { 'class': 'lf-muted lf-lag-why', 'style': 'font-size:11.5px;margin:2px 0 4px' }, [ lagdWhy ]));
+		}
 		else if (EMBED && lag.error) {
 			var whyT = { nonetem: _('LobbyFence has no netem module for this firmware\'s kernel (%s).').format(st && st.kernel || '?'),
 				netemrefused: _('The router\'s kernel refused LobbyFence\'s netem module - it was built for a different firmware build. Nothing was changed.'),
@@ -4721,6 +4731,7 @@ return view.extend({
 		if (st && st.offload)
 			sec.appendChild(lineMsg(t.blocked, E('span', { 'class': 'lf-warn' }, DDWRT
 				? _('The SFE fast path is on, so most game packets skip the lag. Set Setup → Basic Setup → Shortcut Forwarding Engine to CTF (or Disable).')
+				: MERLIN ? _('The router\'s hardware acceleration is on, and LobbyFence can\'t keep the game\'s connections out of it on this firmware, so most game packets skip the lag. The Debug… report says why.')
 				: _('Flow offloading is on, so most game packets skip the lag. Turn it off under Network → Firewall → Routing/NAT Offloading.'))));
 	},
 
@@ -5155,10 +5166,13 @@ return view.extend({
 			return games.reduce(function(n, g) { return n + g.rows.length; }, 0);
 		}
 		/* while the window is open the lists follow the router - the servers learned while
-		   you play - every 10 s; not while something is being done here or servers are ticked */
+		   you play - every 10 s (on ASUS every 30 s: each refresh there is a request through
+		   the router's add-on settings file); not while something is being done here,
+		   servers are ticked or the browser tab is in the background */
 		function servers(text) { return String(text).replace(/^#.*\n?/gm, ''); }
 		function quiet() { return busy || armedN > 0 || !!listNode.querySelector('.lf-servers-pick:checked'); }
-		var follow = (self.serversFollowMs != null ? self.serversFollowMs : 10000) > 0 && window.setInterval(function() {
+		var followMs = self.serversFollowMs != null ? self.serversFollowMs : MERLIN ? 30000 : 10000;
+		var follow = followMs > 0 && window.setInterval(function() {
 			if (!document.body.contains(listNode)) { window.clearInterval(follow); return; }
 			if (document.hidden || polling || quiet() || !current)
 				return;
@@ -5177,7 +5191,7 @@ return view.extend({
 					d.open = true;
 				listNode.scrollTop = scroll;
 			}).catch(function() {}).then(function() { polling = false; });
-		}, self.serversFollowMs != null ? self.serversFollowMs : 10000);
+		}, followMs);
 		function sendFile(text) {
 			if (!isFile(text)) { stateNode.textContent = _('That is not a LobbyFence servers file (made with Download servers or Copy).'); return; }
 			if (text.length > 1024 * 1024) { stateNode.textContent = _('That is too big (more than 1 MB).'); return; }
@@ -6477,14 +6491,19 @@ return view.extend({
 			])
 		]);
 		load();
-		/* every 5 s until the window closes (Cancel, Use these ports, or another window) */
+		/* every 5 s until the window closes (Cancel, Use these ports, or another window),
+		   not while the browser tab is in the background. On ASUS every 10 s: each
+		   refresh there is a request through the router's add-on settings file (a
+		   write to its flash, two lines in its system log) - and the ports seen
+		   change once per learning pass anyway (every 20 s) */
 		timer = window.setInterval(function() {
 			if (!document.body.contains(listNode)) {
 				window.clearInterval(timer);
 				return;
 			}
-			load();
-		}, 5000);
+			if (!document.hidden)
+				load();
+		}, MERLIN ? 10000 : 5000);
 	},
 
 	/* switch a zone to another game: its ports, protocol and the game's recommended

@@ -91,11 +91,63 @@ lag_target() { # index
 	fi
 }
 
+# ---- hardware acceleration: SKIPLOG
+
+# Broadcom's SKIPLOG target is built into the 4.1 kernels, but in the 4.19
+# ones it is a module (xt_SKIPLOG) that the firmware loads only for features
+# of its own that use it - without it, iptables doesn't know the target and a
+# running game's packets skip LobbyFence (and its lag). So: the firmware's own
+# module is loaded before iptables is asked again - once per boot, what
+# happened kept in skiplog.load for diag.
+SKIPLOG_KO=xt_SKIPLOG
+skiplog_mod() { grep -q "^$SKIPLOG_KO " "${LF_PROC_MODULES:-/proc/modules}" 2>/dev/null; }
+skiplog_load() {
+	local r skiplog_ko
+	[ -f "$LF_RUN/skiplog.load" ] && return 0
+	if skiplog_mod; then r="module loaded already"
+	elif modprobe "$SKIPLOG_KO" >/dev/null 2>&1 && skiplog_mod; then r="module loaded"
+	else
+		# only the firmware's own file, by its name
+		skiplog_ko="$(find "${LF_MODULES_DIR:-/lib/modules/$(uname -r)}" -name "$SKIPLOG_KO.ko" 2>/dev/null | head -n 1)"
+		if [ -z "$skiplog_ko" ]; then r="no $SKIPLOG_KO module in this firmware"
+		elif r="$(insmod "$skiplog_ko" 2>&1)" && skiplog_mod; then r="module loaded ($skiplog_ko)"
+		else r="$skiplog_ko would not load${r:+: $r}"; fi
+	fi
+	echo "$r" > "$LF_RUN/skiplog.load"
+	log notice "hardware acceleration: SKIPLOG target - $r"
+}
+# iptables' own words when it refuses a target (IPv4 filter table, for diag)
+ipt_target_err() { # target
+	printf '*filter\n:LF_TEST - [0:0]\n-A LF_TEST -j %s\nCOMMIT\n' "$1" | $IPT_RESTORE -n 2>&1 | head -n 2 | tr '\n' ' ' | sed 's/ *$//'
+	printf '*filter\n:LF_TEST - [0:0]\n-X LF_TEST\nCOMMIT\n' | $IPT_RESTORE -n >/dev/null 2>&1
+}
+# SKIPLOG usable in the zone chains - after loading its module where needed
+skiplog_ok() { # 4|6
+	local f="$1" e
+	ipt_target_ok "$f" SKIPLOG && return 0
+	skiplog_load
+	# asked before the module was there: ask again, once
+	if skiplog_mod && [ ! -f "$LF_RUN/target.$f.SKIPLOG.mod" ]; then
+		: > "$LF_RUN/target.$f.SKIPLOG.mod"
+		rm -f "$LF_RUN/target.$f.SKIPLOG"
+		ipt_target_ok "$f" SKIPLOG && return 0
+	fi
+	# the module is there and iptables still says no: its reason, for diag
+	if skiplog_mod && [ "$f" = 4 ] && ! grep -q 'iptables:' "$LF_RUN/skiplog.load" 2>/dev/null; then
+		e="$(ipt_target_err SKIPLOG)"
+		echo "$(cat "$LF_RUN/skiplog.load"); iptables: ${e:-refused}" > "$LF_RUN/skiplog.load"
+	fi
+	return 1
+}
+# the flow cache is on (the firmware turns it off itself for some of its features)
+fc_on() { have "$FC" && [ "$(nvram get fc_disable 2>/dev/null)" != 1 ]; }
+accel_skip_ok() { [ "$(cat "$LF_RUN/target.4.SKIPLOG" 2>/dev/null)" = 1 ]; }
+
 fw_prepare() {
 	local f
 	FW_SKIP4=""; FW_SKIP6=""
 	for f in $(fw_families); do
-		ipt_target_ok "$f" SKIPLOG && eval "FW_SKIP$f=SKIPLOG"
+		skiplog_ok "$f" && eval "FW_SKIP$f=SKIPLOG"
 	done
 }
 
@@ -496,17 +548,21 @@ netem_state() {
 fw_diag() {
 	fw_v6
 	echo "IPv6: $(if [ -f "$LF_RUN/v6.off" ]; then echo 'not filtered (ip6tables refused the rules)'; elif [ "$FW_V6" != 1 ]; then echo 'not in use'; elif [ -f "$LF_RUN/v6.noset" ]; then echo 'filtered, servers learned from the connection table'; else echo filtered; fi)"
-	echo "hardware acceleration: $(have "$FC" && echo 'flow cache present' || echo 'no flow cache tool'); game connections kept out of it: $(ipt_target_ok 4 SKIPLOG && echo yes || echo 'no (SKIPLOG missing)')"
+	echo "hardware acceleration: $(if ! have "$FC"; then echo 'no flow cache tool'; elif fc_on; then echo 'flow cache on'; else echo 'flow cache off (fc_disable)'; fi); game connections kept out of it: $(accel_skip_ok && echo yes || echo 'no - the SKIPLOG target is not usable')$([ -s "$LF_RUN/skiplog.load" ] && echo " (SKIPLOG: $(cat "$LF_RUN/skiplog.load"))")"
 	echo "lag simulator: $(if [ "$LAG_SUPPORTED" != 1 ]; then echo 'lf-lagd missing'; elif [ ! -s "$LF_RUN/lag.zones" ]; then echo 'not in use'; elif [ "$(cat "$LF_RUN/lag.kind" 2>/dev/null)" = netem ]; then echo "netem, queues on:$(tr '\n' ' ' 2>/dev/null < "$LF_RUN/lag.devs" | sed 's/^/ /; s/ $//')"; else echo "lf-lagd, running for:$(for p in "$LF_RUN"/lagd.*.pid; do [ -f "$p" ] && kill -0 "$(cat "$p")" 2>/dev/null && { p="${p##*/lagd.}"; printf ' %s' "${p%.pid}"; }; done)$([ -s "$LF_RUN/lag.why" ] && echo " (netem not used: $(cat "$LF_RUN/lag.why"))")"; fi)"
 	echo "netem: $(netem_state)$([ -n "$LF_NETEM_KO" ] && echo " - module $LF_NETEM_KO")"
 	if [ -f "$LF_RUN/netem.config" ] && [ "$(cat "$LF_RUN/netem.config")" != ok ]; then sed 's/^/netem kernel configuration: /' "$LF_RUN/netem.config"; fi
 }
 
 fw_status_json() {
-	printf '"platform":"merlin","lag_supported":%s,"offload":false,' "$([ "$LAG_SUPPORTED" = 1 ] && echo true || echo false)"
-	printf '"kernel":"%s","lag_kind":"%s","netem":"%s",' "$(uname -r 2>/dev/null)" \
-		"$(cat "$LF_RUN/lag.kind" 2>/dev/null || { [ "$NETEM_HAVE" = 1 ] && echo netem || echo nfqueue; })" "$(netem_state)"
+	# "offload": the flow cache is on and the game's connections can't be kept out of it
+	printf '"platform":"merlin","lag_supported":%s,"offload":%s,' "$([ "$LAG_SUPPORTED" = 1 ] && echo true || echo false)" \
+		"$(fc_on && ! accel_skip_ok && echo true || echo false)"
+	# "lag_why": why lf-lagd carries the lag although this router has netem (busy: QoS)
+	printf '"kernel":"%s","lag_kind":"%s","netem":"%s","lag_why":"%s",' "$(uname -r 2>/dev/null)" \
+		"$(cat "$LF_RUN/lag.kind" 2>/dev/null || { [ "$NETEM_HAVE" = 1 ] && echo netem || echo nfqueue; })" \
+		"$(netem_state)" "$(head -n 1 "$LF_RUN/lag.why" 2>/dev/null | tr -cd 'a-z')"
 	printf '"ipv6":"%s",' "$(if [ -f "$LF_RUN/v6.off" ]; then echo off; elif ! fw_v6; then echo none; elif [ -f "$LF_RUN/v6.noset" ]; then echo no-learning; else echo on; fi)"
-	printf '"accel_skip":%s,"conntrack":%s,"tc":true,"pkg":"",' "$([ "$(cat "$LF_RUN/target.4.SKIPLOG" 2>/dev/null)" = 1 ] && echo true || echo false)" \
+	printf '"accel_skip":%s,"conntrack":%s,"tc":true,"pkg":"",' "$(accel_skip_ok && echo true || echo false)" \
 		"$(have conntrack && echo true || echo false)"
 }

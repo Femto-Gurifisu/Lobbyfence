@@ -162,8 +162,14 @@
 			if (/FxiOS|EdgiOS|OPiOS/.test(ua)) return { name: 'your browser', arrow: null, steps: [
 				'Open the browser’s menu and tap “Share”.',
 				'Scroll down and tap “Add to Home Screen”.', 'Tap “Add”.' ] };
+			/* Brave on iPhone has no "Add to Home Screen" at all (same user agent as
+			   Safari, but navigator.brave where Brave provides it): Safari does it */
+			if (navigator.brave) return { name: 'Brave', noAdd: true, arrow: null, steps: [
+				'Copy this page’s address: tap the address bar, then “Copy”.',
+				'Open Safari, paste the address into its address bar and open the page.',
+				'In Safari tap Share ⬆ (on newer iPhones tap ⋯ first, then Share), scroll down and tap “Add to Home Screen”, then “Add”.' ] };
 			return { name: 'Safari', arrow: 'bottom-center', steps: [
-				'Tap Share ⬆ at the bottom of the screen (on newer iPhones tap ⋯ first, then Share; in Brave tap ⋯, then Share).',
+				'Tap Share ⬆ at the bottom of the screen (on newer iPhones tap ⋯ first, then Share).',
 				'Scroll down and tap “Add to Home Screen”.',
 				'Leave “Open as Web App” on if it’s there, then tap “Add”.' ] };
 		}
@@ -215,10 +221,21 @@
 		head.appendChild(img);
 		head.appendChild(el('strong', null, 'Add LobbyFence to your home screen'));
 		box.appendChild(head);
-		box.appendChild(el('p', 'lf-gsub', 'Browsers don’t let a page add itself – three taps in ' + b.name + ':'));
+		box.appendChild(el('p', 'lf-gsub', b.noAdd ? b.name + ' on iPhone can’t add pages to the home screen – Safari can. Open this page there:'
+			: 'Browsers don’t let a page add itself – three taps in ' + b.name + ':'));
 		var ol = el('ol');
 		b.steps.forEach(function(t) { ol.appendChild(el('li', null, t)); });
 		box.appendChild(ol);
+		/* iPhone: Safari adds pages to the home screen, Brave doesn't (and can't
+		   always be told from Safari), nor does the built-in browser of another
+		   app a page was opened from (Messages, Discord, a router's own app),
+		   which looks like Safari */
+		if (ios()) {
+			var addr = location.protocol + '//' + location.host + location.pathname;
+			box.appendChild(el('p', 'lf-gmore', b.noAdd ? 'This page’s address: ' + addr
+				: 'No “Add to Home Screen” in the list? Then this isn’t Safari itself: Brave on iPhone can’t add pages, nor can the ' +
+				'browser inside another app (Messages, Discord, the router maker’s app…). Open ' + addr + ' in Safari and add it there.'));
+		}
 		if (b.chromium) {
 			/* Chromium installs pages as apps only from secure addresses; for the router's
 			   own plain-http address that can be allowed in the browser's settings */

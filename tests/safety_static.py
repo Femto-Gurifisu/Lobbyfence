@@ -8,7 +8,9 @@ Fails when a script could wipe or brick a router or fill its nvram:
   * writes to devices (dd of=, > /dev/...) other than /dev/null
   * rm -rf of anything but LobbyFence's own folders (a path built from a
     variable that might be empty - rm -rf "$X"/* - can wipe the router)
-  * kernel modules other than ipset's and LobbyFence's own netem module
+  * kernel modules other than ipset's, the packet queue's, LobbyFence's own
+    netem module and the firmware's own xt_SKIPLOG (Broadcom's, which ASUS's
+    4.19-kernel firmware loads only for some features of its own)
 
 A new rm -rf, nvram write or module load needs a look and an entry here.
   usage: safety_static.py [repo]
@@ -48,7 +50,8 @@ RM_LITERAL = re.compile(r"^/(tmp|var/run|jffs|etc/lobbyfence|etc/config/lobbyfen
                         r"usr/share/lobbyfence|www/luci-static|www/user|tmp/var/wwwext|"
                         r"/?tmp/luci-modulecache)\b")
 
-MODULES = re.compile(r"^(ip_set|ip_set_hash_ip|ip_set_hash_net|xt_set|sch_netem|nfnetlink_queue|\"?\$LF_NETEM_KO\"?|\"?\$k(o)?\"?)$")
+MODULES = re.compile(r"^(ip_set|ip_set_hash_ip|ip_set_hash_net|xt_set|sch_netem|nfnetlink_queue|\"?\$LF_NETEM_KO\"?|\"?\$k(o)?\"?|"
+                     r"xt_SKIPLOG|\"?\$SKIPLOG_KO\"?|\"?\$skiplog_ko\"?)$")
 # "$m" in a loop over these modules only
 MODULE_LOOP = re.compile(r"\bfor m in ([\w ]+);")
 
@@ -197,6 +200,6 @@ if problems:
     print(f"{len(problems)} problem(s)")
     sys.exit(1)
 print(f"PASS: {len(SCRIPTS)} scripts: no flash / firmware / reboot commands, nvram writes only to {sorted(NVRAM_KEYS)},"
-      " no device writes, rm -rf only inside LobbyFence's folders, only ipset / netem modules")
+      " no device writes, rm -rf only inside LobbyFence's folders, only the ipset, packet-queue, netem and SKIPLOG modules")
 print(f"PASS: servers.txt: all {n_srv} addresses are game servers in data-centre networks (no players' addresses)")
 print("ALL STATIC SAFETY CHECKS PASSED")

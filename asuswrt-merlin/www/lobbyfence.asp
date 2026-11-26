@@ -16,11 +16,14 @@
 <title>LobbyFence</title>
 <link rel="stylesheet" type="text/css" href="index_style.css"/>
 <link rel="stylesheet" type="text/css" href="form_style.css"/>
+<!-- the router's own scripts, in the order Merlin's pages load them: state.js uses jQuery
+     while it loads (3006 firmware) - without it the router's header, menu and tabs are not drawn -->
+<script language="JavaScript" type="text/javascript" src="/js/jquery.js"></script>
 <script language="JavaScript" type="text/javascript" src="/state.js"></script>
 <script language="JavaScript" type="text/javascript" src="/general.js"></script>
+<script language="JavaScript" type="text/javascript" src="/validator.js"></script>
 <script language="JavaScript" type="text/javascript" src="/popup.js"></script>
 <script language="JavaScript" type="text/javascript" src="/help.js"></script>
-<script type="text/javascript" language="JavaScript" src="/validator.js"></script>
 <style>
 	#lf-frame { display: block; width: 100%; height: 900px; border: 0; background: #fff; border-radius: 4px; }
 	#lf-open { float: right; font-size: 12px; color: #FFCC00; }

@@ -81,8 +81,16 @@ def rc_event(service):
     inr("/bin/sh", str(W / "jffs/scripts/service-event"), "restart", service)
 
 
+# Merlin 3006's state.js uses jQuery while it loads, before it declares bandName;
+# show_menu needs bandName - a page without /js/jquery.js gets no header, menu or tabs
+STUB_JQUERY = "window.jQuery = window.$ = function (s) { return document.querySelector(s); }; $.inArray = function (v, a) { return a.indexOf(v); };"
+STUB_STATE = """
+var DUT_SUPPORT_WLBANDS = (function () { return ["2G", "5G"].filter(function (b) { return $.inArray(b, ["2G", "5G"]) >= 0; }); })();
+const bandName = ["2G", "5G1", "5G2", "6G1", "6G2"];
+"""
 STUB_GENERAL = """
 function show_menu() {
+  if (!bandName.length) return;
   var x = new XMLHttpRequest(); x.open('GET', '/require/modules/menuTree.js', false); x.send();
   var m = /\\{url: "(user[0-9]+\\.asp)", tabName: "LobbyFence"\\}/.exec(x.responseText);
   document.getElementById('mainMenu').innerHTML = m ? '<a id="menu-lf" href="/' + m[1] + '">Administration &gt; LobbyFence</a>' : 'no LobbyFence entry';
@@ -106,8 +114,12 @@ def router_context(b, **opts):
                 if m:
                     threading.Thread(target=rc_event, args=(m.group(1),), daemon=True).start()
             return route.fulfill(status=200, content_type="text/html", body="<script>done_committing();</script>")
-        if path in ("/state.js", "/popup.js", "/help.js", "/validator.js"):
+        if path in ("/popup.js", "/help.js", "/validator.js"):
             return route.fulfill(content_type="text/javascript", body="")
+        if path == "/js/jquery.js":
+            return route.fulfill(content_type="text/javascript", body=STUB_JQUERY)
+        if path == "/state.js":
+            return route.fulfill(content_type="text/javascript", body=STUB_STATE)
         if path == "/general.js":
             return route.fulfill(content_type="text/javascript", body=STUB_GENERAL)
         if path == "/require/modules/menuTree.js":

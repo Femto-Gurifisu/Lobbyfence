@@ -124,8 +124,9 @@ grep -q "lag simulator: netem, queues on: br0 eth0" "$W/out.A" && grep -q "^nete
 ! pgrep -f "$W/home/lf-lagd" >/dev/null && ok "lf-lagd not started" || no "lf-lagd running"
 
 # --- B. QoS uses the WAN: lf-lagd instead, br0 left as it was
-run B 'touch busy.eth0' 'ipt_lag_apply; ls "$LF_RUN"/lagd.*.pid'
+run B 'touch busy.eth0' 'ipt_lag_apply; ls "$LF_RUN"/lagd.*.pid; fw_status_json > "$LF_RUN/st"'
 [ "$(cat "$r/lag.kind")" = nfqueue ] && [ "$(cat "$r/lag.why")" = busy ] && grep -q "lagd.game.pid" "$W/out.B" && ok "QoS on: falls back to lf-lagd" || no "busy: $(cat "$r/lag.kind" "$r/lag.why" "$W/out.B" 2>&1)"
+grep -q '"lag_kind":"nfqueue",.*"lag_why":"busy"' "$r/st" && ok "...and the status tells the page why (the map says QoS is the reason)" || no "status: $(cat "$r/st" 2>&1)"
 [ ! -f "$f/dev/br0" ] && ok "the queue already put on br0 is taken away again" || no "br0 left: $(cat "$f/dev/br0")"
 grep -q -- "-R LF_game_q 1 -j NFQUEUE --queue-num 7401 --queue-bypass" "$f/ipt.log" && ok "rules point at lf-lagd's queues" || no "nfq: $(cat "$f/ipt.log")"
 [ ! -f "$W/home/.netem-loading" ] && [ ! -f "$r/lag.game.err" ] && ok "no trial pending, no error shown (lag works)" || no "guard/err"

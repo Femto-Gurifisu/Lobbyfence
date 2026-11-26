@@ -1078,7 +1078,7 @@ fw_status_json() {
 
 # for the debug report: LobbyFence's rules and sets (sizes, not their contents), lag
 fw_debug() {
-	local t f
+	local t f v
 	for f in $(fw_families); do
 		for t in mangle filter raw; do
 			echo "$( [ "$f" = 6 ] && echo ip6tables || echo iptables ) -t $t (LobbyFence's rules):"
@@ -1091,7 +1091,8 @@ fw_debug() {
 	echo
 	echo "lag simulator: $([ "$LAG_SUPPORTED" = 1 ] && echo supported || echo 'not supported')$(grep -q '^sch_netem ' "${LF_PROC_MODULES:-/proc/modules}" 2>/dev/null && echo ', netem loaded')"
 	have "$TC" && $TC qdisc show 2>&1 | head -n 40
-	echo "IPv6 state: $(ls "$LF_RUN"/v6.* 2>/dev/null | sed 's#.*/##' | tr '\n' ' ')"
+	v="$(ls "$LF_RUN"/v6.* 2>/dev/null | sed 's#.*/##' | tr '\n' ' ')"
+	echo "IPv6 state: ${v:-normal (no IPv6 fallback in use)}"
 	if [ -f "$LF_RUN/v6.refused" ]; then
 		echo
 		echo "IPv6 rules that ip6tables refused:"

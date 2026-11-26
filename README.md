@@ -401,8 +401,11 @@ What is different on Asuswrt-Merlin:
   handles reshape it. In *Full screen* one finger moves the map again.
 * **Home-screen app** (ASUS and FreshTomato): the phone layout can be added to
   a phone's home screen. It then has its own LobbyFence icon and opens without
-  the browser's tabs. On an **iPhone**, tap *Share*, then *Add to Home Screen*;
-  it opens in its own window. On **Android** (Brave, Chrome), open the browser
+  the browser's tabs. On an **iPhone**, in **Safari** tap *Share*, then *Add to
+  Home Screen*; it opens in its own window. Brave on iPhone can't add pages to
+  the home screen, and neither can the browser inside another app (a link
+  opened from Messages or Discord): open the page in Safari for this. The tip's
+  steps say so. On **Android** (Brave, Chrome), open the browser
   menu (⋮), then *Add to Home screen*. Android browsers open a page in its own
   window only over HTTPS; the router's page is plain `http://`, so there the
   icon opens LobbyFence in the browser. In the phone layout (not inside the router's
@@ -422,7 +425,13 @@ What is different on Asuswrt-Merlin:
   game's packets skip the firewall once a connection runs. LobbyFence keeps
   just the game's connections out of it (the `SKIPLOG` target ASUS itself uses)
   and flushes the flow cache when its rules change. Everything else stays
-  accelerated.
+  accelerated. On the 4.19-kernel models `SKIPLOG` is a kernel module
+  (`xt_SKIPLOG`) that the firmware loads only for some features of its own:
+  LobbyFence loads it from the firmware itself. If it can't be used, the map
+  says so: servers are still learned and blocked (a connection to a server
+  that turns out to be outside is cut), but a running match's packets skip
+  the lag simulator and the live counts. `lobbyfence diag` shows which case a
+  router is in.
 * **Lag simulator** - two ways, picked automatically:
   * **netem** (the kernel's own network emulator, the same as on OpenWrt and
     FreshTomato) on the models Merlin builds firmware for today (all
@@ -473,7 +482,9 @@ What is different on Asuswrt-Merlin:
     don't get in its way.
 
   The map shows which one is running ("Active … · netem" or "· lf-lagd"), and
-  `lobbyfence diag` shows it too, with netem's state. Either way, up to 12 zones
+  when lf-lagd stands in for netem it says why underneath - usually QoS or the
+  bandwidth limiter using the connection. `lobbyfence diag` shows it too, with
+  netem's state. Either way, up to 12 zones
   can use the lag simulator at once.
 * Zone names (the short id) are at most 16 characters, like on FreshTomato.
 * Command line: `/jffs/addons/lobbyfence/lobbyfence status`, `... diag`,
@@ -488,8 +499,9 @@ Supported models: the ones Merlin builds firmware for, on 3004.388.x or
 * Wi-Fi 7: GT-BE98 Pro, RT-BE96U, RT-BE88U / RT-BE7200, RT-BE86U, RT-BE92U,
   RT-BE58 Go. Their firmware has the same firewall parts, flow cache and
   add-on support as the Wi-Fi 6 models (checked in Merlin 3006.102.9's
-  source and kernel configuration). LobbyFence has not been run on a real
-  Wi-Fi 7 router yet - reports are welcome.
+  source and kernel configuration). It runs on a real GT-BE98 Pro (see
+  [Tested on real routers](#tested-on-real-routers)); reports from the other
+  Wi-Fi 7 models are welcome.
 
 Models Merlin has stopped building for (RT-AX56U, RT-AC68U V4) work on their
 last Merlin release, with lf-lagd for the lag simulator. The GT-BE19000AI
@@ -855,8 +867,10 @@ games.
   twice. Servers in the list LobbyFence comes with are not listed here (nor
   downloaded, copied or sent): every LobbyFence has them already - so after a
   reset, only the servers LobbyFence doesn't know yet show up.
-  While it is open it follows the router every 10 seconds, so the servers
-  found while you play show up (not while you have servers ticked).
+  While it is open it follows the router every 10 seconds (on ASUS every 30
+  seconds: each look there goes through the router's add-on settings file,
+  which is in its flash), so the servers found while you play show up - not
+  while you have servers ticked, nor while the browser tab is in the background.
 * **Download servers** saves every located server listed here, grouped by the
   game of the zone that found it, with its location: `lobbyfence-servers-YYYYMMDD.txt`.
   Browsers flag downloads from `http://` router pages as insecure - choose
@@ -1170,7 +1184,8 @@ impossible. LobbyFence also runs on the real routers listed under
   anything that could brick or wipe one: flash / firmware / reboot commands,
   nvram writes other than LobbyFence's two small ones, writes to devices,
   `rm -rf` outside LobbyFence's own folders, kernel modules other than
-  ipset's and LobbyFence's netem.
+  ipset's, the packet queue's, LobbyFence's netem and the firmware's own
+  `xt_SKIPLOG` (Asus).
 * `sync_servers_test.py` — `tools/sync-servers.py`, which adds shared servers
   files to the built-in list: only data-centre servers of listed client-server
   games go in, each once; home addresses, peer-to-peer games, Custom zones and
@@ -1279,6 +1294,9 @@ impossible. LobbyFence also runs on the real routers listed under
   *Test API* counted, other devices using up the count, a 429, a clock jump.
 * `merlin_unit.sh <workdir> [shell]` — the Merlin rules this test kernel
   can't load: `SKIPLOG` in the zone chains, the lag queue per direction.
+  Also `SKIPLOG` as a module (4.19 kernels): loaded once per boot, then
+  asked for again even after an earlier "missing"; no module in the
+  firmware (the page is told).
 * `merlin_netem_unit.sh <workdir> [shell]` — the Merlin lag simulator's choice
   between netem and lf-lagd, with stand-ins for the GT-AXE16000's `tc`, `ip`,
   `ping` and `insmod`. It covers:
